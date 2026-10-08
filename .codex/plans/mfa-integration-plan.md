@@ -1,6 +1,6 @@
 # MFA integration plan — `strontiumcorp/laravel-mfa` → artistly, clone-voice, podcast-flow
 
-> **Status:** Phase 1 (package) **feature-complete and verified**: 325 tests, Laravel 11/12/13, coverage ~95%. A second independent review (2026-10-09, §1.4c) fixed 2 bugs; its open items are triaged below. Release (1.5) is next: push, tag. Phases 2–6 (app integration and rollout) not started.
+> **Status:** Phase 1 (package) **feature-complete and verified**: 347 tests, Laravel 11/12/13. All decisions D1–D10 are closed. The second review (§1.4c) is fixed except R5 (waiting on the FK-vs-morph decision). Release (1.5) is next: push, tag. Phases 2–6 (app integration and rollout) not started; artistly goes first.
 > **Last updated:** 2026-10-09
 > **Legend:** `[x]` done · `[~]` in progress / partially done · `[ ]` not started · `[!]` blocked or needs a decision
 
@@ -17,23 +17,16 @@
   - a send-limit redesign: exponential cooldown, separate budgets for confirmed and unconfirmed destinations, per-IP and global caps, rollback on refusal
 - **SMS providers:** built in are Twilio, Vonage, Infobip and Amazon SNS (SigV4 signed in-package; works from self-hosted servers), plus the `failover` and `routing` composites. Any app can enable or switch providers through config alone.
 - **Quality:**
-  - 325 tests, passing on Laravel 11.57, 12.69 and 13.35; line coverage ~95%
+  - 347 tests, passing on Laravel 11, 12 and 13; line coverage ~95%
   - PHPStan level 6; Pint
   - a one-off mutation pass reached 99.4% on the security code; mutation testing is now retired
 - **Tooling:** a `Makefile` task runner; parallel tests; a CI workflow (not run on GitHub yet)
 - **Naming:** `strontiumcorp/laravel-mfa`, namespace `StrontiumCorp\LaravelMfa`, with `@itsemon245` as maintainer and code owner
 
 **Next steps, in order**
-0. **Review follow-ups (§1.4c):** decide which open items go into v0.1.0. Recommended before tagging: R3 (SMS timeouts), R5 (user-deletion cleanup). The rest can follow.
+0. **R5 (§1.4c):** decide whether factors/codes/audit rows move from a polymorphic relation to a `user_id` foreign key with cascade, then implement before tagging (the schema should be final before v0.1.0).
 1. **Release (1.5):** push to `github.com/strontiumcorp/laravel-mfa`, first green CI run, tag `v0.1.0`, add `CHANGELOG.md`.
-2. **Decisions:**
-   - D4 launch factors (recommended: TOTP and email)
-   - D5 enforce for admins
-   - D6 Google-login users and password confirmation
-   - D9 impersonation without MFA
-   - D10 disabled factor types fail open or closed
-   - D3 SMS provider (only when SMS is turned on)
-3. **Integrate podcast-flow (Phase 3),** then clone-voice (Phase 4), then artistly (Phase 5).
+2. **Integrate artistly (Phase 3),** then clone-voice (Phase 4), then podcast-flow (Phase 5). All decisions are closed (see Phase 0).
 
 **Notes for picking up**
 - Run `make` to list tasks. Verify with `make ci`, `make coverage` and `make test-matrix`. **Do not run mutation tests** (user decision).
@@ -62,14 +55,14 @@ One installable package that adds MFA (authenticator app, email OTP, SMS OTP, pl
 |---|---|---|---|
 | D1 | Package name / namespace | `[x]` | **`strontiumcorp/laravel-mfa`**, namespace **`StrontiumCorp\LaravelMfa`** (company-owned). Mojahidul Islam (`@itsemon245`) is the listed author/maintainer and the `CODEOWNERS` reviewer. Renamed 2026-10-08. |
 | D2 | Where the package is hosted | `[x]` | Private repo **https://github.com/strontiumcorp/laravel-mfa** (created, empty). Apps install it via a `vcs` repository entry; CI and servers need a deploy key or GitHub token (see README *Installation*). |
-| D3 | SMS provider | `[!]` | Not needed until SMS is enabled; all four are built in, so this is a config choice (`MFA_SMS_DRIVER`). **Pricing (Oct 2026 list):** US all-in is about $0.012/SMS on every provider (AWS ~6% under Twilio); UK $0.044–0.057; **Bangladesh $0.33–0.60** (Infobip cheapest); India $0.004 on AWS with DLT, otherwise $0.065–0.092. Outside India-with-DLT, price differences are small, so choose on reliability. Suggested setup when needed: Twilio + fallback (Vonage or SNS) via `failover`, Infobip for South Asia via `routing`. For Bangladesh users, prefer TOTP/email. |
-| D4 | Which factors to launch with | `[!]` | Launch with TOTP and email. Add SMS later, because it carries cost and toll-fraud risk. |
-| D5 | Enforcement | `[!]` | `EnforceForAdmins` in all three apps (each `User` has `isAdmin()`). Opt-in for everyone else. |
-| D6 | Password confirmation before factor changes | `[!]` | clone-voice has Google-login users who may not know a password. Options: keep `password.confirm` and give those users a "set password" flow, or set `confirm_middleware` to `[]` and rely on MFA-verified sessions only. |
-| D7 | Rollout order | `[x]` | podcast-flow (L13, the package's primary test target), then clone-voice (L12, same structure), then artistly (L11, the most quirks). |
-| D8 | Code delivery mode | `[!]` | Synchronous at launch (immediate error feedback). Move to a queue (`MFA_DELIVERY_QUEUE_CONNECTION`) if provider latency shows up in metrics. |
-| D9 | Impersonating with an admin who has no MFA (security review #7) | `[!]` | Today `Mfa::grantForImpersonation()` allows it when the admin has no factors and isn't enforced. Option A (recommended once D5 is on): if the **target** has factors, require the admin to have actually passed MFA. Option B: keep the current behavior. With D5 enforced, admins always have MFA, so A costs nothing. |
-| D10 | Disabling a factor type in config (security review #9) | `[!]` | Today it "fails open": a user whose only factor is SMS isn't challenged once SMS is disabled, and could enroll a new factor with just the password. Option A: keep fail-open and document "disable a type only after users migrate". Option B: fail closed (still challenge, offer only recovery codes). B is safer but can lock users out. |
+| D3 | SMS provider | `[x]` | **Twilio** when SMS is turned on; **SMS stays disabled** at launch (`MFA_SMS_ENABLED=false`, the default). Set `MFA_SMS_DRIVER=twilio` + credentials in each app's env so enabling it later is one switch. Pricing notes (Oct 2026 list): US ~$0.012/SMS everywhere; UK $0.044–0.057; Bangladesh $0.33–0.60 (Infobip cheapest, a `routing` candidate later); India $0.004 on AWS with DLT. |
+| D4 | Which factors to launch with | `[x]` | **TOTP and email.** SMS later (cost, toll-fraud risk). |
+| D5 | Enforcement | `[x]` | Enforce for admins in all three apps via config roles: `'enforce' => ['admin', 'super_admin', 'support']` (matches each app's `isAdmin()`; the trait's `getMfaRoles()` reads the `role` attribute, string in artistly, `UserRole` enum in clone-voice/podcast-flow). Opt-in for everyone else. Code-level rules go through `Mfa::enforceUsing(fn ($user) => …)`. Implemented 2026-10-09. |
+| D6 | Password confirmation before factor changes | `[x]` | Per app: `mfa:doctor` warns when Socialite is installed and `password.confirm` is on. Apps with Google/social login (artistly and clone-voice both have Socialite) set `routes.confirm_middleware` to `[]` unless they ship a set-password flow. Client-side toggles come from one shared, typed `MfaContext` (`'mfa' => Mfa::context($request)` in `HandleInertiaRequests`, `useMfa()` in React). Implemented 2026-10-09. |
+| D7 | Rollout order | `[x]` | **artistly first** (L11, most quirks), then clone-voice (L12), then podcast-flow (L13), so the newer apps get the least friction. Phases 3–5 reordered accordingly. |
+| D8 | Code delivery mode | `[x]` | **Queued from day one.** `delivery.queue` alone queues on the default connection; `delivery.queue_connection` picks one. A `sync` connection falls back to inline sending. Failed queued deliveries discard the unsent code. Implemented 2026-10-09. Note: artistly's `.env.example` has `QUEUE_CONNECTION=sync`; confirm production runs a real queue and worker. |
+| D9 | Impersonating with an admin who has no MFA (security review #7) | `[x]` | **Option A**, implemented 2026-10-09: if the target has MFA, `grantForImpersonation()` requires the impersonator to have actually passed MFA in the session. Free with D5, since admins must enroll. |
+| D10 | Disabling a factor type in config (security review #9) | `[x]` | **Option A: keep fail-open** and document "disable a type only after users migrate" (README). `mfa:doctor` now counts users who still have factors of a disabled type. |
 
 ---
 
@@ -168,7 +161,7 @@ One installable package that adds MFA (authenticator app, email OTP, SMS OTP, pl
   - `composer test` and the CI workflow also run Pest with `--parallel`.
 - [!] First green CI run on GitHub: blocked on 1.5 (repo not pushed yet)
 
-### 1.4c Second independent review — `[~]` (2026-10-09)
+### 1.4c Second independent review — `[~]` (2026-10-09; all fixed except R5)
 
 Scope: security core, `src/Sms/`, integration ergonomics, docs. `make ci`, `make test-matrix` (L11/12/13) and `make typecheck-stubs` (all three apps) pass.
 
@@ -177,18 +170,19 @@ Scope: security core, `src/Sms/`, integration ergonomics, docs. `make ci`, `make
 - [x] R2 MEDIUM: `DeliverOtp::handle()` injected `SmsSender` for every delivery. A broken SMS config (e.g. `MFA_SMS_DRIVER=failover` with no chain) made **email** codes 500, even with SMS disabled. SMS build errors also escaped as a 500 and left the unsent code behind, so the cooldown blocked a retry. The sender is now resolved inside the delivery `try` for SMS only, so errors become `DeliveryFailed` and the code is discarded.
 
 **Open** (not fixed; need a decision or are low impact):
-- [ ] R3 MEDIUM: sync SMS worst case is too slow. Each driver uses `timeout(10)` with 2 attempts (~20s per provider), so a 2–3 provider failover chain can take 40–60s. That exceeds PHP/nginx timeouts; a fatal mid-chain skips `DeliveryFailed`, leaves the code (cooldown), and shows the user a 500/504. Suggested: `connectTimeout(3)->timeout(5)`, one attempt per provider inside a failover chain (failover is the retry), or a total deadline in `FailoverSmsSender`.
-- [ ] R4 MEDIUM (queued delivery only, D8): when a queued `DeliverOtp` finally fails, `failed()` doesn't discard the code, so the user waits out a cooldown for a code that never arrived. Suggested: pass the OTP id into the job and discard it in `failed()`.
-- [ ] R5 MEDIUM (privacy): deleting a user leaves `mfa_factors` (encrypted phone/email), recovery codes and audit rows (IP, user agent) behind; morph relations have no cascade. Suggested: a `deleted` / `forceDeleted` hook in `HasMultiFactorAuthentication`, or document the cleanup. Behaviour change, so ask first.
-- [ ] R6 LOW (lock-out): anyone with the password can burn `verify_per_day` (50) and lock the owner out of the challenge, recovery codes included, for 24h. Known trade-off of per-account limits. Mitigate with the 1.6 "notify on daily-cap lockout" follow-up; support can `mfa:reset`.
-- [ ] R7 LOW: `DeliveryFailed` for connection errors includes Guzzle's message, which ends with the request URL (Twilio Account SID, Infobip personal base URL). Not end-user PII, but it lands in logs and the audit table. Keep only the cURL error number.
-- [ ] R8 LOW: retrying on any `ConnectionException` includes read timeouts after the provider accepted the message, so the user can get two SMS (double cost). Same when failover moves on after a timeout. Accept, or retry only connect errors (cURL 6/7).
-- [ ] R9 LOW: `routing.routes` keys written as `'+880'` never match (numbers are compared without `+`), silently sending that traffic to the default. Strip `+` from keys; have `mfa:doctor` reject non-digit prefixes.
-- [ ] R10 LOW: send-limit cache keys use unsalted `sha256(destination)`. Phone numbers are brute-forceable from a cache dump. Use an HMAC keyed like `CodeHasher`.
-- [ ] R11 LOW (integration): Sanctum stateful SPA routes (`statefulApi()` / `EnsureFrontendRequestsAreStateful`) in the `api` group carry a session but aren't covered by the web-group middleware. None of the three apps enables it today (artistly has it commented out). Add a README note and a `mfa:doctor` warning.
-- [ ] R12 LOW (ergonomics): `mfa:doctor` could also check that `routes.logout_route` and `routes.home` resolve, and that `confirm_middleware`'s alias and `password.confirm` route exist (relevant to D6).
-- [ ] R13 LOW: after a successful Inertia challenge the redirect goes to the intended URL via XHR; a non-Inertia page (Blade, download) then opens in Inertia's error modal. Use `Inertia::location()` for X-Inertia requests.
-- [ ] R14 LOW (docs): README's "`loginUsingId()` is never challenged" holds only without a session cookie (a web request that calls it persists the login). `POST /mfa/recovery-codes` with no factor returns `422 {message}` without `errors`, which json-mode.md doesn't mention.
+- [x] R3 MEDIUM (fixed): sync SMS worst case is too slow. Each driver uses `timeout(10)` with 2 attempts (~20s per provider), so a 2–3 provider failover chain can take 40–60s. That exceeds PHP/nginx timeouts; a fatal mid-chain skips `DeliveryFailed`, leaves the code (cooldown), and shows the user a 500/504. Suggested: `connectTimeout(3)->timeout(5)`, one attempt per provider inside a failover chain (failover is the retry), or a total deadline in `FailoverSmsSender`.
+- [x] R4 MEDIUM (fixed; matters now that D8 queues from day one): when a queued `DeliverOtp` finally fails, `failed()` doesn't discard the code, so the user waits out a cooldown for a code that never arrived. Suggested: pass the OTP id into the job and discard it in `failed()`.
+- [!] R5 MEDIUM (privacy; waiting on a decision, see below): deleting a user leaves `mfa_factors` (encrypted phone/email), recovery codes and audit rows (IP, user agent) behind; morph relations have no cascade. Suggested: a `deleted` / `forceDeleted` hook in `HasMultiFactorAuthentication`, or document the cleanup. Behaviour change, so ask first.
+- [x] R6 LOW (won't fix, user decision 2026-10-09: inherent to per-account limits; affected users go to support / `mfa:reset`): anyone with the password can burn `verify_per_day` (50) and lock the owner out of the challenge, recovery codes included, for 24h. Known trade-off of per-account limits. Mitigate with the 1.6 "notify on daily-cap lockout" follow-up; support can `mfa:reset`.
+- [x] R7 LOW (fixed: `Redact` strips URLs, emails and phone numbers from `DeliveryFailed` and from every event's context before any sink): `DeliveryFailed` for connection errors includes Guzzle's message, which ends with the request URL (Twilio Account SID, Infobip personal base URL). Not end-user PII, but it lands in logs and the audit table. Keep only the cURL error number.
+- [x] R8 LOW (fixed: retry only when the request never reached the provider; Guzzle 7 and 8 aware): retrying on any `ConnectionException` includes read timeouts after the provider accepted the message, so the user can get two SMS (double cost). Same when failover moves on after a timeout. Accept, or retry only connect errors (cURL 6/7).
+- [x] R9 LOW (fixed: `+880` and `880` both work): `routing.routes` keys written as `'+880'` never match (numbers are compared without `+`), silently sending that traffic to the default. Strip `+` from keys; have `mfa:doctor` reject non-digit prefixes.
+- [x] R10 LOW (fixed: HMAC with `APP_KEY`): send-limit cache keys use unsalted `sha256(destination)`. Phone numbers are brute-forceable from a cache dump. Use an HMAC keyed like `CodeHasher`.
+- [x] R11 LOW (fixed: README note, `mfa:doctor` warning, and the `MfaApiKeyNotice` component for API key settings): Sanctum stateful SPA routes (`statefulApi()` / `EnsureFrontendRequestsAreStateful`) in the `api` group carry a session but aren't covered by the web-group middleware. None of the three apps enables it today (artistly has it commented out). Add a README note and a `mfa:doctor` warning.
+- [x] R12 LOW (fixed): `mfa:doctor` could also check that `routes.logout_route` and `routes.home` resolve, and that `confirm_middleware`'s alias and `password.confirm` route exist (relevant to D6).
+- [x] R13 LOW (fixed: `Inertia::location()`): after a successful Inertia challenge the redirect goes to the intended URL via XHR; a non-Inertia page (Blade, download) then opens in Inertia's error modal. Use `Inertia::location()` for X-Inertia requests.
+- [x] R14 LOW (fixed): README's "`loginUsingId()` is never challenged" holds only without a session cookie (a web request that calls it persists the login). `POST /mfa/recovery-codes` with no factor returns `422 {message}` without `errors`, which json-mode.md doesn't mention.
+- R5 options (asked 2026-10-09): replace the polymorphic `authenticatable_*` columns with a constrained `user_id` foreign key. All three apps authenticate only `App\Models\User` (bigint `id`). `cascadeOnDelete()` on factors, OTP codes (via factor) and recovery codes covers every hard delete, including query-builder deletes that skip model events, which a trait hook wouldn't. Soft deletes (artistly) keep the rows until a force delete, so a restored user keeps MFA. Open points: audit rows cascade or `nullOnDelete()` (keeps security history, IP until the 90-day prune); multi-model guards are dropped.
 - Accepted as-is: logout on any guard clears verification for all guards (only matters for multi-guard apps; none of the three).
 
 **Checked and sound:** deny-by-default middleware and session-identity resolution (remember-me challenged, `setUser()` not); per-guard verification; enrollment allow-list; intended URL stored for plain GETs only; session regenerated on verify; pending enrollments bound to the session; settings unreachable while unverified; `OtpStore` (row lock, latest-code-only, burn after N, discard on failure, cooldown before caps); TOTP compare-and-set replay protection; atomic recovery-code consume; HMAC with key rotation and `hash_equals` over every candidate; count-before-check verify limits; `SendGuard` rollback and IPv6 /64 grouping; SigV4 (verified vectors; region regex blocks host injection); provider errors carry only status/codes, never the recipient; failover summarises non-`DeliveryFailed` exceptions by class; `SmsManager` cycle detection is Octane-safe (`finally`); the three apps only use token-based `auth:sanctum` in `api` (artistly's one `auth:sanctum` web route is in the `web` group, so covered).
@@ -233,13 +227,20 @@ Each app gets these steps on its own feature branch. App-specific deviations are
    - `php artisan mfa:install` (publishes `config/mfa.php` and the pages into `resources/js/{Pages|pages}/mfa/`)
    - `php artisan migrate`
 2. **Model:** add `implements MultiFactorAuthenticatable` and `use HasMultiFactorAuthentication` to `App\Models\User`.
-3. **Config / env:** enable factors (D4), set `enforce` (D5), `routes.home`, `routes.confirm_middleware` (D6), `MFA_LOG_CHANNEL`, and the SMS credentials if enabled.
+3. **Config / env:**
+   - factors: TOTP + email (D4); `MFA_SMS_ENABLED=false`, `MFA_SMS_DRIVER=twilio` + Twilio credentials ready (D3)
+   - `'enforce' => ['admin', 'super_admin', 'support']` (D5)
+   - `routes.home`; `routes.confirm_middleware` → `[]` if the app has social login and no set-password flow (D6)
+   - `MFA_DELIVERY_QUEUE=mfa` (or the app's queue) and a worker that serves it (D8)
+   - `MFA_LOG_CHANNEL`
 4. **API-key auth:** in `ApiKeyAuth` / `MultiAuth`, change `auth()->login($user)` to `auth()->setUser($user)` (stateless; stops API keys from minting browser sessions).
 5. **Impersonation:** confirm it still works. Login-swap impersonation needs `Mfa::grantForImpersonation()`.
 6. **UI**
    - Wrap the published pages in the app's layouts.
    - Add a "Two-factor authentication" entry in account settings that links to `route('mfa.settings')`.
    - Check that flash/status display works with the app's `HandleInertiaRequests`.
+   - Share the context: `'mfa' => fn () => Mfa::context($request)` in `HandleInertiaRequests::share()`.
+   - Show `<MfaApiKeyNotice />` (published to `components/mfa/`) next to the API key settings.
 7. **Tests**
    - Run the existing suite. It should pass unchanged, because `actingAs()` doesn't trigger MFA.
    - Add app-level tests with `InteractsWithMfa`: challenge after login, verified access, an admin forced to enroll, impersonation, a webhook still working, and an API key still working.
@@ -262,17 +263,21 @@ Each app gets these steps on its own feature branch. App-specific deviations are
 
 ---
 
-## Phase 3 — podcast-flow (Laravel 13, Inertia v3, React 19, Octane) — `[ ]`
+## Phase 3 — artistly (Laravel 11, Inertia v2, React 18 / JSX, Kernel-style app) — `[ ]`
 
-Working branch is currently `PODCAST-144`; create a dedicated MFA branch.
+Working branch is currently `SDAP-786`; create a dedicated MFA branch.
 
-- [ ] Steps 1–3 of the Phase 2 checklist (pages go to `resources/js/pages/mfa/`)
-- [ ] `app/Http/Middleware/ApiKeyAuth.php:61` and `app/Http/Middleware/MultiAuth.php:28`: change `login()` to `setUser()`
-- [ ] Impersonation uses per-request `HandleImpersonation` (`Auth::setUser`). **No change expected**; verify only.
-- [ ] Webhooks in `routes/webhooks.php` are in the `web` group but carry no session, so they pass. Verify `webhook/*` is in `middleware.except` anyway.
-- [ ] Add the settings link next to `settings/profile` / `settings/password` (`routes/settings.php`)
-- [ ] Octane: run the suite and a manual flow under `octane:start` (no state leaks between requests)
-- [ ] Trusted proxies are `'*'`. Confirm the app is reachable **only** through exactly one proxy layer; otherwise list the proxy IPs explicitly, so per-IP send limits can't be bypassed by spoofing (`mfa:doctor` warns).
+- [x] **Prerequisite:** package fix 1.3 (configurable logout URL). Note (2026-10-09): on branch `SDAP-786` artistly's logout is the standard named `logout` route (`routes/auth.php:68`); `Admin\SettingsController::logout` exists but has no route. Re-check on the MFA branch.
+- [ ] Laravel 11 is end-of-life and every 11.x has open advisories, so Composer may block installs. Use the separate advisory-triage task, and consider upgrading to Laravel 12 before or after MFA.
+- [ ] Steps 1–3 of the Phase 2 checklist (pages go to `resources/js/Pages/mfa/`, `.tsx` resolves through the existing glob)
+- [ ] **Login-swap impersonation:**
+  - `Admin/UserController::switch_user` (swap at line 265 on `SDAP-786`): add `Mfa::grantForImpersonation($admin, $target)` after `Auth::loginUsingId()`. On the current branch this is the only login swap; re-grep for `loginUsingId` on the MFA branch in case others come back.
+  - `routes/web.php` `exit-impersonate`: no change expected (the admin's verified flag survives); verify only
+- [ ] `ApiKeyAuth` already uses `Auth::setUser()`, so no change is needed
+- [ ] `App\Jobs\ProcessBedtimeFlipbookJob` calls `Auth::guard('web')->loginUsingId()` inside a job. Harmless for MFA when queued (no session is persisted); confirm it is never dispatched synchronously from a web request, where it would swap the session's user.
+- [ ] `App\\Http\\Middleware\\TrustProxies` has `$proxies` unset. If production runs behind a load balancer/CDN, configure the proxy IPs, or every user shares one IP for the per-IP limits (`mfa:doctor` warns).
+- [ ] Kernel-style app (`app/Http/Kernel.php`, `app/Console/Kernel.php`): verify the middleware lands in the `web` group (`mfa:doctor`) and that `mfa:prune` appears in `schedule:list`
+- [ ] The settings page is `Pages/Profile/Edit.jsx`: add a link or section for MFA
 - [ ] Steps 6–9 of the checklist; manual QA
 
 ## Phase 4 — clone-voice (Laravel 12, Inertia v2, React 19, Octane, Google OAuth) — `[ ]`
@@ -288,21 +293,17 @@ Working branch is currently `production`; create a dedicated MFA branch, not `pr
 - [ ] Settings link in `routes/settings.php` pages
 - [ ] Steps 6–9 of the checklist; manual QA
 
-## Phase 5 — artistly (Laravel 11, Inertia v2, React 18 / JSX, Kernel-style app) — `[ ]`
+## Phase 5 — podcast-flow (Laravel 13, Inertia v3, React 19, Octane) — `[ ]`
 
-Working branch is currently `SDAP-786`; create a dedicated MFA branch.
+Working branch is currently `PODCAST-144`; create a dedicated MFA branch.
 
-- [x] **Prerequisite:** package fix 1.3 (configurable logout URL). Note (2026-10-09): on branch `SDAP-786` artistly's logout is the standard named `logout` route (`routes/auth.php:68`); `Admin\SettingsController::logout` exists but has no route. Re-check on the MFA branch.
-- [ ] Laravel 11 is end-of-life and every 11.x has open advisories, so Composer may block installs. Use the separate advisory-triage task, and consider upgrading to Laravel 12 before or after MFA.
-- [ ] Steps 1–3 of the Phase 2 checklist (pages go to `resources/js/Pages/mfa/`, `.tsx` resolves through the existing glob)
-- [ ] **Login-swap impersonation:**
-  - `Admin/UserController::switch_user` (swap at line 265 on `SDAP-786`): add `Mfa::grantForImpersonation($admin, $target)` after `Auth::loginUsingId()`. On the current branch this is the only login swap; re-grep for `loginUsingId` on the MFA branch in case others come back.
-  - `routes/web.php` `exit-impersonate`: no change expected (the admin's verified flag survives); verify only
-- [ ] `ApiKeyAuth` already uses `Auth::setUser()`, so no change is needed
-- [ ] `App\Jobs\ProcessBedtimeFlipbookJob` calls `Auth::guard('web')->loginUsingId()` inside a job. Harmless for MFA when queued (no session is persisted); confirm it is never dispatched synchronously from a web request, where it would swap the session's user.
-- [ ] `App\\Http\\Middleware\\TrustProxies` has `$proxies` unset. If production runs behind a load balancer/CDN, configure the proxy IPs, or every user shares one IP for the per-IP limits (`mfa:doctor` warns).
-- [ ] Kernel-style app (`app/Http/Kernel.php`, `app/Console/Kernel.php`): verify the middleware lands in the `web` group (`mfa:doctor`) and that `mfa:prune` appears in `schedule:list`
-- [ ] The settings page is `Pages/Profile/Edit.jsx`: add a link or section for MFA
+- [ ] Steps 1–3 of the Phase 2 checklist (pages go to `resources/js/pages/mfa/`)
+- [ ] `app/Http/Middleware/ApiKeyAuth.php:61` and `app/Http/Middleware/MultiAuth.php:28`: change `login()` to `setUser()`
+- [ ] Impersonation uses per-request `HandleImpersonation` (`Auth::setUser`). **No change expected**; verify only.
+- [ ] Webhooks in `routes/webhooks.php` are in the `web` group but carry no session, so they pass. Verify `webhook/*` is in `middleware.except` anyway.
+- [ ] Add the settings link next to `settings/profile` / `settings/password` (`routes/settings.php`)
+- [ ] Octane: run the suite and a manual flow under `octane:start` (no state leaks between requests)
+- [ ] Trusted proxies are `'*'`. Confirm the app is reachable **only** through exactly one proxy layer; otherwise list the proxy IPs explicitly, so per-IP send limits can't be bypassed by spoofing (`mfa:doctor` warns).
 - [ ] Steps 6–9 of the checklist; manual QA
 
 ---
@@ -412,3 +413,8 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
   - 12 open items triaged (R3–R14); R3 (SMS timeouts) and R5 (user-deletion cleanup) recommended before v0.1.0.
   - Plan corrections for artistly: branch is now `SDAP-786`, the impersonation swap is at `UserController.php:265`, logout is the named `logout` route.
   - 325 tests pass on Laravel 11/12/13; PHPStan and Pint clean; the stubs type-check in all three apps.
+  - Follow-up the same day, after the user's answers:
+    - decisions D3–D10 closed (Twilio with SMS off; TOTP + email; role-based enforcement; Socialite doctor warning + shared `MfaContext`; artistly first; queued delivery; D9 option A; D10 fail-open documented)
+    - implemented: R3/R7/R8/R9 (SMS timeouts, no duplicate retries, redaction, `+` prefixes), R10 (HMAC cache keys), R4 + D8 (queue name, discard failed codes), R13 (full page visit after the challenge), D9, D5 (`enforce` roles list, `Mfa::enforceUsing()`), doctor checks (R11, R12, D6, D10), `Mfa::context()` + TypeScript type + `MfaApiKeyNotice`, docs
+    - R6 closed as won't-fix (user decision); R5 waits on the FK-vs-morph decision
+    - 347 tests pass; PHPStan and Pint clean; the stubs (pages and components) type-check in all three apps
