@@ -4,6 +4,7 @@ use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 use StrontiumCorp\LaravelMfa\Contracts\SmsSender;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
@@ -12,6 +13,7 @@ use StrontiumCorp\LaravelMfa\Exceptions\DeliveryFailed;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\FactorManager;
 use StrontiumCorp\LaravelMfa\Jobs\DeliverOtp;
+use StrontiumCorp\LaravelMfa\Notifications\OtpCodeNotification;
 use StrontiumCorp\LaravelMfa\Sms\SmsManager;
 
 it('queues delivery with an encrypted payload when configured', function () {
@@ -98,4 +100,24 @@ it('renders the SMS message template', function () {
     Mfa::factor(FactorType::Sms)->challenge($factor);
 
     expect($sms->sent[0]['message'])->toBe('555123 is your Artistly verification code. It expires in 10 minutes.');
+});
+
+it('delivers email codes even when the SMS driver is misconfigured', function () {
+    Notification::fake();
+    config(['mfa.sms.driver' => 'failover', 'mfa.sms.drivers.failover.drivers' => []]);
+    [$user, $factor] = $this->userWithFactor(FactorType::Email);
+
+    $this->loginWithSession($user)->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
+
+    Notification::assertSentOnDemand(OtpCodeNotification::class);
+});
+
+it('reports a broken SMS driver as a delivery failure, not a 500', function () {
+    config(['mfa.sms.driver' => 'nope']);
+    [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+
+    $this->loginWithSession($user)->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertStatus(422);
+
+    // The undelivered code was discarded, so no cooldown blocks a retry.
+    expect($factor->otpCodes()->count())->toBe(0);
 });

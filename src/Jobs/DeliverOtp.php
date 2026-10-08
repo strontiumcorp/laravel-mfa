@@ -44,7 +44,7 @@ class DeliverOtp implements ShouldBeEncrypted, ShouldQueue
         $this->backoff = array_map('intval', (array) config('mfa.delivery.backoff'));
     }
 
-    public function handle(SmsSender $sms, MetricsRecorder $metrics): void
+    public function handle(MetricsRecorder $metrics): void
     {
         $factor = MfaFactor::query()->find($this->factorId);
 
@@ -57,7 +57,9 @@ class DeliverOtp implements ShouldBeEncrypted, ShouldQueue
         try {
             match ($factor->type) {
                 FactorType::Email => $this->sendEmail($factor),
-                FactorType::Sms => $sms->send($factor->destination, $this->smsMessage()),
+                // Resolved here, not injected: a broken SMS config must not
+                // break email delivery, and must surface as DeliveryFailed.
+                FactorType::Sms => app(SmsSender::class)->send($factor->destination, $this->smsMessage()),
                 FactorType::Totp => null,
             };
         } catch (DeliveryFailed $e) {
