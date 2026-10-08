@@ -11,7 +11,7 @@ XDEBUG_COV := -d xdebug.mode=coverage
 MIN_COVERAGE ?= 85
 
 .DEFAULT_GOAL := help
-.PHONY: help install test test-filter coverage lint format analyse ci test-laravel test-matrix typecheck-stubs clean
+.PHONY: help install test test-filter coverage lint format analyse ci test-laravel test-matrix typecheck-stubs release clean
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -50,6 +50,9 @@ test-matrix: ## Run the suite against Laravel 11, 12 and 13
 typecheck-stubs: ## Type-check the React stubs against host apps, e.g. make typecheck-stubs APPS="../podcast-flow ../artistly"
 	@test -n "$(APPS)" || (echo 'Usage: make typecheck-stubs APPS="../app-one ../app-two"' && exit 1)
 	scripts/typecheck-stubs.sh $(APPS)
+
+release: ## Tag a release and update CHANGELOG.md, e.g. make release ARGS="--dry-run" (see scripts/release.sh --help)
+	scripts/release.sh $(ARGS)
 
 clean: ## Remove caches and build output
 	rm -rf build .phpunit.cache coverage
