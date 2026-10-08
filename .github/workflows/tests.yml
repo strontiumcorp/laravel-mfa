@@ -26,6 +26,11 @@ jobs:
             testbench: '^10.0'
           - laravel: '13'
             testbench: '^11.0'
+          # One cell also measures coverage (instead of a second full run elsewhere).
+          - php: '8.4'
+            laravel: '13'
+            stability: prefer-stable
+            coverage: true
         exclude:
           - laravel: '13'
             php: '8.2'
@@ -37,7 +42,18 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           extensions: mbstring, pdo_sqlite, sqlite3, openssl
-          coverage: none
+          coverage: ${{ matrix.coverage && 'pcov' || 'none' }}
+
+      # Cache downloaded packages (not vendor/): resolution still runs fresh,
+      # so prefer-lowest/stable stay honest, but nothing is re-downloaded.
+      - name: Locate the Composer cache
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-php${{ matrix.php }}-l${{ matrix.laravel }}-${{ matrix.stability }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-${{ runner.os }}-php${{ matrix.php }}-l${{ matrix.laravel }}-${{ matrix.stability }}-
 
       # Every Laravel 11 release now carries unpatched advisories (EOL), and
       # Composer 2.9 blocks them by default. We still verify compatibility
@@ -53,7 +69,12 @@ jobs:
             --with "orchestra/testbench:${{ matrix.testbench }}"
 
       - name: Run tests
+        if: ${{ !matrix.coverage }}
         run: vendor/bin/pest --ci --parallel
+
+      - name: Run tests with coverage
+        if: ${{ matrix.coverage }}
+        run: vendor/bin/pest --ci --parallel --coverage --min=85
 
   quality:
     name: Static analysis & style
@@ -63,9 +84,22 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
-          coverage: pcov
+          coverage: none
+      - name: Locate the Composer cache
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-quality-${{ hashFiles('composer.json') }}
+          restore-keys: composer-${{ runner.os }}-quality-
+      # PHPStan's result cache: only changed files are re-analysed. Keyed per
+      # commit, restored from the latest one.
+      - uses: actions/cache@v4
+        with:
+          path: build/phpstan
+          key: phpstan-${{ runner.os }}-${{ github.sha }}
+          restore-keys: phpstan-${{ runner.os }}-
       - run: composer update --prefer-dist --no-interaction --no-progress
-      - run: vendor/bin/pint --test
+      - run: vendor/bin/pint --test --parallel
       - run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
-      - name: Coverage
-        run: vendor/bin/pest --parallel --coverage --min=85

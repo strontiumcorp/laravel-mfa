@@ -30,10 +30,10 @@ coverage: ## Run tests in parallel with coverage (fails under MIN_COVERAGE, defa
 	$(PHP) $(XDEBUG_COV) $(PEST) $(PARALLEL) --passthru-php="'-d' 'xdebug.mode=coverage'" --coverage --min=$(MIN_COVERAGE)
 
 lint: ## Check code style (Pint)
-	vendor/bin/pint --test
+	vendor/bin/pint --test --parallel
 
 format: ## Fix code style (Pint)
-	vendor/bin/pint
+	vendor/bin/pint --parallel
 
 analyse: ## Static analysis (PHPStan / Larastan)
 	vendor/bin/phpstan analyse --memory-limit=1G --no-progress
