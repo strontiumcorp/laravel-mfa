@@ -7,6 +7,7 @@ use Illuminate\Http\Client\Factory as Http;
 use StrontiumCorp\LaravelMfa\Contracts\SmsSender;
 use StrontiumCorp\LaravelMfa\Exceptions\DeliveryFailed;
 use StrontiumCorp\LaravelMfa\Sms\Aws\SignatureV4;
+use StrontiumCorp\LaravelMfa\Sms\Concerns\CallsProviderApi;
 
 /**
  * Amazon SNS (SMS) via the Publish action of the SNS Query API, signed with
@@ -19,6 +20,8 @@ use StrontiumCorp\LaravelMfa\Sms\Aws\SignatureV4;
  */
 final class SnsSmsSender implements SmsSender
 {
+    use CallsProviderApi;
+
     /** @param array<string, mixed> $config */
     public function __construct(
         private readonly Http $http,
@@ -50,14 +53,12 @@ final class SnsSmsSender implements SmsSender
         );
 
         try {
-            $response = $this->http
+            $response = $this->request()
                 ->withHeaders($headers)
                 ->withBody($body, $contentType)
-                ->timeout(10)
-                ->retry(2, 200, fn ($e) => $e instanceof ConnectionException, throw: false)
                 ->post("https://{$host}/");
         } catch (ConnectionException $e) {
-            throw DeliveryFailed::provider('sns', 'connection: '.$e->getMessage());
+            throw self::connectionFailed('sns', $e);
         }
 
         if ($response->failed() || ! str_contains($response->body(), '<MessageId>')) {

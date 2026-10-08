@@ -9,6 +9,7 @@ use Illuminate\Support\Str;
 use StrontiumCorp\LaravelMfa\Contracts\MfaActivity;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Enums\FailureReason;
+use StrontiumCorp\LaravelMfa\Support\Redact;
 use StrontiumCorp\LaravelMfa\Support\RequestContext;
 
 abstract class MfaEvent implements MfaActivity
@@ -54,7 +55,8 @@ abstract class MfaEvent implements MfaActivity
             'reason' => $this->reason?->value,
             'flow_id' => $this->flowId,
             'ip' => $this->ipAddress,
-            ...$this->context,
+            // Free text (e.g. provider errors) is redacted before any sink sees it.
+            ...Redact::context($this->context),
         ], static fn ($value) => $value !== null);
     }
 }

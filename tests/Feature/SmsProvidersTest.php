@@ -1,6 +1,10 @@
 <?php
 
 use Carbon\CarbonImmutable;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\NetworkTimeoutException;
+use GuzzleHttp\Exception\TransferException;
+use GuzzleHttp\Psr7\Request as PsrRequest;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Event;
@@ -229,6 +233,19 @@ describe('routing', function () {
         expect($log->getArrayCopy())->toBe(['bd:+8801911000000', 'bd_gp:+8801711000000', 'world:+15555550100']);
     });
 
+    it('accepts prefixes written with or without "+"', function () {
+        $log = new ArrayObject;
+        foreach (['bd', 'uk', 'world'] as $name) {
+            recordingDriver($name, $log);
+        }
+        config(['mfa.sms.drivers.routing' => ['routes' => ['+880' => 'bd', '44' => 'uk'], 'default' => 'world']]);
+
+        sms('routing')->send('+8801711000000', 'x');
+        sms('routing')->send('+447700900000', 'x');
+
+        expect($log->getArrayCopy())->toBe(['bd:+8801711000000', 'uk:+447700900000']);
+    });
+
     it('can route a region to its own named failover chain', function () {
         $log = new ArrayObject;
         recordingDriver('infobipish', $log, DeliveryFailed::provider('infobipish', 'HTTP 500'));
@@ -351,4 +368,68 @@ describe('mfa:doctor SMS checks', function () {
         config(['mfa.sms.drivers.failover' => ['drivers' => ['failover']]]);
         $this->artisan('mfa:doctor')->assertFailed()->expectsOutputToContain('circular reference failover → failover');
     });
+});
+
+describe('provider HTTP calls', function () {
+    beforeEach(fn () => config(['mfa.sms.drivers.twilio' => ['sid' => 'AC0123456789abcdef', 'token' => 't', 'from' => '+15550000000']]));
+
+    /** A transport error as Guzzle's curl handler reports it (Guzzle 7 or 8). */
+    function transportError(bool $sent): TransferException
+    {
+        $message = 'cURL error 28: failed (see https://curl.haxx.se/libcurl/c/libcurl-errors.html) for https://api.twilio.com/2010-04-01/Accounts/AC0123456789abcdef/Messages.json';
+        $request = new PsrRequest('POST', 'https://api.twilio.com/');
+
+        if (class_exists(NetworkTimeoutException::class)) { // Guzzle 8: typed exceptions
+            return $sent ? new NetworkTimeoutException($message, $request) : new ConnectException($message, $request);
+        }
+
+        return new ConnectException($message, $request, null, ['errno' => $sent ? 28 : 7, 'request_size' => $sent ? 512 : 0]);
+    }
+
+    it('retries when the request never reached the provider', function () {
+        $attempts = 0;
+        Http::fake(function () use (&$attempts) {
+            $attempts++;
+            throw transportError(sent: false);
+        });
+
+        expect(fn () => sms('twilio')->send('+15555550100', 'hi'))->toThrow(DeliveryFailed::class);
+        expect($attempts)->toBe(2);
+    });
+
+    it('does not retry a timeout after the message was sent (no duplicate SMS)', function () {
+        $attempts = 0;
+        Http::fake(function () use (&$attempts) {
+            $attempts++;
+            throw transportError(sent: true);
+        });
+
+        expect(fn () => sms('twilio')->send('+15555550100', 'hi'))->toThrow(DeliveryFailed::class);
+        expect($attempts)->toBe(1);
+    });
+
+    it('keeps URLs (account ids) out of connection errors', function () {
+        Http::fake(fn () => throw transportError(sent: true));
+
+        try {
+            sms('twilio')->send('+15555550100', 'hi');
+        } catch (DeliveryFailed $e) {
+        }
+
+        expect($e->getMessage())->toStartWith('[twilio] connection: cURL error 28')
+            ->not->toContain('AC0123456789abcdef')
+            ->not->toContain('https://');
+    });
+});
+
+it('redacts URLs, emails and phone numbers from event context before logging or auditing', function () {
+    event(new ChallengeDeliveryFailed(null, FactorType::Sms, null, [
+        'error' => 'failed for jane@example.com / +15555550100 at https://api.example.com/AC1/x',
+        'factor_id' => 7,
+    ]));
+
+    expect(MfaAuditLog::sole()->context)->toBe([
+        'error' => 'failed for [email] / [number] at [url]',
+        'factor_id' => 7,
+    ]);
 });

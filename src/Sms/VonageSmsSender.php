@@ -6,12 +6,15 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as Http;
 use StrontiumCorp\LaravelMfa\Contracts\SmsSender;
 use StrontiumCorp\LaravelMfa\Exceptions\DeliveryFailed;
+use StrontiumCorp\LaravelMfa\Sms\Concerns\CallsProviderApi;
 
 /**
  * Vonage (Nexmo) SMS API over Laravel's HTTP client.
  */
 final class VonageSmsSender implements SmsSender
 {
+    use CallsProviderApi;
+
     /** @param array<string, mixed> $config */
     public function __construct(
         private readonly Http $http,
@@ -21,10 +24,8 @@ final class VonageSmsSender implements SmsSender
     public function send(string $to, string $message): void
     {
         try {
-            $response = $this->http
+            $response = $this->request()
                 ->asForm()
-                ->timeout(10)
-                ->retry(2, 200, fn ($e) => $e instanceof ConnectionException, throw: false)
                 ->post('https://rest.nexmo.com/sms/json', [
                     'api_key' => $this->config['key'] ?? '',
                     'api_secret' => $this->config['secret'] ?? '',
@@ -33,7 +34,7 @@ final class VonageSmsSender implements SmsSender
                     'text' => $message,
                 ]);
         } catch (ConnectionException $e) {
-            throw DeliveryFailed::provider('vonage', 'connection: '.$e->getMessage());
+            throw self::connectionFailed('vonage', $e);
         }
 
         $status = (string) $response->json('messages.0.status', 'unknown');

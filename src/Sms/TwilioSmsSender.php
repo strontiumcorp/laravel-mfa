@@ -6,6 +6,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as Http;
 use StrontiumCorp\LaravelMfa\Contracts\SmsSender;
 use StrontiumCorp\LaravelMfa\Exceptions\DeliveryFailed;
+use StrontiumCorp\LaravelMfa\Sms\Concerns\CallsProviderApi;
 
 /**
  * Twilio Messages API over Laravel's HTTP client — no SDK required, and
@@ -13,6 +14,8 @@ use StrontiumCorp\LaravelMfa\Exceptions\DeliveryFailed;
  */
 final class TwilioSmsSender implements SmsSender
 {
+    use CallsProviderApi;
+
     /** @param array<string, mixed> $config */
     public function __construct(
         private readonly Http $http,
@@ -31,14 +34,12 @@ final class TwilioSmsSender implements SmsSender
         ]);
 
         try {
-            $response = $this->http
+            $response = $this->request()
                 ->asForm()
                 ->withBasicAuth($sid, (string) ($this->config['token'] ?? ''))
-                ->timeout(10)
-                ->retry(2, 200, fn ($e) => $e instanceof ConnectionException, throw: false)
                 ->post("https://api.twilio.com/2010-04-01/Accounts/{$sid}/Messages.json", $payload);
         } catch (ConnectionException $e) {
-            throw DeliveryFailed::provider('twilio', 'connection: '.$e->getMessage());
+            throw self::connectionFailed('twilio', $e);
         }
 
         if ($response->failed()) {

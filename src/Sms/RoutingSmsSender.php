@@ -11,7 +11,7 @@ use StrontiumCorp\LaravelMfa\Contracts\SmsSender;
  */
 final class RoutingSmsSender implements SmsSender
 {
-    /** @param array<string|int, SmsSender> $routes digit prefix => sender */
+    /** @param array<string|int, SmsSender> $routes digit prefix (with or without "+") => sender */
     public function __construct(
         private readonly array $routes,
         private readonly SmsSender $default,
@@ -28,13 +28,13 @@ final class RoutingSmsSender implements SmsSender
         $best = null;
 
         foreach (array_keys($this->routes) as $prefix) {
-            $prefix = (string) $prefix;
+            $prefix = ltrim((string) $prefix, '+');
 
             if (str_starts_with($digits, $prefix) && ($best === null || strlen($prefix) > strlen($best))) {
                 $best = $prefix;
             }
         }
 
-        return $best === null ? $this->default : $this->routes[$best];
+        return $best === null ? $this->default : ($this->routes[$best] ?? $this->routes['+'.$best]);
     }
 }

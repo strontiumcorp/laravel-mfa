@@ -6,6 +6,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory as Http;
 use StrontiumCorp\LaravelMfa\Contracts\SmsSender;
 use StrontiumCorp\LaravelMfa\Exceptions\DeliveryFailed;
+use StrontiumCorp\LaravelMfa\Sms\Concerns\CallsProviderApi;
 
 /**
  * Infobip SMS API v3 (POST /sms/3/messages) over Laravel's HTTP client.
@@ -14,6 +15,8 @@ use StrontiumCorp\LaravelMfa\Exceptions\DeliveryFailed;
  */
 final class InfobipSmsSender implements SmsSender
 {
+    use CallsProviderApi;
+
     /** @param array<string, mixed> $config */
     public function __construct(
         private readonly Http $http,
@@ -25,11 +28,9 @@ final class InfobipSmsSender implements SmsSender
         $base = rtrim((string) ($this->config['base_url'] ?? 'https://api.infobip.com'), '/');
 
         try {
-            $response = $this->http
+            $response = $this->request()
                 ->withHeaders(['Authorization' => 'App '.($this->config['api_key'] ?? ''), 'Accept' => 'application/json'])
                 ->asJson()
-                ->timeout(10)
-                ->retry(2, 200, fn ($e) => $e instanceof ConnectionException, throw: false)
                 ->post("{$base}/sms/3/messages", [
                     'messages' => [[
                         'sender' => (string) ($this->config['from'] ?? ''),
@@ -38,7 +39,7 @@ final class InfobipSmsSender implements SmsSender
                     ]],
                 ]);
         } catch (ConnectionException $e) {
-            throw DeliveryFailed::provider('infobip', 'connection: '.$e->getMessage());
+            throw self::connectionFailed('infobip', $e);
         }
 
         if ($response->failed()) {

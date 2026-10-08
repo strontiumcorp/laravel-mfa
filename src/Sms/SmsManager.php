@@ -119,7 +119,8 @@ class SmsManager extends Manager
 
         $routes = [];
         foreach ((array) ($config['routes'] ?? []) as $prefix => $name) {
-            $routes[(string) $prefix] = $this->driver((string) $name);
+            // '880' and '+880' both work.
+            $routes[ltrim((string) $prefix, '+')] = $this->driver((string) $name);
         }
 
         return new RoutingSmsSender($routes, $this->driver((string) $config['default']));
