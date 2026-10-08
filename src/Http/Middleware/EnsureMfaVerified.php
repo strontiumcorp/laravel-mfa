@@ -98,6 +98,14 @@ class EnsureMfaVerified
 
     private function isExcluded(Request $request): bool
     {
+        // The challenge page's "Sign out" posts to routes.logout_route, so it
+        // must always be reachable, wherever the app's logout lives.
+        $logout = config('mfa.routes.logout_route');
+
+        if (is_string($logout) && $logout !== '' && $request->route() !== null && $request->routeIs($logout)) {
+            return true;
+        }
+
         // Equivalent mutant(s): the config value is always a list.
         return $this->matches($request, (array) config('mfa.middleware.except')); // @pest-mutate-ignore: RemoveArrayCast
     }

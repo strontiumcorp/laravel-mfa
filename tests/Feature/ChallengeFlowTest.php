@@ -37,6 +37,15 @@ it('points "Sign out" at the app\'s named logout route, wherever it lives', func
     expect($this->getJson(route('mfa.challenge'))->json('urls.logout'))->toBe(url('/admin/logout'));
 });
 
+it('lets an unverified user sign out through a custom logout route', function () {
+    Route::middleware('web')->post('/admin/logout', fn () => 'bye')->name('admin.logout');
+    app('router')->getRoutes()->refreshNameLookups();
+    config(['mfa.routes.logout_route' => 'admin.logout']);
+    [$user] = $this->userWithFactor();
+
+    $this->loginWithSession($user)->post('/admin/logout')->assertOk()->assertSee('bye');
+});
+
 it('hides "Sign out" when the logout route does not exist', function () {
     config(['mfa.routes.logout_route' => 'nope']);
     [$user] = $this->userWithFactor();
