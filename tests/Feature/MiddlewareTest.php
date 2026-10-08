@@ -5,7 +5,9 @@ use Illuminate\Support\Facades\Event;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Events\ChallengeRequired;
 use StrontiumCorp\LaravelMfa\Events\EnrollmentRequired;
+use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
+use StrontiumCorp\LaravelMfa\Tests\Fixtures\Role;
 
 it('lets guests through', function () {
     $this->get('/public')->assertOk();
@@ -146,5 +148,39 @@ describe('performance', function () {
         $this->createMfaFactor($user, FactorType::Totp);
 
         $this->get('/dashboard')->assertRedirect(route('mfa.challenge'));
+    });
+});
+
+describe('enforcement (D5)', function () {
+    it('enforces for a list of roles, read from a string or enum "role" attribute', function () {
+        config(['mfa.enforce' => ['admin', 'super_admin']]);
+
+        expect(Mfa::mustEnroll($this->makeUser()->forceFill(['role' => 'admin'])))->toBeTrue()
+            ->and(Mfa::mustEnroll($this->makeUser()->forceFill(['role' => Role::Admin])))->toBeTrue()
+            ->and(Mfa::mustEnroll($this->makeUser()->forceFill(['role' => Role::Member])))->toBeFalse()
+            ->and(Mfa::mustEnroll($this->makeUser()))->toBeFalse();
+    });
+
+    it('lets Mfa::enforceUsing() decide in code, ahead of the config', function () {
+        config(['mfa.enforce' => ['admin']]);
+        Mfa::enforceUsing(fn ($user) => $user->email === 'boss@example.com');
+
+        try {
+            expect(Mfa::mustEnroll($this->makeUser(['email' => 'boss@example.com'])))->toBeTrue()
+                ->and(Mfa::mustEnroll($this->makeUser()->forceFill(['role' => 'admin'])))->toBeFalse();
+        } finally {
+            Mfa::enforceUsing(null);
+        }
+    });
+
+    it('never requires enrollment from users who already have a factor', function () {
+        Mfa::enforceUsing(fn () => true);
+
+        try {
+            [$user] = $this->userWithFactor();
+            expect(Mfa::mustEnroll($user))->toBeFalse();
+        } finally {
+            Mfa::enforceUsing(null);
+        }
     });
 });

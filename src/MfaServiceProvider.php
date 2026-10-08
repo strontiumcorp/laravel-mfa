@@ -164,7 +164,12 @@ class MfaServiceProvider extends ServiceProvider
             'Delivery' => config('mfa.delivery.queue_connection') || config('mfa.delivery.queue')
                 ? 'queued ('.(config('mfa.delivery.queue_connection') ?: config('queue.default')).(config('mfa.delivery.queue') ? ':'.config('mfa.delivery.queue') : '').')'
                 : 'sync',
-            'Enforcement' => config('mfa.enforce') ? (string) config('mfa.enforce') : 'opt-in',
+            'Enforcement' => match (true) {
+                $this->app->make(Mfa::class)->enforcesInCode() => 'Mfa::enforceUsing()',
+                is_array(config('mfa.enforce')) && config('mfa.enforce') !== [] => 'roles: '.implode(', ', (array) config('mfa.enforce')),
+                is_string(config('mfa.enforce')) => config('mfa.enforce'),
+                default => 'opt-in',
+            },
             'Audit log' => config('mfa.observability.audit.enabled') ? 'on' : 'off',
         ]);
     }

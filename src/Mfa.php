@@ -24,6 +24,7 @@ use StrontiumCorp\LaravelMfa\Events\ImpersonationGranted;
 use StrontiumCorp\LaravelMfa\Events\VerificationSucceeded;
 use StrontiumCorp\LaravelMfa\Exceptions\ImpersonationNotAllowed;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
+use StrontiumCorp\LaravelMfa\Policies\EnforceForRoles;
 use StrontiumCorp\LaravelMfa\Sms\SmsManager;
 use StrontiumCorp\LaravelMfa\Support\RequestContext;
 use StrontiumCorp\LaravelMfa\Support\SessionIdentity;
@@ -34,7 +35,8 @@ use StrontiumCorp\LaravelMfa\Testing\FixedCodeGenerator;
  * Facade root (StrontiumCorp\LaravelMfa\Facades\Mfa).
  *
  * Holds no per-request state — the session/request are always passed in —
- * so it is safe as a singleton under Octane.
+ * so it is safe as a singleton under Octane. (The enforceUsing() callback is
+ * app configuration, registered once at boot.)
  */
 class Mfa
 {
@@ -42,6 +44,9 @@ class Mfa
 
     /** Set to false (Mfa::ignoreMigrations()) if you publish and own the migrations. */
     public static bool $runsMigrations = true;
+
+    /** @var (Closure(MultiFactorAuthenticatable): bool)|null */
+    private ?Closure $enforceUsing = null;
 
     public static function ignoreMigrations(): void
     {
@@ -144,14 +149,44 @@ class Mfa
     {
         $policy = $this->config->get('mfa.enforce');
 
-        if ($policy === null || $this->hasConfirmedFactors($user)) {
+        if (($policy === null || $policy === []) && $this->enforceUsing === null) {
             return false;
         }
 
+        if ($this->hasConfirmedFactors($user)) {
+            return false;
+        }
+
+        if ($this->enforceUsing !== null) {
+            return (bool) ($this->enforceUsing)($user);
+        }
+
         /** @var EnforcementPolicy $instance */
-        $instance = $this->app->make($policy);
+        $instance = is_array($policy)
+            ? new EnforceForRoles(array_values(array_map('strval', $policy)))
+            : $this->app->make($policy);
 
         return $instance->mustEnroll($user);
+    }
+
+    /**
+     * Decide in code who must enroll; takes precedence over config('mfa.enforce').
+     * Register in a service provider's boot(), e.g.
+     * Mfa::enforceUsing(fn (User $user) => $user->isAdmin()). Pass null to clear.
+     *
+     * @param  (Closure(MultiFactorAuthenticatable): bool)|null  $callback
+     */
+    public function enforceUsing(?Closure $callback): static
+    {
+        $this->enforceUsing = $callback;
+
+        return $this;
+    }
+
+    /** Whether enforceUsing() has registered a callback (for mfa:doctor / about). */
+    public function enforcesInCode(): bool
+    {
+        return $this->enforceUsing !== null;
     }
 
     /** Whether this user would be let through without a challenge right now. */

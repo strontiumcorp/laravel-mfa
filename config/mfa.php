@@ -36,9 +36,14 @@ return [
     |--------------------------------------------------------------------------
     |
     | null  => MFA is opt-in per user.
-    | class => a class implementing Contracts\EnforcementPolicy that decides
-    |          which users must enroll (e.g. admins). Use a class, not a
-    |          closure, so `php artisan config:cache` keeps working.
+    | roles => a list of roles that must enroll, e.g. ['admin', 'support'],
+    |          matched against the user's getMfaRoles() (the "role"
+    |          attribute by default; string or enum).
+    | class => a class implementing Contracts\EnforcementPolicy.
+    |
+    | For logic in code, call Mfa::enforceUsing(fn ($user) => ...) in a
+    | service provider instead; it takes precedence over this value. (A
+    | closure can't go here: `php artisan config:cache` can't store it.)
     |
     */
 

@@ -102,8 +102,13 @@ class DoctorCommand extends Command
             }
         }
 
-        if ($policy = config('mfa.enforce')) {
-            $this->check("Enforcement policy [{$policy}] implements EnforcementPolicy", is_string($policy) && is_subclass_of($policy, EnforcementPolicy::class));
+        $policy = config('mfa.enforce');
+        if ($mfa->enforcesInCode()) {
+            $this->components->twoColumnDetail('Enforcement decided by Mfa::enforceUsing()', '<fg=green;options=bold>OK</>');
+        } elseif (is_array($policy) && $policy !== []) {
+            $this->check('Enforced for roles ['.implode(', ', $policy).']', array_filter($policy, fn ($role) => ! is_string($role) || $role === '') === []);
+        } elseif (is_string($policy) && $policy !== '') {
+            $this->check("Enforcement policy [{$policy}] implements EnforcementPolicy", is_subclass_of($policy, EnforcementPolicy::class));
         }
 
         if (config('mfa.ui.driver') === 'inertia') {
