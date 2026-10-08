@@ -93,7 +93,7 @@ The messages are written for end users and are safe to display as-is. For the ma
 ```
 → `{ "status": "verified", "redirect": "https://app.test/dashboard" }`
 
-The session ID is regenerated on success, so take the new cookie from the response. `redirect` is the page the user originally asked for, or `config('mfa.routes.home')` if there was none.
+The session ID is regenerated on success, so take the new cookie from the response. (Inertia requests get a full page visit to the intended page instead: `409` with `X-Inertia-Location`.) `redirect` is the page the user originally asked for, or `config('mfa.routes.home')` if there was none.
 
 ### `POST /mfa/challenge/recover`
 
@@ -175,3 +175,5 @@ Unconfirmed destinations have tight limits, because anyone can trigger them:
 ### `POST /mfa/recovery-codes`
 
 → `{ "status": "recovery-codes-generated", "recovery_codes": [ … ] }`. This invalidates every previous code.
+
+If the user has no confirmed factor yet, the response is `422 { "message": "Enable a verification method first." }`, without an `errors` key.

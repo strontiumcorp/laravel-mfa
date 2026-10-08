@@ -41,6 +41,8 @@ class User extends Authenticatable implements MultiFactorAuthenticatable
 
 Link to `route('mfa.settings')` from your account page. That's the whole integration.
 
+Optionally, share MFA state with every page (see [Frontend context](#frontend-context)) and show the API key notice next to your API key settings (see [API keys](#api-keys)).
+
 ## How it protects your app
 
 The `EnsureMfaVerified` middleware is appended to the `web` group, so **every web route is protected by default**. It checks the identity the login stored in the session, not `Auth::user()`. That means:
@@ -48,7 +50,9 @@ The `EnsureMfaVerified` middleware is appended to the `web` group, so **every we
 | Scenario | Behaviour |
 |---|---|
 | Password login, Socialite login, remember-me cookie | Challenged until MFA passes |
-| Webhooks / jobs / commands calling `Auth::setUser()` or `loginUsingId()` | Never challenged (no session login) |
+| Webhooks / jobs / commands calling `Auth::setUser()` | Never challenged (nothing is stored in the session) |
+| `loginUsingId()` / `login()` in a request with no session cookie (a job, a stateless webhook) | Not challenged in that request; the login is never persisted |
+| `loginUsingId()` / `login()` in a browser request | Persists a session login, so the **next** request is challenged (see impersonation below) |
 | Impersonation via per-request `Auth::setUser()` (clone-voice, podcast-flow) | Works unchanged: the verified admin is still the session user |
 | Impersonation via `Auth::loginUsingId($target)` (artistly) | Call `Mfa::grantForImpersonation($admin, $target)` right after |
 | `actingAs()` in your tests | Not challenged, so existing suites keep passing |
@@ -64,9 +68,49 @@ Auth::loginUsingId($request->user_id);
 Mfa::grantForImpersonation($admin, auth()->user()); // throws if $admin hasn't passed MFA
 ```
 
+If the target has MFA, the admin must have actually passed MFA in this session; an admin without factors can't impersonate them. Targets without MFA only need the admin to be MFA-satisfied.
+
 ### API keys
 
 If your API-key middleware calls `auth()->login($user)`, change it to `auth()->setUser($user)`. `login()` writes a session cookie, which turns the API key into a browser session.
+
+MFA is **not** enforced for API-key requests: a leaked key (or a leaked password, used to read the key) bypasses it. Show the published notice next to your API key settings so users know to regenerate the key after any leak:
+
+```tsx
+import MfaApiKeyNotice from '@/components/mfa/api-key-notice'; // Components/ in apps that use Pages/
+
+<MfaApiKeyNotice />
+```
+
+It reads the [frontend context](#frontend-context) to hide itself when MFA is off, and links to the MFA settings for users who haven't enabled it.
+
+**Sanctum SPA mode.** If you use Sanctum's stateful API (`statefulApi()` / `EnsureFrontendRequestsAreStateful`), `api` routes are authenticated by the session cookie but are outside the `web` group. Add the `mfa` middleware to them. `mfa:doctor` warns when this applies. Token-based `auth:sanctum` is unaffected.
+
+### Frontend context
+
+`Mfa::context($request)` returns a typed `MfaContext` with everything the UI needs: whether MFA is on, the enabled factors, whether factor changes ask for a password, the session user's `hasMfa` / `verified` / `mustEnroll`, and the MFA URLs. Share it once, under one key:
+
+```php
+// app/Http/Middleware/HandleInertiaRequests.php
+public function share(Request $request): array
+{
+    return [
+        ...parent::share($request),
+        'mfa' => fn () => \StrontiumCorp\LaravelMfa\Facades\Mfa::context($request),
+    ];
+}
+```
+
+`mfa:install` publishes the matching TypeScript type and a hook to `components/mfa/mfa-context.ts`:
+
+```tsx
+import { useMfa } from '@/components/mfa/mfa-context';
+
+const mfa = useMfa(); // MfaContext | null
+{mfa?.user && !mfa.user.hasMfa && <a href={mfa.urls.settings ?? '#'}>Turn on two-factor authentication</a>}
+```
+
+The PHP class and the TypeScript type mirror each other; a test pins the shape.
 
 ## Configuration
 
@@ -81,15 +125,33 @@ MFA_SMS_DRIVER=twilio            # log | twilio | vonage | infobip | sns | failo
 TWILIO_SID=...
 TWILIO_TOKEN=...
 TWILIO_FROM=+15550000000         # or TWILIO_MESSAGING_SERVICE_SID
-MFA_DELIVERY_QUEUE_CONNECTION=   # empty = send synchronously
+MFA_DELIVERY_QUEUE=mfa           # queue name on the default connection; both empty = send inline
+MFA_DELIVERY_QUEUE_CONNECTION=   # or a specific connection
 MFA_LOG_CHANNEL=                 # dedicated log channel for MFA events
 ```
 
-**Enforcement.** Set `'enforce' => \StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins::class`, or point it at your own `EnforcementPolicy`. Use a class, not a closure, so `config:cache` works.
+**Enforcement.** Users must enroll when `enforce` says so:
+
+```php
+'enforce' => ['admin', 'super_admin', 'support'],   // roles, matched against $user->getMfaRoles()
+'enforce' => \App\Mfa\MyPolicy::class,             // or a Contracts\EnforcementPolicy class
+```
+
+`getMfaRoles()` comes from the trait and reads the `role` attribute (a string or an enum). Override it for other role systems, e.g. spatie/laravel-permission: `return $this->getRoleNames()->all();`.
+
+For logic in code, register a callback in a service provider. It takes precedence over the config. (A closure can't go in `config/mfa.php`, because `config:cache` can't store it.)
+
+```php
+Mfa::enforceUsing(fn (User $user) => $user->isAdmin());
+```
+
+**Code delivery.** Set `delivery.queue` (a queue on the default connection) or `delivery.queue_connection` to send codes from a queued job. The payload is encrypted and retried with backoff. If every retry fails, the unsent code is discarded so the user can request another one right away. A connection that resolves to `sync` sends inline.
+
+**Disabling a factor type** fails open: users whose only factors are of that type are no longer challenged. Disable a type only after those users enroll another factor; `mfa:doctor` counts the users affected.
 
 **Logout link.** The challenge page's "Sign out" button posts to the route named in `routes.logout_route` (default `logout`), so an app whose logout is `POST /admin/logout` works as long as the route is named. That route is always exempt from the middleware, so unverified users can sign out. Set it to `null` to hide the button.
 
-**Password users vs. social-login users.** Adding or removing a factor runs `password.confirm` by default (`routes.confirm_middleware`). If some users have no password, set it to `[]` or to your own middleware.
+**Password users vs. social-login users.** Adding or removing a factor runs `password.confirm` by default (`routes.confirm_middleware`). If some users have no password, set it to `[]` or to your own middleware. `mfa:doctor` warns when Socialite is installed and password confirmation is on.
 
 **Sending codes: cooldown, caps and abuse protection.** Email and SMS codes are protected against bombing, toll fraud and lock-out attacks. There are two separate budgets, so the protection against bombing can't be used to lock an owner out:
 
@@ -153,6 +215,7 @@ Two composite drivers combine the others:
 ```
 
 How these behave:
+- **Timeouts:** 3s to connect and 5s in total per attempt (override with `connect_timeout` / `timeout` on a driver). A request is retried only if it never reached the provider, so a slow provider can't produce a duplicate SMS.
 - **When a provider fails** in a failover chain, `SmsProviderFailed` fires. It's logged, audited and counted under `mfa.sms_provider_failed{provider=…}`, with the flow ID.
 - **Only when every provider fails** does the user see a delivery error, and `ChallengeDeliveryFailed` fires.
 - **Circular configurations** are rejected when the driver is built.
@@ -174,7 +237,7 @@ Implement `Contracts\Factor` and register it with `Mfa::extend('passkey', fn ($a
 
 Every action emits a domain event (`StrontiumCorp\LaravelMfa\Events\*`, all implementing `Contracts\MfaActivity`). The package fans each event out to three sinks; a failure in any sink is reported and never blocks a login.
 
-- **Logs.** One structured line per event (`mfa.verification_failed`, …) with `user_id`, `factor`, `reason`, `flow_id` and `ip`. Codes, secrets and full phone numbers are never logged.
+- **Logs.** One structured line per event (`mfa.verification_failed`, …) with `user_id`, `factor`, `reason`, `flow_id` and `ip`. Codes, secrets and full phone numbers are never logged. Free text in event context (such as provider errors) has URLs, email addresses and phone numbers redacted before it reaches any sink.
 - **Audit table.** `mfa_audit_logs` is queryable and pruned after `retention_days`.
 - **Metrics.** Counters and delivery timings go through `Contracts\MetricsRecorder`. Bind your own for Prometheus, StatsD or Pulse; `log` and `null` ship built in.
 
