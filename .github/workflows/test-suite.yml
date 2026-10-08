@@ -15,7 +15,7 @@ on:
 jobs:
   tests:
     name: PHP ${{ matrix.php }} · Laravel ${{ matrix.laravel }} · ${{ matrix.stability }}${{ matrix.coverage && ' · coverage' || '' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(inputs.matrix) }}
