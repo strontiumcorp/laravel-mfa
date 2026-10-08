@@ -5,8 +5,9 @@ namespace StrontiumCorp\LaravelMfa\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
+use StrontiumCorp\LaravelMfa\Mfa;
 
 /**
  * @property int $id
@@ -37,10 +38,10 @@ class MfaAuditLog extends Model
         return ['context' => 'array'];
     }
 
-    /** @return MorphTo<Model, $this> */
-    public function authenticatable(): MorphTo
+    /** @return BelongsTo<Model, $this> */
+    public function user(): BelongsTo
     {
-        return $this->morphTo();
+        return $this->belongsTo(Mfa::userModel(), 'user_id');
     }
 
     /** @return Builder<static> */

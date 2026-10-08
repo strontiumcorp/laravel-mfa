@@ -7,6 +7,7 @@ use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Support\Facades\Artisan;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
+use StrontiumCorp\LaravelMfa\Tests\Fixtures\PlainUser;
 
 it('passes mfa:doctor on a correctly integrated app', function () {
     config(['session.driver' => 'database', 'mfa.factors.sms.enabled' => false]);
@@ -154,6 +155,16 @@ describe('mfa:doctor integration checks', function () {
         app(Kernel::class)->prependMiddlewareToGroup('api', 'Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful');
 
         $this->artisan('mfa:doctor')->assertSuccessful()->expectsOutputToContain('Sanctum stateful API is on');
+    });
+
+    it('fails when an MFA guard uses another model than the one MFA rows belong to', function () {
+        config([
+            'auth.providers.plain' => ['driver' => 'eloquent', 'model' => PlainUser::class],
+            'auth.guards.plain' => ['driver' => 'session', 'provider' => 'plain'],
+            'mfa.guards' => ['web', 'plain'],
+        ]);
+
+        $this->artisan('mfa:doctor')->assertFailed()->expectsOutputToContain('Guard [plain] uses the MFA user model');
     });
 
     it('warns about users whose factor type was disabled (fail-open, D10)', function () {

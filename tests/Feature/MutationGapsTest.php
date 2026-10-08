@@ -8,7 +8,6 @@
 use Illuminate\Auth\GenericUser;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Contracts\Http\Kernel;
-use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
 use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Session\Store;
@@ -33,8 +32,6 @@ use StrontiumCorp\LaravelMfa\Support\OtpStore;
 use StrontiumCorp\LaravelMfa\Support\PendingEnrollments;
 use StrontiumCorp\LaravelMfa\Support\RandomCodeGenerator;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
-use StrontiumCorp\LaravelMfa\Support\SendGuard;
-use StrontiumCorp\LaravelMfa\Tests\Fixtures\AdminUser;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\HandleImpersonation;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\PlainUser;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\User;
@@ -102,17 +99,6 @@ describe('SendGuard', function () {
         addSms('+15555550102')->assertStatus(429);
         $this->freshGuards()->loginWithSession($this->makeUser());
         addSms('+15555550102')->assertStatus(429);
-    });
-
-    it('keys budgets by model type + id', function () {
-        Relation::morphMap(['admin' => AdminUser::class]);
-        config(['mfa.rate_limit.send_per_hour' => 1]);
-        $user = $this->makeUser();
-        $admin = AdminUser::findOrFail($user->id);           // same id, other type
-        $guard = app(SendGuard::class);
-
-        expect($guard->attempt($this->createMfaFactor($user, FactorType::Sms), null))->toBeNull()
-            ->and($guard->attempt($this->createMfaFactor($admin, FactorType::Sms, '+15555550123'), null))->toBeNull();
     });
 
     it('keeps the send and new-destination budgets apart', function () {
@@ -513,15 +499,6 @@ describe('Mfa core', function () {
         expect(Mfa::hasConfirmedFactors($user))->toBeTrue();
         cache()->flush();
         $this->loginWithSession($user)->get('/dashboard')->assertRedirect(route('mfa.challenge'));
-    });
-
-    it('finds factors of morph-mapped user models', function () {
-        Relation::morphMap(['admin' => AdminUser::class]);
-        $admin = AdminUser::findOrFail($this->makeUser()->id);
-        $this->createMfaFactor($admin);
-        cache()->flush();
-
-        expect(Mfa::hasConfirmedFactors($admin))->toBeTrue();
     });
 
     it('lists enabled types as a JSON list even when one is disabled', function () {

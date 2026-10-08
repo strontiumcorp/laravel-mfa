@@ -28,6 +28,8 @@ abstract class TestCase extends Orchestra
         tap($app['config'], function (Repository $config) {
             $config->set('app.key', 'base64:'.base64_encode(str_repeat('k', 32)));
             $config->set('database.default', 'testing');
+            // Testbench turns SQLite foreign keys off; MFA rows rely on them.
+            $config->set('database.connections.testing.foreign_key_constraints', true);
             $config->set('auth.providers.users.model', User::class);
             $config->set('cache.default', 'array');
             $config->set('session.driver', 'array');

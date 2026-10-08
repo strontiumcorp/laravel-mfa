@@ -32,6 +32,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | User model
+    |--------------------------------------------------------------------------
+    |
+    | The model MFA rows belong to (user_id foreign keys). null = the model of
+    | the first guard's user provider. Every guard above must use this model.
+    | Deleting a user deletes their factors, codes and recovery codes; their
+    | audit rows are kept (user_id set to null) until the retention prune.
+    |
+    */
+
+    'user_model' => null,
+
+    /*
+    |--------------------------------------------------------------------------
     | Enforcement
     |--------------------------------------------------------------------------
     |

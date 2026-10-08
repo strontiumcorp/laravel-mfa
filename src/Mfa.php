@@ -55,6 +55,22 @@ class Mfa
         static::$runsMigrations = false;
     }
 
+    /**
+     * The user model MFA rows belong to (user_id foreign keys):
+     * config('mfa.user_model'), else the model of the first MFA guard.
+     *
+     * @return class-string<Model>
+     */
+    public static function userModel(): string
+    {
+        $guard = ((array) config('mfa.guards'))[0] ?? 'web';
+
+        /** @var class-string<Model> */
+        return config('mfa.user_model')
+            ?? config('auth.providers.'.config("auth.guards.{$guard}.provider").'.model')
+            ?? 'App\\Models\\User';
+    }
+
     public function __construct(
         private readonly Container $app,
         private readonly Config $config,
@@ -96,8 +112,7 @@ class Mfa
 
     public function hasConfirmedFactors(MultiFactorAuthenticatable $user): bool
     {
-        $type = $this->morphType($user);
-        $key = $this->cacheKey($type, $user->getAuthIdentifier());
+        $key = $this->cacheKey($user->getAuthIdentifier());
         $cached = $this->cacheStore()->get($key);
 
         if ($cached !== null) {
@@ -105,7 +120,7 @@ class Mfa
             return (bool) $cached; // @pest-mutate-ignore: RemoveBooleanCast
         }
 
-        $has = $this->queryHasConfirmedFactors($type, $user->getAuthIdentifier());
+        $has = $this->queryHasConfirmedFactors($user->getAuthIdentifier());
 
         // add(), not put(): if a factor changed while we were querying, its
         // model event has already written the fresh answer — never let this
@@ -118,7 +133,7 @@ class Mfa
 
     public function forgetCachedState(MultiFactorAuthenticatable $user): void
     {
-        $this->refreshCachedStateFor($this->morphType($user), $user->getAuthIdentifier());
+        $this->refreshCachedStateFor($user->getAuthIdentifier());
     }
 
     /**
@@ -126,21 +141,20 @@ class Mfa
      * rather than just forgetting the key, so a concurrent fill that read
      * the old state cannot win the race.
      */
-    public function refreshCachedStateFor(string $morphType, int|string $id): void
+    public function refreshCachedStateFor(int|string $userId): void
     {
         $this->cacheStore()->put(
-            $this->cacheKey($morphType, $id),
+            $this->cacheKey($userId),
             // Equivalent mutant(s): see add() above.
-            (int) $this->queryHasConfirmedFactors($morphType, $id), // @pest-mutate-ignore: RemoveIntegerCast
+            (int) $this->queryHasConfirmedFactors($userId), // @pest-mutate-ignore: RemoveIntegerCast
             (int) $this->config->get('mfa.cache.ttl'),
         );
     }
 
-    private function queryHasConfirmedFactors(string $morphType, int|string $id): bool
+    private function queryHasConfirmedFactors(int|string $userId): bool
     {
         return MfaFactor::query()
-            ->where('authenticatable_type', $morphType)
-            ->where('authenticatable_id', $id)
+            ->where('user_id', $userId)
             ->whereNotNull('confirmed_at')
             // Equivalent mutant(s): Eloquent binds backed enums by value.
             ->whereIn('type', array_map(fn (FactorType $t) => $t->value, $this->enabledTypes())) // @pest-mutate-ignore: UnwrapArrayMap
@@ -423,15 +437,9 @@ class Mfa
         return $this->guards()[0] ?? 'web';
     }
 
-    private function cacheKey(string $morphType, int|string $id): string
+    private function cacheKey(int|string $userId): string
     {
-        return $this->config->get('mfa.cache.prefix').':has-factors:'.md5($morphType).':'.$id;
-    }
-
-    private function morphType(Authenticatable $user): string
-    {
-        // Equivalent mutant(s): non-Eloquent users can't implement the contract (it needs MorphMany relations).
-        return $user instanceof Model ? $user->getMorphClass() : $user::class; // @pest-mutate-ignore: InstanceOfToTrue
+        return $this->config->get('mfa.cache.prefix').':has-factors:'.$userId;
     }
 
     private function cacheStore(): Cache

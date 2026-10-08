@@ -3,14 +3,21 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use StrontiumCorp\LaravelMfa\Mfa;
 
 return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create(config('mfa.tables.factors', 'mfa_factors'), function (Blueprint $table) {
+        // Factors and codes belong to the user and go with them; audit rows
+        // outlive the user (user_id → null) until the retention prune.
+        $model = Mfa::userModel();
+        $users = (new $model)->getTable();
+        $key = (new $model)->getKeyName();
+
+        Schema::create(config('mfa.tables.factors', 'mfa_factors'), function (Blueprint $table) use ($users, $key) {
             $table->id();
-            $table->morphs('authenticatable');
+            $table->foreignId('user_id')->constrained($users, $key)->cascadeOnDelete();
             $table->string('type', 32);
             $table->string('label')->nullable();
             $table->text('secret')->nullable();          // encrypted (TOTP)
@@ -20,7 +27,7 @@ return new class extends Migration
             $table->timestamp('last_used_at')->nullable();
             $table->timestamps();
 
-            $table->index(['authenticatable_type', 'authenticatable_id', 'confirmed_at'], 'mfa_factors_owner_confirmed_index');
+            $table->index(['user_id', 'confirmed_at']);
         });
 
         Schema::create(config('mfa.tables.otp_codes', 'mfa_otp_codes'), function (Blueprint $table) {
@@ -36,19 +43,19 @@ return new class extends Migration
             $table->index('expires_at');
         });
 
-        Schema::create(config('mfa.tables.recovery_codes', 'mfa_recovery_codes'), function (Blueprint $table) {
+        Schema::create(config('mfa.tables.recovery_codes', 'mfa_recovery_codes'), function (Blueprint $table) use ($users, $key) {
             $table->id();
-            $table->morphs('authenticatable');
+            $table->foreignId('user_id')->constrained($users, $key)->cascadeOnDelete();
             $table->string('code_hash', 64);
             $table->timestamp('used_at')->nullable();
             $table->timestamp('created_at')->nullable();
 
-            $table->unique(['authenticatable_type', 'authenticatable_id', 'code_hash'], 'mfa_recovery_codes_owner_hash_unique');
+            $table->unique(['user_id', 'code_hash']);
         });
 
-        Schema::create(config('mfa.tables.audit_logs', 'mfa_audit_logs'), function (Blueprint $table) {
+        Schema::create(config('mfa.tables.audit_logs', 'mfa_audit_logs'), function (Blueprint $table) use ($users, $key) {
             $table->id();
-            $table->nullableMorphs('authenticatable');
+            $table->foreignId('user_id')->nullable()->constrained($users, $key)->nullOnDelete();
             $table->string('event', 64);
             $table->string('factor_type', 32)->nullable();
             $table->string('reason', 64)->nullable();
@@ -58,7 +65,7 @@ return new class extends Migration
             $table->json('context')->nullable();
             $table->timestamp('created_at')->nullable();
 
-            $table->index(['authenticatable_type', 'authenticatable_id', 'created_at'], 'mfa_audit_logs_owner_created_index');
+            $table->index(['user_id', 'created_at']);
             $table->index('flow_id');
             $table->index(['event', 'created_at']);
             $table->index('created_at');

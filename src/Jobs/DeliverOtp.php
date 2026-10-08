@@ -97,7 +97,7 @@ class DeliverOtp implements ShouldBeEncrypted, ShouldQueue
         $factor = MfaFactor::query()->find($this->factorId);
 
         app(Events::class)->dispatch(new ChallengeDeliveryFailed(
-            $factor?->authenticatable, $factor?->type, FailureReason::DeliveryFailed,
+            $factor?->user, $factor?->type, FailureReason::DeliveryFailed,
             ['factor_id' => $this->factorId, 'error' => $exception?->getMessage(), 'queued' => true],
         ));
     }

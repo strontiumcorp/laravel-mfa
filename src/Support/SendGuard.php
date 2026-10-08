@@ -50,7 +50,7 @@ final class SendGuard
      */
     public function attempt(MfaFactor $factor, ?string $ip): ?VerificationResult
     {
-        $user = $factor->authenticatable;
+        $user = $factor->user;
         $confirmed = $factor->isConfirmed();
         // Equivalent mutant(s): send paths only reach here with a destination.
         $destination = (string) $factor->destination; // @pest-mutate-ignore: RemoveStringCast
@@ -159,7 +159,7 @@ final class SendGuard
         // Equivalent mutant: the flag's value is never read, only its presence.
         // Equivalent mutant(s): the key is an int primary key, stringified the same way.
         if ($this->cache->add(CacheKey::for('suspicious', (string) $factor->getKey()), true, self::HOUR)) { // @pest-mutate-ignore: TrueToFalse,RemoveStringCast
-            $this->events->dispatch(new SuspiciousCodeRequests($factor->authenticatable, $factor->type, null, ['reason' => $reason, 'factor_id' => $factor->getKey(), ...$context]));
+            $this->events->dispatch(new SuspiciousCodeRequests($factor->user, $factor->type, null, ['reason' => $reason, 'factor_id' => $factor->getKey(), ...$context]));
         }
     }
 

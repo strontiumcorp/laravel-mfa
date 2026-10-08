@@ -121,7 +121,7 @@ abstract class OtpFactor implements Factor
                 $this->store->discard((int) $issued['result']->context['otp_id']); // @pest-mutate-ignore: RemoveIntegerCast
 
                 $this->events->dispatch(new ChallengeDeliveryFailed(
-                    $factor->authenticatable, $this->type(), FailureReason::DeliveryFailed, ['factor_id' => $factor->getKey(), 'error' => $e->getMessage()]
+                    $factor->user, $this->type(), FailureReason::DeliveryFailed, ['factor_id' => $factor->getKey(), 'error' => $e->getMessage()]
                 ));
 
                 return VerificationResult::failure(FailureReason::DeliveryFailed);
@@ -132,7 +132,7 @@ abstract class OtpFactor implements Factor
             );
         }
 
-        $this->events->dispatch(new ChallengeSent($factor->authenticatable, $this->type(), null, [
+        $this->events->dispatch(new ChallengeSent($factor->user, $this->type(), null, [
             'factor_id' => $factor->getKey(),
             'queued' => $queued,
         ]));

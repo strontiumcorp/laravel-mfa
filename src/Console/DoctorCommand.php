@@ -50,6 +50,11 @@ class DoctorCommand extends Command
                 is_string($model) && is_subclass_of($model, MultiFactorAuthenticatable::class),
                 'Add `implements MultiFactorAuthenticatable` + `use HasMultiFactorAuthentication` to '.($model ?: 'your user model'),
             );
+            $this->check(
+                "Guard [{$guard}] uses the MFA user model [".Mfa::userModel().']',
+                $model === Mfa::userModel(),
+                'MFA rows have a user_id foreign key to one model; set mfa.user_model or remove the guard from mfa.guards',
+            );
         }
 
         // Ask the HTTP kernel (resolving it applies our append) — the router
@@ -244,7 +249,7 @@ class DoctorCommand extends Command
                 ->whereIn('type', array_map(fn (FactorType $type) => $type->value, $disabled))
                 ->toBase()
                 ->distinct()
-                ->get(['type', 'authenticatable_type', 'authenticatable_id'])
+                ->get(['type', 'user_id'])
                 ->countBy('type');
         } catch (Throwable) {
             return; // tables are checked above

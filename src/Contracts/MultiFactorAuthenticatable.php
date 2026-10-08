@@ -4,7 +4,7 @@ namespace StrontiumCorp\LaravelMfa\Contracts;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Models\MfaRecoveryCode;
 
@@ -13,11 +13,11 @@ use StrontiumCorp\LaravelMfa\Models\MfaRecoveryCode;
  */
 interface MultiFactorAuthenticatable extends Authenticatable
 {
-    /** @return MorphMany<MfaFactor, Model> */
-    public function mfaFactors(): MorphMany;
+    /** @return HasMany<MfaFactor, Model> */
+    public function mfaFactors(): HasMany;
 
-    /** @return MorphMany<MfaRecoveryCode, Model> */
-    public function mfaRecoveryCodes(): MorphMany;
+    /** @return HasMany<MfaRecoveryCode, Model> */
+    public function mfaRecoveryCodes(): HasMany;
 
     /** Address used by the email factor by default. */
     public function getMfaEmail(): ?string;

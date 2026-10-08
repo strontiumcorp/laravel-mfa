@@ -3,7 +3,6 @@
 namespace StrontiumCorp\LaravelMfa\Support;
 
 use Illuminate\Contracts\Auth\Authenticatable;
-use Illuminate\Database\Eloquent\Model;
 
 /**
  * Cache/rate-limiter keys for MFA. One place, so every counter is namespaced
@@ -19,15 +18,9 @@ final class CacheKey
         return sprintf('mfa:%s:%s', $bucket, hash_hmac('sha256', strtolower($subject), (string) config('app.key'))); // @pest-mutate-ignore: UnwrapStrtolower
     }
 
-    /** Stable subject for a user: model type + id (ids repeat across models). */
+    /** Stable subject for a user (one user model: see Mfa::userModel()). */
     public static function user(Authenticatable $user): string
     {
-        // Equivalent mutants: class name and morph alias are both unique per
-        // model; non-Eloquent authenticatables can't implement the contract.
-        $type = $user instanceof Model ? $user->getMorphClass() : $user::class; // @pest-mutate-ignore: InstanceOfToTrue,InstanceOfToFalse,TernaryNegated
-
-        // Equivalent mutants: dropping/reordering the separator only matters
-        // for crafted type/id pairs that can't occur (types are class names).
-        return $type.'|'.$user->getAuthIdentifier(); // @pest-mutate-ignore: ConcatRemoveRight,ConcatSwitchSides
+        return 'user|'.$user->getAuthIdentifier();
     }
 }

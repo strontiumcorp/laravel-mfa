@@ -3,7 +3,6 @@
 namespace StrontiumCorp\LaravelMfa\Console;
 
 use Illuminate\Console\Command;
-use Illuminate\Database\Eloquent\Model;
 use StrontiumCorp\LaravelMfa\Console\Concerns\ResolvesUser;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
@@ -47,8 +46,7 @@ class StatusCommand extends Command
         );
 
         $logs = MfaAuditLog::query()
-            ->where('authenticatable_type', $user instanceof Model ? $user->getMorphClass() : $user::class)
-            ->where('authenticatable_id', $user->getAuthIdentifier())
+            ->where('user_id', $user->getAuthIdentifier())
             ->when($this->option('flow'), fn ($q, $flow) => $q->where('flow_id', $flow))
             ->latest('id')
             ->limit((int) $this->option('limit'))

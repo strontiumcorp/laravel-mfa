@@ -3,7 +3,7 @@
 namespace StrontiumCorp\LaravelMfa\Concerns;
 
 use BackedEnum;
-use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
@@ -16,22 +16,22 @@ use UnitEnum;
  */
 trait HasMultiFactorAuthentication
 {
-    /** @return MorphMany<MfaFactor, $this> */
-    public function mfaFactors(): MorphMany
+    /** @return HasMany<MfaFactor, $this> */
+    public function mfaFactors(): HasMany
     {
-        return $this->morphMany(MfaFactor::class, 'authenticatable');
+        return $this->hasMany(MfaFactor::class, 'user_id');
     }
 
-    /** @return MorphMany<MfaRecoveryCode, $this> */
-    public function mfaRecoveryCodes(): MorphMany
+    /** @return HasMany<MfaRecoveryCode, $this> */
+    public function mfaRecoveryCodes(): HasMany
     {
-        return $this->morphMany(MfaRecoveryCode::class, 'authenticatable');
+        return $this->hasMany(MfaRecoveryCode::class, 'user_id');
     }
 
-    /** @return MorphMany<MfaAuditLog, $this> */
-    public function mfaAuditLogs(): MorphMany
+    /** @return HasMany<MfaAuditLog, $this> */
+    public function mfaAuditLogs(): HasMany
     {
-        return $this->morphMany(MfaAuditLog::class, 'authenticatable');
+        return $this->hasMany(MfaAuditLog::class, 'user_id');
     }
 
     public function getMfaEmail(): ?string

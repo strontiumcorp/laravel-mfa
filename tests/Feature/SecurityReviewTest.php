@@ -124,7 +124,7 @@ it('[#1] caps verification attempts per day, not just per minute', function () {
 
 it('[#5] a stale "no MFA" read cannot overwrite the answer written when a factor is confirmed', function () {
     $user = $this->makeUser();
-    $key = 'mfa:has-factors:'.md5($user->getMorphClass()).':'.$user->id;
+    $key = 'mfa:has-factors:'.$user->id;
 
     // Request A starts its fill and reads "no factors"...
     $staleRead = Mfa::hasConfirmedFactors($user); // fills the cache with 0

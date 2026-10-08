@@ -4,8 +4,8 @@ namespace StrontiumCorp\LaravelMfa\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Carbon;
 use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
@@ -14,8 +14,7 @@ use StrontiumCorp\LaravelMfa\Support\Mask;
 
 /**
  * @property int $id
- * @property string $authenticatable_type
- * @property int|string $authenticatable_id
+ * @property int|string $user_id
  * @property FactorType $type
  * @property string|null $label
  * @property string|null $secret
@@ -24,7 +23,7 @@ use StrontiumCorp\LaravelMfa\Support\Mask;
  * @property Carbon|null $confirmed_at
  * @property Carbon|null $last_used_at
  * @property Carbon|null $created_at
- * @property-read (Model&MultiFactorAuthenticatable)|null $authenticatable
+ * @property-read (Model&MultiFactorAuthenticatable)|null $user
  */
 class MfaFactor extends Model
 {
@@ -40,7 +39,7 @@ class MfaFactor extends Model
     protected static function booted(): void
     {
         $forget = static fn (self $factor) => app(Mfa::class)
-            ->refreshCachedStateFor($factor->authenticatable_type, $factor->authenticatable_id);
+            ->refreshCachedStateFor($factor->user_id);
 
         static::saved($forget);
         static::deleted($forget);
@@ -58,10 +57,10 @@ class MfaFactor extends Model
         ];
     }
 
-    /** @return MorphTo<Model, $this> */
-    public function authenticatable(): MorphTo
+    /** @return BelongsTo<Model, $this> */
+    public function user(): BelongsTo
     {
-        return $this->morphTo();
+        return $this->belongsTo(Mfa::userModel(), 'user_id');
     }
 
     /** @return HasMany<MfaOtpCode, $this> */

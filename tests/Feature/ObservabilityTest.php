@@ -49,7 +49,7 @@ it('writes a queryable audit trail with reason, flow, ip and user agent', functi
     expect($row->event)->toBe('verification_failed')
         ->and($row->reason)->toBe('invalid_code')
         ->and($row->factor_type)->toBe('totp')
-        ->and($row->authenticatable_id)->toBe($user->id)
+        ->and($row->user_id)->toBe($user->id)
         ->and($row->flow_id)->not->toBeNull()
         ->and($row->ip_address)->toBe('127.0.0.1')
         ->and($row->user_agent)->toBe('PestBrowser/1.0')

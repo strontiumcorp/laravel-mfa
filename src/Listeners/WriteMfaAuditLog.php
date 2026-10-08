@@ -2,10 +2,10 @@
 
 namespace StrontiumCorp\LaravelMfa\Listeners;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use StrontiumCorp\LaravelMfa\Contracts\MfaActivity;
 use StrontiumCorp\LaravelMfa\Events\MfaEvent;
+use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use Throwable;
 
@@ -20,11 +20,11 @@ final class WriteMfaAuditLog
         }
 
         try {
-            $user = $event->user instanceof Model ? $event->user : null;
+            // user_id is a foreign key to the MFA user model only.
+            $user = is_a($event->user, Mfa::userModel()) ? $event->user : null;
 
             MfaAuditLog::query()->create([
-                'authenticatable_type' => $user?->getMorphClass(),
-                'authenticatable_id' => $user?->getKey(),
+                'user_id' => $user?->getKey(),
                 'event' => $event->name(),
                 'factor_type' => $event->factorType?->value,
                 'reason' => $event->reason?->value,
