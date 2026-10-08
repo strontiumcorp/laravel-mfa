@@ -17,6 +17,7 @@ use StrontiumCorp\LaravelMfa\Events\ChallengeDeliveryFailed;
 use StrontiumCorp\LaravelMfa\Exceptions\DeliveryFailed;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Notifications\OtpCodeNotification;
+use StrontiumCorp\LaravelMfa\Support\OtpStore;
 use Throwable;
 
 /**
@@ -39,6 +40,7 @@ class DeliverOtp implements ShouldBeEncrypted, ShouldQueue
         public readonly int $factorId,
         #[\SensitiveParameter] public readonly string $code,
         public readonly int $ttlSeconds,
+        public readonly ?int $otpId = null,
     ) {
         $this->tries = (int) config('mfa.delivery.tries');
         $this->backoff = array_map('intval', (array) config('mfa.delivery.backoff'));
@@ -84,6 +86,12 @@ class DeliverOtp implements ShouldBeEncrypted, ShouldQueue
         // calls failed() on a freshly unserialized copy of the job.
         if ($this->synchronous) {
             return;
+        }
+
+        // The code never arrived: drop it so the resend cooldown doesn't make
+        // the user wait for it.
+        if ($this->otpId !== null) {
+            app(OtpStore::class)->discard($this->otpId);
         }
 
         $factor = MfaFactor::query()->find($this->factorId);

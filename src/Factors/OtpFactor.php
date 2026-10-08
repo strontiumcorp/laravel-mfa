@@ -108,9 +108,10 @@ abstract class OtpFactor implements Factor
         }
 
         // Equivalent mutant(s): ttl is an int in config.
-        $job = new DeliverOtp($factor->getKey(), $issued['code'], (int) $this->config['ttl']); // @pest-mutate-ignore: RemoveIntegerCast
+        $job = new DeliverOtp($factor->getKey(), $issued['code'], (int) $this->config['ttl'], (int) $issued['result']->context['otp_id']); // @pest-mutate-ignore: RemoveIntegerCast
+        $queued = $this->queued();
 
-        if (empty($this->delivery['queue_connection'])) {
+        if (! $queued) {
             try {
                 $job->synchronous = true;
                 $this->bus->dispatchSync($job);
@@ -127,13 +128,13 @@ abstract class OtpFactor implements Factor
             }
         } else {
             $this->bus->dispatch(
-                $job->onConnection($this->delivery['queue_connection'])->onQueue($this->delivery['queue'] ?? null)
+                $job->onConnection($this->delivery['queue_connection'] ?: null)->onQueue($this->delivery['queue'] ?: null)
             );
         }
 
         $this->events->dispatch(new ChallengeSent($factor->authenticatable, $this->type(), null, [
             'factor_id' => $factor->getKey(),
-            'queued' => ! empty($this->delivery['queue_connection']),
+            'queued' => $queued,
         ]));
 
         // Equivalent mutant(s): streak is computed as an int.
@@ -146,6 +147,24 @@ abstract class OtpFactor implements Factor
         }
 
         return VerificationResult::success(['retry_after' => $issued['result']->context['retry_after']]);
+    }
+
+    /**
+     * Queued when a connection or a queue name is set (a queue name alone
+     * uses the default connection), unless that connection is "sync": then
+     * the code is sent inline, with immediate error feedback.
+     */
+    private function queued(): bool
+    {
+        $connection = ($this->delivery['queue_connection'] ?? null) ?: null;
+
+        if ($connection === null && empty($this->delivery['queue'])) {
+            return false;
+        }
+
+        $connection ??= config('queue.default');
+
+        return config("queue.connections.{$connection}.driver") !== 'sync';
     }
 
     public function verify(MfaFactor $factor, string $code): VerificationResult

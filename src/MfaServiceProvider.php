@@ -161,7 +161,9 @@ class MfaServiceProvider extends ServiceProvider
             'Enabled' => config('mfa.enabled') ? '<fg=green;options=bold>YES</>' : '<fg=yellow;options=bold>NO</>',
             'Factors' => implode(', ', array_map(fn ($t) => $t->value, $this->app->make(Mfa::class)->enabledTypes())) ?: 'none',
             'SMS driver' => (string) config('mfa.sms.driver'),
-            'Delivery' => config('mfa.delivery.queue_connection') ? 'queued ('.config('mfa.delivery.queue_connection').')' : 'sync',
+            'Delivery' => config('mfa.delivery.queue_connection') || config('mfa.delivery.queue')
+                ? 'queued ('.(config('mfa.delivery.queue_connection') ?: config('queue.default')).(config('mfa.delivery.queue') ? ':'.config('mfa.delivery.queue') : '').')'
+                : 'sync',
             'Enforcement' => config('mfa.enforce') ? (string) config('mfa.enforce') : 'opt-in',
             'Audit log' => config('mfa.observability.audit.enabled') ? 'on' : 'off',
         ]);

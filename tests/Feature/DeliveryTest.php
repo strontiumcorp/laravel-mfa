@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Queue;
 use StrontiumCorp\LaravelMfa\Contracts\SmsSender;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Events\ChallengeDeliveryFailed;
+use StrontiumCorp\LaravelMfa\Events\ChallengeSent;
 use StrontiumCorp\LaravelMfa\Exceptions\DeliveryFailed;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\FactorManager;
@@ -26,6 +27,49 @@ it('queues delivery with an encrypted payload when configured', function () {
 
     Queue::assertPushedOn('mfa', DeliverOtp::class, fn (DeliverOtp $job) => $job->factorId === $factor->id && $job->connection === 'redis');
     expect(new DeliverOtp(1, '123456', 300))->toBeInstanceOf(ShouldBeEncrypted::class);
+});
+
+it('queues on the default connection when only a queue name is set', function () {
+    Queue::fake();
+    config(['queue.default' => 'database', 'mfa.delivery.queue_connection' => null, 'mfa.delivery.queue' => 'mfa']);
+    app(FactorManager::class)->forgetDrivers();
+    [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+
+    $this->loginWithSession($user)->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
+
+    Queue::assertPushedOn('mfa', DeliverOtp::class, fn (DeliverOtp $job) => $job->connection === null && $job->otpId !== null);
+});
+
+it('sends inline when the delivery queue resolves to the sync connection', function () {
+    Event::fake([ChallengeSent::class]);
+    $sms = Mfa::fakeSms();
+    config(['queue.default' => 'sync', 'mfa.delivery.queue_connection' => null, 'mfa.delivery.queue' => 'mfa']);
+    app(FactorManager::class)->forgetDrivers();
+    [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+
+    $this->loginWithSession($user)->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
+
+    $sms->assertSentTo('+15555550100');
+    Event::assertDispatched(ChallengeSent::class, fn ($e) => $e->context['queued'] === false);
+});
+
+it('discards the code when a queued delivery finally fails, so the user can resend at once', function () {
+    config(['mfa.delivery.queue_connection' => 'redis']);
+    app(FactorManager::class)->forgetDrivers();
+    Queue::fake();
+    [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+    $this->loginWithSession($user)->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
+
+    // A resend is refused by the cooldown while the code is outstanding...
+    $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertStatus(429);
+
+    /** @var DeliverOtp $job */
+    $job = Queue::pushed(DeliverOtp::class)->first();
+    $job->failed(new DeliveryFailed('[twilio] HTTP 500'));
+
+    // ...but allowed once the undelivered code is gone.
+    expect($factor->otpCodes()->count())->toBe(0);
+    $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
 });
 
 it('emits a delivery-failed event when queued retries are exhausted', function () {

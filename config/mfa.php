@@ -172,9 +172,13 @@ return [
     | Code delivery
     |--------------------------------------------------------------------------
     |
-    | null => send email/SMS synchronously (simple, immediate error feedback).
-    | name => dispatch delivery to this queue connection. The job payload is
-    |         encrypted, retried with backoff, and failures emit events.
+    | Both null => send email/SMS synchronously (immediate error feedback).
+    | Either set => dispatch delivery as a job: queue_connection alone uses
+    |         that connection, queue alone uses that queue on the default
+    |         connection. The payload is encrypted, retried with backoff, and
+    |         a final failure emits an event and discards the unsent code so
+    |         the user can request another one right away. A "sync"
+    |         connection falls back to inline sending.
     |
     */
 

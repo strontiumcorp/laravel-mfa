@@ -93,8 +93,13 @@ class DoctorCommand extends Command
             $this->warn_("Cache store [{$cacheStore}] is not shared — rate limits and factor cache are per-server");
         }
 
-        if ($connection = config('mfa.delivery.queue_connection')) {
+        if (config('mfa.delivery.queue_connection') || config('mfa.delivery.queue')) {
+            $connection = config('mfa.delivery.queue_connection') ?: config('queue.default');
             $this->check("Delivery queue connection [{$connection}] exists", config("queue.connections.{$connection}") !== null);
+
+            if (config("queue.connections.{$connection}.driver") === 'sync' && app()->isProduction()) {
+                $this->warn_("Delivery queue connection [{$connection}] is \"sync\" — codes are sent inline, not queued");
+            }
         }
 
         if ($policy = config('mfa.enforce')) {
