@@ -1,0 +1,68 @@
+name: test suite
+
+# Reusable: the test job for one matrix. Callers pass the combinations:
+#   tests.yml        every push / PR: the combinations that matter (fast)
+#   full-matrix.yml  release tags, on demand, nightly: every combination
+
+on:
+  workflow_call:
+    inputs:
+      matrix:
+        description: 'JSON strategy matrix with php, laravel, stability and an optional coverage flag'
+        required: true
+        type: string
+
+jobs:
+  tests:
+    name: PHP ${{ matrix.php }} · Laravel ${{ matrix.laravel }} · ${{ matrix.stability }}${{ matrix.coverage && ' · coverage' || '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, pdo_sqlite, sqlite3, openssl
+          coverage: ${{ matrix.coverage && 'pcov' || 'none' }}
+
+      # Cache downloaded packages (not vendor/): resolution still runs fresh,
+      # so prefer-lowest/stable stay honest, but nothing is re-downloaded.
+      - name: Locate the Composer cache
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-php${{ matrix.php }}-l${{ matrix.laravel }}-${{ matrix.stability }}-${{ hashFiles('composer.json') }}
+          restore-keys: composer-${{ runner.os }}-php${{ matrix.php }}-l${{ matrix.laravel }}-${{ matrix.stability }}-
+
+      # Every Laravel 11 release now carries unpatched advisories (EOL), and
+      # Composer 2.9 blocks them by default. We still verify compatibility
+      # because apps on 11 consume this package; it does not ship Laravel.
+      - name: Allow EOL Laravel 11 for compatibility testing
+        if: matrix.laravel == '11'
+        run: composer config audit.block-insecure false
+
+      - name: Install dependencies
+        run: |
+          case "${{ matrix.laravel }}" in
+            11) testbench='^9.0' ;;
+            12) testbench='^10.0' ;;
+            13) testbench='^11.0' ;;
+            *) echo "No Testbench mapping for Laravel ${{ matrix.laravel }}" >&2; exit 1 ;;
+          esac
+          composer update --${{ matrix.stability }} --prefer-dist --no-interaction --no-progress -W \
+            --with "laravel/framework:^${{ matrix.laravel }}.0" \
+            --with "orchestra/testbench:${testbench}"
+
+      - name: Run tests
+        if: ${{ !matrix.coverage }}
+        run: vendor/bin/pest --ci --parallel
+
+      - name: Run tests with coverage
+        if: ${{ matrix.coverage }}
+        run: vendor/bin/pest --ci --parallel --coverage --min=85

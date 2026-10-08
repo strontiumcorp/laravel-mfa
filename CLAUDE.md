@@ -45,6 +45,7 @@ It must be secure, cheap per request, Octane-safe, fully tested, and observable.
 - Commits: focused, Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `ci:`, scopes like `fix(sms):`, `!` for breaking). Short scannable subject; detail goes in extra `-m` paragraphs. **No `Co-Authored-By` or any other trailer.**
 - Don't push unless asked. Pushing and tagging are the maintainer's call.
 - Releasing: `make release` (`scripts/release.sh` + `scripts/update-changelog.py`). It runs only on a clean `main` that is up to date with `origin`, runs `make ci`, infers the version from the commits (breaking → major, or minor below 1.0; `feat` → minor; else patch), prepends grouped notes to `CHANGELOG.md`, commits `chore: release vX.Y.Z`, creates an annotated tag with the notes, and pushes both atomically after you confirm. Composer reads the version from the tag; no file holds a version. Release only after CI on GitHub is green.
+- CI layout: `.github/workflows/test-suite.yml` holds the test job once (reusable, takes a JSON matrix). `tests.yml` (every push/PR) runs static analysis plus 7 combinations, under the plan's 20-concurrent-job limit so nothing queues. `full-matrix.yml` runs all 22 on `v*` tags, on demand, and nightly if `main` changed. Private repo: each job bills a whole minute, so keep per-push jobs few.
 
 ## Testing rules (each one learned the hard way)
 

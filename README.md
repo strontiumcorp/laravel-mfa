@@ -337,7 +337,7 @@ make release                       # inferred version
 make release ARGS="--minor"        # or --major / --patch / v1.2.3
 ```
 
-CI runs PHP 8.2–8.5 × Laravel 11/12/13 × lowest/stable dependencies.
+CI on every push and pull request runs static analysis plus 7 combinations: the minimum PHP with the lowest dependencies for each Laravel major, each app's real PHP/Laravel pair, and the newest PHP. The full PHP 8.2–8.5 × Laravel 11/12/13 × lowest/stable matrix (22 jobs) runs on release tags, nightly when `main` changed, and on demand (Actions → *full matrix* → *Run workflow*).
 
 Notes for contributors:
 - Tests must never write into Testbench's skeleton under `vendor/`; use a temp dir (see the `mfa:install` test). Parallel runs share it.
