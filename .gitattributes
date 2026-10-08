@@ -9,3 +9,4 @@
 /scripts           export-ignore
 /.codex            export-ignore
 /build             export-ignore
+/CLAUDE.md         export-ignore
