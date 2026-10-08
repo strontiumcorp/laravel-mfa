@@ -1,6 +1,6 @@
 # MFA integration plan — `strontiumcorp/laravel-mfa` → artistly, clone-voice, podcast-flow
 
-> **Status:** Phase 1 (package) **feature-complete and verified**: 347 tests, Laravel 11/12/13. All decisions D1–D10 are closed. The second review (§1.4c) is fixed except R5 (waiting on the FK-vs-morph decision). Release (1.5) is next: push, tag. Phases 2–6 (app integration and rollout) not started; artistly goes first.
+> **Status:** Phase 1 (package) **feature-complete and verified**: 348 tests, Laravel 11/12/13. All decisions D1–D10 are closed and the second review (§1.4c) is fully resolved. Release (1.5) is next: push, tag. Phases 2–6 (app integration and rollout) not started; artistly goes first.
 > **Last updated:** 2026-10-09
 > **Legend:** `[x]` done · `[~]` in progress / partially done · `[ ]` not started · `[!]` blocked or needs a decision
 
@@ -17,14 +17,13 @@
   - a send-limit redesign: exponential cooldown, separate budgets for confirmed and unconfirmed destinations, per-IP and global caps, rollback on refusal
 - **SMS providers:** built in are Twilio, Vonage, Infobip and Amazon SNS (SigV4 signed in-package; works from self-hosted servers), plus the `failover` and `routing` composites. Any app can enable or switch providers through config alone.
 - **Quality:**
-  - 347 tests, passing on Laravel 11, 12 and 13; line coverage ~95%
+  - 348 tests, passing on Laravel 11, 12 and 13; line coverage ~95%
   - PHPStan level 6; Pint
   - a one-off mutation pass reached 99.4% on the security code; mutation testing is now retired
 - **Tooling:** a `Makefile` task runner; parallel tests; a CI workflow (not run on GitHub yet)
 - **Naming:** `strontiumcorp/laravel-mfa`, namespace `StrontiumCorp\LaravelMfa`, with `@itsemon245` as maintainer and code owner
 
 **Next steps, in order**
-0. **R5 (§1.4c):** decide whether factors/codes/audit rows move from a polymorphic relation to a `user_id` foreign key with cascade, then implement before tagging (the schema should be final before v0.1.0).
 1. **Release (1.5):** push to `github.com/strontiumcorp/laravel-mfa`, first green CI run, tag `v0.1.0`, add `CHANGELOG.md`.
 2. **Integrate artistly (Phase 3),** then clone-voice (Phase 4), then podcast-flow (Phase 5). All decisions are closed (see Phase 0).
 
@@ -161,7 +160,7 @@ One installable package that adds MFA (authenticator app, email OTP, SMS OTP, pl
   - `composer test` and the CI workflow also run Pest with `--parallel`.
 - [!] First green CI run on GitHub: blocked on 1.5 (repo not pushed yet)
 
-### 1.4c Second independent review — `[~]` (2026-10-09; all fixed except R5)
+### 1.4c Second independent review — `[x]` (2026-10-09)
 
 Scope: security core, `src/Sms/`, integration ergonomics, docs. `make ci`, `make test-matrix` (L11/12/13) and `make typecheck-stubs` (all three apps) pass.
 
@@ -172,7 +171,7 @@ Scope: security core, `src/Sms/`, integration ergonomics, docs. `make ci`, `make
 **Open** (not fixed; need a decision or are low impact):
 - [x] R3 MEDIUM (fixed): sync SMS worst case is too slow. Each driver uses `timeout(10)` with 2 attempts (~20s per provider), so a 2–3 provider failover chain can take 40–60s. That exceeds PHP/nginx timeouts; a fatal mid-chain skips `DeliveryFailed`, leaves the code (cooldown), and shows the user a 500/504. Suggested: `connectTimeout(3)->timeout(5)`, one attempt per provider inside a failover chain (failover is the retry), or a total deadline in `FailoverSmsSender`.
 - [x] R4 MEDIUM (fixed; matters now that D8 queues from day one): when a queued `DeliverOtp` finally fails, `failed()` doesn't discard the code, so the user waits out a cooldown for a code that never arrived. Suggested: pass the OTP id into the job and discard it in `failed()`.
-- [!] R5 MEDIUM (privacy; waiting on a decision, see below): deleting a user leaves `mfa_factors` (encrypted phone/email), recovery codes and audit rows (IP, user agent) behind; morph relations have no cascade. Suggested: a `deleted` / `forceDeleted` hook in `HasMultiFactorAuthentication`, or document the cleanup. Behaviour change, so ask first.
+- [x] R5 MEDIUM (privacy; fixed with a `user_id` foreign key, see below): deleting a user leaves `mfa_factors` (encrypted phone/email), recovery codes and audit rows (IP, user agent) behind; morph relations have no cascade. Suggested: a `deleted` / `forceDeleted` hook in `HasMultiFactorAuthentication`, or document the cleanup. Behaviour change, so ask first.
 - [x] R6 LOW (won't fix, user decision 2026-10-09: inherent to per-account limits; affected users go to support / `mfa:reset`): anyone with the password can burn `verify_per_day` (50) and lock the owner out of the challenge, recovery codes included, for 24h. Known trade-off of per-account limits. Mitigate with the 1.6 "notify on daily-cap lockout" follow-up; support can `mfa:reset`.
 - [x] R7 LOW (fixed: `Redact` strips URLs, emails and phone numbers from `DeliveryFailed` and from every event's context before any sink): `DeliveryFailed` for connection errors includes Guzzle's message, which ends with the request URL (Twilio Account SID, Infobip personal base URL). Not end-user PII, but it lands in logs and the audit table. Keep only the cURL error number.
 - [x] R8 LOW (fixed: retry only when the request never reached the provider; Guzzle 7 and 8 aware): retrying on any `ConnectionException` includes read timeouts after the provider accepted the message, so the user can get two SMS (double cost). Same when failover moves on after a timeout. Accept, or retry only connect errors (cURL 6/7).
@@ -182,7 +181,7 @@ Scope: security core, `src/Sms/`, integration ergonomics, docs. `make ci`, `make
 - [x] R12 LOW (fixed): `mfa:doctor` could also check that `routes.logout_route` and `routes.home` resolve, and that `confirm_middleware`'s alias and `password.confirm` route exist (relevant to D6).
 - [x] R13 LOW (fixed: `Inertia::location()`): after a successful Inertia challenge the redirect goes to the intended URL via XHR; a non-Inertia page (Blade, download) then opens in Inertia's error modal. Use `Inertia::location()` for X-Inertia requests.
 - [x] R14 LOW (fixed): README's "`loginUsingId()` is never challenged" holds only without a session cookie (a web request that calls it persists the login). `POST /mfa/recovery-codes` with no factor returns `422 {message}` without `errors`, which json-mode.md doesn't mention.
-- R5 options (asked 2026-10-09): replace the polymorphic `authenticatable_*` columns with a constrained `user_id` foreign key. All three apps authenticate only `App\Models\User` (bigint `id`). `cascadeOnDelete()` on factors, OTP codes (via factor) and recovery codes covers every hard delete, including query-builder deletes that skip model events, which a trait hook wouldn't. Soft deletes (artistly) keep the rows until a force delete, so a restored user keeps MFA. Open points: audit rows cascade or `nullOnDelete()` (keeps security history, IP until the 90-day prune); multi-model guards are dropped.
+- R5 resolution (user decision 2026-10-09: FK, and keep audit rows until the prune). Implemented: replace the polymorphic `authenticatable_*` columns with a constrained `user_id` foreign key. All three apps authenticate only `App\Models\User` (bigint `id`). `cascadeOnDelete()` on factors, OTP codes (via factor) and recovery codes covers every hard delete, including query-builder deletes that skip model events, which a trait hook wouldn't. Soft deletes (artistly) keep the rows until a force delete, so a restored user keeps MFA. Audit rows use `nullOnDelete()`, so the security history survives until the 90-day prune. One user model only (`mfa.user_model`, default: the first guard's model); `mfa:doctor` fails when an MFA guard uses another model. The test suite now runs with SQLite foreign keys on.
 - Accepted as-is: logout on any guard clears verification for all guards (only matters for multi-guard apps; none of the three).
 
 **Checked and sound:** deny-by-default middleware and session-identity resolution (remember-me challenged, `setUser()` not); per-guard verification; enrollment allow-list; intended URL stored for plain GETs only; session regenerated on verify; pending enrollments bound to the session; settings unreachable while unverified; `OtpStore` (row lock, latest-code-only, burn after N, discard on failure, cooldown before caps); TOTP compare-and-set replay protection; atomic recovery-code consume; HMAC with key rotation and `hash_equals` over every candidate; count-before-check verify limits; `SendGuard` rollback and IPv6 /64 grouping; SigV4 (verified vectors; region regex blocks host injection); provider errors carry only status/codes, never the recipient; failover summarises non-`DeliveryFailed` exceptions by class; `SmsManager` cycle detection is Octane-safe (`finally`); the three apps only use token-based `auth:sanctum` in `api` (artistly's one `auth:sanctum` web route is in the `web` group, so covered).
@@ -418,3 +417,4 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
     - implemented: R3/R7/R8/R9 (SMS timeouts, no duplicate retries, redaction, `+` prefixes), R10 (HMAC cache keys), R4 + D8 (queue name, discard failed codes), R13 (full page visit after the challenge), D9, D5 (`enforce` roles list, `Mfa::enforceUsing()`), doctor checks (R11, R12, D6, D10), `Mfa::context()` + TypeScript type + `MfaApiKeyNotice`, docs
     - R6 closed as won't-fix (user decision); R5 waits on the FK-vs-morph decision
     - 347 tests pass; PHPStan and Pint clean; the stubs (pages and components) type-check in all three apps
+  - R5 done (user decision): MFA rows moved from a polymorphic relation to a `user_id` foreign key. Factors, OTP codes and recovery codes cascade on user delete (query-builder deletes included); audit rows are kept with `user_id` null until the prune. New `mfa.user_model` setting and a doctor check that every MFA guard uses it. R8 confirmed as implemented. 348 tests pass on Laravel 11/12/13.

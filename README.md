@@ -41,6 +41,8 @@ class User extends Authenticatable implements MultiFactorAuthenticatable
 
 Link to `route('mfa.settings')` from your account page. That's the whole integration.
 
+MFA rows belong to one user model through `user_id` foreign keys. By default that's the model of the first MFA guard; set `mfa.user_model` to override it. The user's primary key must be a big integer (Laravel's default `$table->id()`). Deleting a user deletes their factors, codes and recovery codes in the database, even for deletes that skip model events. Their audit rows stay, with `user_id` set to null, until the retention prune, so incidents can still be investigated. Soft-deleted users keep everything until they are force-deleted.
+
 Optionally, share MFA state with every page (see [Frontend context](#frontend-context)) and show the API key notice next to your API key settings (see [API keys](#api-keys)).
 
 ## How it protects your app
@@ -270,6 +272,7 @@ php artisan about --only=mfa
 - A pending enrollment is bound to the browser session that started it, and expires after 30 minutes. Another session on the same account can't read its TOTP secret or confirm it.
 - Transport error text, which can contain the recipient's address, never reaches the MFA log or audit table. The full exception goes to the app's normal error reporting.
 - Queued delivery jobs are encrypted (`ShouldBeEncrypted`).
+- Deleting a user removes their MFA secrets and destinations (foreign-key cascade); audit rows are kept, unlinked, until pruned.
 
 ## Scaling
 
