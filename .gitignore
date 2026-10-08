@@ -6,3 +6,22 @@ build/
 coverage/
 .idea/
 .vscode/
+
+# Python (scripts/update-changelog.py)
+__pycache__/
+*.py[cod]
+
+# Node (stub type-checks run against the apps' node_modules, but just in case)
+node_modules/
+
+# OS and editor leftovers
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Local env and scratch files
+.env
+.env.*
+*.log
+release-notes.md
