@@ -64,6 +64,18 @@ it('renders the Inertia page', function () {
         ->assertJsonPath('props.urls.verify', route('mfa.challenge.verify'));
 });
 
+it('leaves the challenge with a full page visit for Inertia, since the target may not be an Inertia page', function () {
+    config(['mfa.ui.driver' => 'inertia']);
+    [$user, $factor] = $this->userWithFactor(FactorType::Totp);
+    $this->loginWithSession($user)->get('/dashboard');
+
+    $this->post(route('mfa.challenge.verify'), ['factor_id' => $factor->id, 'code' => $this->currentTotpCode($factor)], ['X-Inertia' => 'true'])
+        ->assertStatus(409)
+        ->assertHeader('X-Inertia-Location', url('/dashboard'));
+
+    $this->get('/dashboard')->assertOk();
+});
+
 it('completes a TOTP challenge and returns to the intended page', function () {
     config(['mfa.ui.driver' => 'inertia']);
     Event::fake([VerificationSucceeded::class]);

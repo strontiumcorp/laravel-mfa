@@ -80,7 +80,7 @@ class ChallengeController extends Controller
 
         $intended = $this->intended($request);
 
-        return $this->ui->success($intended, 'verified', ['redirect' => $intended]);
+        return $this->ui->leave($intended, 'verified', ['redirect' => $intended]);
     }
 
     public function recover(Request $request): Response
@@ -98,7 +98,7 @@ class ChallengeController extends Controller
 
         $intended = $this->intended($request);
 
-        return $this->ui->success($intended, 'verified-with-recovery-code', [
+        return $this->ui->leave($intended, 'verified-with-recovery-code', [
             'redirect' => $intended,
             'remaining' => $result->context['remaining'],
         ]);

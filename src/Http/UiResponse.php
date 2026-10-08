@@ -58,6 +58,25 @@ final class UiResponse
     }
 
     /**
+     * Success that leaves the MFA screens for the app (after a challenge).
+     * Inertia gets a full page visit (409 + X-Inertia-Location): the target
+     * may not be an Inertia page, and a fresh load also picks up the
+     * regenerated session cleanly.
+     *
+     * @param  array<string, mixed>  $data  returned as JSON
+     */
+    public function leave(string $to, string $status, array $data = []): Response
+    {
+        if (! $this->wantsJson() && $this->request->header('X-Inertia') && class_exists(Inertia::class)) {
+            $this->request->session()->flash('mfa.status', $status);
+
+            return Inertia::location($to);
+        }
+
+        return $this->success($to, $status, $data);
+    }
+
+    /**
      * Failures become validation errors on "code": 422 for JSON, redirect-back
      * with errors for Inertia — both handled natively by Laravel.
      *
