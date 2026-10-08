@@ -15,7 +15,8 @@ final class CacheKey
     public static function for(string $bucket, string $subject): string
     {
         // Equivalent mutant: subjects are normalised (lower-case) before they get here.
-        return sprintf('mfa:%s:%s', $bucket, hash('sha256', strtolower($subject))); // @pest-mutate-ignore: UnwrapStrtolower
+        // Keyed, so a cache dump can't be brute-forced back to phone numbers.
+        return sprintf('mfa:%s:%s', $bucket, hash_hmac('sha256', strtolower($subject), (string) config('app.key'))); // @pest-mutate-ignore: UnwrapStrtolower
     }
 
     /** Stable subject for a user: model type + id (ids repeat across models). */
