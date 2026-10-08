@@ -1,0 +1,177 @@
+# JSON mode
+
+By default the MFA routes render Inertia pages. Set the `json` UI driver to drive the same flow from any frontend: a Vue/Svelte SPA, Blade with fetch, or a mobile web view.
+
+```dotenv
+MFA_UI_DRIVER=json
+```
+
+Even with the `inertia` driver, any request that sends `Accept: application/json` (and not `X-Inertia`) gets JSON. You can therefore mix the two modes: Inertia pages for the browser, JSON for a widget.
+
+Every response shape below is pinned by `tests/Feature/JsonContractTest.php`. If you change a response, update that test and this page together.
+
+## Before you start
+
+- **This is still session authentication.** Send the session cookie and the CSRF token, exactly as for any other `web` route. With axios and Laravel's default `XSRF-TOKEN` cookie this happens automatically. It is not a token API; for stateless API clients, issue tokens only after MFA.
+- All routes live under `config('mfa.routes.prefix')`, which defaults to `/mfa`. They require an authenticated session.
+- IDs in URLs and `factor_id` values are integer factor IDs from the `factors` / `pending` arrays. Non-integer values get a `422`.
+- The routes are throttled per client (`routes.throttle`, default 60/min). Exceeding that returns Laravel's standard `429`, separate from the per-user code limits below.
+
+## Detecting that MFA is needed
+
+Any protected `web` route that receives a JSON request from a user who hasn't verified yet returns:
+
+```http
+HTTP/1.1 403 Forbidden
+
+{ "message": "Multi-factor authentication required.", "error": "mfa_required", "redirect": "https://app.test/mfa/challenge" }
+```
+
+Users who are required to enroll but have no factor get `"error": "mfa_enrollment_required"`, with `redirect` pointing at `/mfa/settings`.
+
+A global response interceptor is the simplest way to handle both:
+
+```js
+axios.interceptors.response.use(null, (error) => {
+    const data = error.response?.data;
+    if (error.response?.status === 403 && data?.error?.startsWith('mfa_')) {
+        window.location.href = data.redirect; // or open your MFA modal
+    }
+    return Promise.reject(error);
+});
+```
+
+## Errors
+
+| Status | When | Body |
+|---|---|---|
+| `422` | Wrong, expired or reused code; invalid destination; unknown factor | `{ "message": "...", "errors": { "code": ["..."] } }`. Enrollment errors use the `destination` or `type` key instead of `code`. |
+| `429` | Rate limited; resend during the cooldown; too many codes to one destination today (`destination_limit`) | Same shape, plus `"retry_after": <seconds>` when known |
+| `503` | The app-wide send breaker is open (likely an attack). Logins with confirmed factors are unaffected. | Same shape |
+| `403` | Not verified yet (see above), or settings opened while a challenge is pending | `{ "error": "mfa_required", ... }` |
+
+The messages are written for end users and are safe to display as-is. For the machine-readable reason, check the audit log or the `VerificationFailed` event, not the message text.
+
+## Challenge (during login)
+
+### `GET /mfa/challenge`
+
+```json
+{
+    "factors": [
+        { "id": 7, "type": "sms", "type_label": "SMS", "label": "SMS", "destination": "+*******0100",
+          "confirmed": true, "confirmed_at": "2026-10-08T10:00:00+00:00", "last_used_at": null }
+    ],
+    "defaultFactorId": 7,
+    "hasRecoveryCodes": true,
+    "urls": { "send": "…/mfa/challenge/send", "verify": "…/mfa/challenge", "recover": "…/mfa/challenge/recover", "logout": "…/logout" },
+    "status": null,
+    "recoveryCodes": null,
+    "retryAfter": null
+}
+```
+
+- `factors` is ordered by most recently used. Destinations are always masked.
+- `urls.logout` is `null` when `config('mfa.routes.logout_route')` doesn't name an existing route.
+- If the session is already verified, or the user has no factors, the endpoint redirects to the intended page instead.
+
+### `POST /mfa/challenge/send`: email/SMS factors only
+
+```json
+{ "factor_id": 7 }
+```
+→ `{ "status": "code-sent", "retry_after": 120 }`.
+
+- `retry_after` is the number of seconds until the next resend unlocks. The cooldown grows 2 → 4 → 8 → 15 minutes, but is never longer than the code's lifetime, so use it to drive a countdown.
+- A resend during the cooldown gets `429` with the remaining `retry_after`.
+- TOTP factors return `{ "status": "code-sent" }`, and nothing is sent.
+
+### `POST /mfa/challenge`
+
+```json
+{ "factor_id": 7, "code": "482913" }
+```
+→ `{ "status": "verified", "redirect": "https://app.test/dashboard" }`
+
+The session ID is regenerated on success, so take the new cookie from the response. `redirect` is the page the user originally asked for, or `config('mfa.routes.home')` if there was none.
+
+### `POST /mfa/challenge/recover`
+
+```json
+{ "code": "ab3de-fg7hk" }
+```
+→ `{ "status": "verified-with-recovery-code", "redirect": "…", "remaining": 9 }`
+
+Codes are matched case-insensitively, ignoring spaces and dashes. When `remaining` gets low, prompt the user to regenerate their codes.
+
+## Settings (managing factors)
+
+These routes are reachable when the session is verified, or when the user has no factors yet (first enrollment). Adding or removing a factor and regenerating codes run `config('mfa.routes.confirm_middleware')` (default `password.confirm`). Over JSON, that middleware returns `423 Password confirmation required`; send the user to your confirm-password page, then retry.
+
+### `GET /mfa/settings`
+
+```json
+{
+    "factors": [ /* confirmed factors, same shape as above */ ],
+    "pending": [ /* unconfirmed factors from the last 30 minutes, same shape plus setup fields (below) */ ],
+    "availableTypes": [ { "type": "totp", "label": "Authenticator app" }, { "type": "email", "label": "Email" } ],
+    "recoveryCodesRemaining": 10,
+    "mustEnroll": false,
+    "urls": { "store": "…/mfa/factors", "confirm": "…/mfa/factors/__ID__/confirm", "resend": "…/mfa/factors/__ID__/resend",
+              "destroy": "…/mfa/factors/__ID__", "recoveryCodes": "…/mfa/recovery-codes" },
+    "status": null,
+    "recoveryCodes": null,
+    "retryAfter": null
+}
+```
+
+Replace `__ID__` in the URLs with a factor ID.
+
+A pending TOTP factor also includes `secret`, `otpauth_url` and `qr_svg`, so you can show the QR code again after a page reload. The secret is never kept in the session.
+
+Pending factors are bound to the browser session that started the enrollment, and expire after 30 minutes:
+- Another session on the same account sees an empty `pending` list.
+- Another session gets `422` ("not available") from `confirm` and `resend`.
+- If the user switches device mid-enrollment, they simply start again.
+
+### `POST /mfa/factors`: start enrollment
+
+| `type` | Body | `setup` in the response |
+|---|---|---|
+| `totp` | `{ "type": "totp" }` | `{ "secret", "otpauth_url", "qr_svg" }` |
+| `email` | `{ "type": "email", "destination": "optional@example.com" }` (defaults to the account email) | `{ "destination": "o***@example.com", "sent": true, "reason": null, "retry_after": 120 }` |
+| `sms` | `{ "type": "sms", "destination": "+1 555 555 0142" }` (E.164 with country code) | `{ "destination": "+*******0142", "sent": true, "reason": null, "retry_after": 120 }` |
+
+Response: `{ "status": "enrollment-started", "factor": { … }, "setup": { … } }`. Email/SMS enrollments also include a top-level `retry_after`.
+
+- Render `qr_svg` as markup. It's server-generated, not user input.
+- If `sent` is `false`, `reason` is a failure code such as `delivery_failed`.
+- When a send limit refuses the message, no pending factor is created, and the response is `429`/`503` on `destination`.
+- Starting a new enrollment of the same type replaces any earlier unconfirmed factor of that type.
+
+### `POST /mfa/factors/{id}/confirm`
+
+```json
+{ "code": "123456" }
+```
+→ `{ "status": "factor-enabled", "recovery_codes": ["ab3de-fg7hk", …] }`
+
+- `recovery_codes` appears only when this is the user's first factor (or they had no codes left). Show the codes once; they can't be retrieved again.
+- Confirming also marks the current session as verified.
+
+### `POST /mfa/factors/{id}/resend`
+
+Resends the code for a pending email/SMS factor. Returns `{ "status": "code-sent", "retry_after": … }`.
+
+Unconfirmed destinations have tight limits, because anyone can trigger them:
+- at most 2 messages per destination per day across all accounts (`429`, "use an authenticator app")
+- 3 new destinations per account per day
+- 10 distinct new destinations per IP per hour
+
+### `DELETE /mfa/factors/{id}`
+
+→ `{ "status": "factor-disabled" }`. Removing the last factor also deletes the user's recovery codes. IDs belonging to other users are ignored.
+
+### `POST /mfa/recovery-codes`
+
+→ `{ "status": "recovery-codes-generated", "recovery_codes": [ … ] }`. This invalidates every previous code.
