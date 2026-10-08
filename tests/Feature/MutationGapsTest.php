@@ -228,6 +228,7 @@ describe('OtpStore', function () {
     });
 
     it('reports the cooldown wait as a whole number of seconds', function () {
+        $this->freezeSecond(); // exact waits: a second boundary mid-test would give 89
         $opts = [...$this->opts, 'ttl' => 600, 'resend_cooldown' => 120];
         $this->store->issue($this->factor, $opts);
         $this->travel(30)->seconds();
@@ -262,6 +263,7 @@ describe('ChallengeService', function () {
     });
 
     it('records stage and retry_after when rate limited', function () {
+        $this->freezeSecond(); // exact waits: a second boundary between the requests would give 59
         Event::fake([Events\VerificationFailed::class]);
         config(['mfa.rate_limit.verify_per_minute' => 1]);
         [$user, $factor] = $this->userWithFactor();

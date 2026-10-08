@@ -190,6 +190,7 @@ describe('confirmed destinations (login)', function () {
 
 describe('retry_after', function () {
     it('tells the client when the next resend unlocks', function () {
+        $this->freezeSecond(); // exact waits: a second boundary mid-test would give 89
         Mfa::fakeSms();
         [$user, $factor] = $this->userWithFactor(FactorType::Sms);
         $this->loginWithSession($user);
