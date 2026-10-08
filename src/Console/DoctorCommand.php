@@ -5,14 +5,17 @@ namespace StrontiumCorp\LaravelMfa\Console;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Http\Middleware\TrustProxies;
+use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
+use Laravel\Socialite\SocialiteServiceProvider;
 use StrontiumCorp\LaravelMfa\Contracts\EnforcementPolicy;
 use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Http\Middleware\EnsureMfaVerified;
 use StrontiumCorp\LaravelMfa\Mfa;
+use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use Throwable;
 
 /**
@@ -116,6 +119,10 @@ class DoctorCommand extends Command
         }
 
         $this->checkTrustedProxies();
+        $this->checkRoutes($router);
+        $this->checkPasswordConfirmation($router);
+        $this->checkStatefulApi();
+        $this->checkDisabledFactorTypes($mfa);
 
         $this->newLine();
 
@@ -165,6 +172,87 @@ class DoctorCommand extends Command
                 ),
             default => [], // custom driver registered via Mfa::extendSms()
         };
+    }
+
+    /** Routes the MFA screens send users to must exist. */
+    private function checkRoutes(Router $router): void
+    {
+        $logout = config('mfa.routes.logout_route');
+        if (is_string($logout) && $logout !== '' && ! $router->has($logout)) {
+            $this->warn_("Logout route [{$logout}] does not exist — the challenge page hides its \"Sign out\" button (routes.logout_route)");
+        }
+
+        $home = (string) config('mfa.routes.home');
+        $this->check("Home [{$home}] resolves to a route (routes.home)", $this->safely(
+            fn () => $router->getRoutes()->match(Request::create($home)) !== null,
+        ), 'Set routes.home to a page every user can reach after the challenge');
+    }
+
+    /**
+     * password.confirm before factor changes (decision D6): the middleware
+     * must exist, and users without a password (social login) can't pass it.
+     */
+    private function checkPasswordConfirmation(Router $router): void
+    {
+        $middleware = (array) config('mfa.routes.confirm_middleware');
+
+        if (! in_array('password.confirm', $middleware, true)) {
+            return;
+        }
+
+        $this->check(
+            'password.confirm middleware and route exist (routes.confirm_middleware)',
+            isset($router->getMiddleware()['password.confirm']) && $router->has('password.confirm'),
+            'Add a password-confirmation route, or set routes.confirm_middleware to []',
+        );
+
+        if (class_exists(SocialiteServiceProvider::class)) {
+            $this->warn_('Socialite is installed: users who signed up with a social login may have no password and can\'t pass password.confirm. Set routes.confirm_middleware to [] (an MFA-verified session is enough), or give them a set-password flow');
+        }
+    }
+
+    /**
+     * Sanctum's stateful SPA mode gives "api" routes a session, but the MFA
+     * middleware is only appended to the "web" group.
+     */
+    private function checkStatefulApi(): void
+    {
+        $stateful = 'Laravel\\Sanctum\\Http\\Middleware\\EnsureFrontendRequestsAreStateful';
+        $kernel = $this->laravel->make(Kernel::class);
+        $api = method_exists($kernel, 'getMiddlewareGroups') ? ($kernel->getMiddlewareGroups()['api'] ?? []) : [];
+
+        if (in_array($stateful, $api, true) && ! in_array(EnsureMfaVerified::class, $api, true) && ! in_array('mfa', $api, true)) {
+            $this->warn_('Sanctum stateful API is on: "api" routes authenticated by session cookie are not covered by MFA. Add the "mfa" middleware to the api group (or to those routes)');
+        }
+    }
+
+    /**
+     * Disabling a factor type fails open (decision D10): users whose factors
+     * are all of that type are no longer challenged.
+     */
+    private function checkDisabledFactorTypes(Mfa $mfa): void
+    {
+        $disabled = array_values(array_filter(FactorType::cases(), fn (FactorType $type) => ! $mfa->isTypeEnabled($type)));
+
+        if ($disabled === []) {
+            return;
+        }
+
+        try {
+            $counts = MfaFactor::query()
+                ->whereNotNull('confirmed_at')
+                ->whereIn('type', array_map(fn (FactorType $type) => $type->value, $disabled))
+                ->toBase()
+                ->distinct()
+                ->get(['type', 'authenticatable_type', 'authenticatable_id'])
+                ->countBy('type');
+        } catch (Throwable) {
+            return; // tables are checked above
+        }
+
+        foreach ($counts as $type => $users) {
+            $this->warn_("{$users} user(s) have a confirmed [{$type}] factor, but [{$type}] is disabled — it no longer protects them (fail-open). Disable a type only after those users enroll another factor");
+        }
     }
 
     /**

@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Http\Middleware\TrustProxies;
@@ -111,5 +112,45 @@ describe('mfa:doctor trusted proxies (per-IP limits need the real client IP)', f
         $this->artisan('mfa:doctor')->assertSuccessful()
             ->expectsOutputToContain('Trusted proxies configured')
             ->doesntExpectOutputToContain('No trusted proxies configured');
+    });
+});
+
+describe('mfa:doctor integration checks', function () {
+    beforeEach(fn () => config(['session.driver' => 'database']));
+
+    it('warns when the logout route is missing (the Sign out button is hidden)', function () {
+        config(['mfa.routes.logout_route' => 'admin.logout']);
+
+        $this->artisan('mfa:doctor')->assertSuccessful()->expectsOutputToContain('Logout route [admin.logout] does not exist');
+    });
+
+    it('fails when routes.home does not resolve', function () {
+        config(['mfa.routes.home' => '/nowhere']);
+
+        $this->artisan('mfa:doctor')->assertFailed()->expectsOutputToContain('Home [/nowhere] resolves to a route');
+    });
+
+    it('checks password.confirm, and warns social-login apps about it (D6)', function () {
+        config(['mfa.routes.confirm_middleware' => ['password.confirm']]);
+        if (! class_exists('Laravel\Socialite\SocialiteServiceProvider')) {
+            class_alias(stdClass::class, 'Laravel\Socialite\SocialiteServiceProvider');
+        }
+
+        $this->artisan('mfa:doctor')->assertSuccessful()
+            ->expectsOutputToContain('password.confirm middleware and route exist')
+            ->expectsOutputToContain('Socialite is installed');
+    });
+
+    it('warns when Sanctum gives api routes a session that MFA does not cover', function () {
+        app(Kernel::class)->prependMiddlewareToGroup('api', 'Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful');
+
+        $this->artisan('mfa:doctor')->assertSuccessful()->expectsOutputToContain('Sanctum stateful API is on');
+    });
+
+    it('warns about users whose factor type was disabled (fail-open, D10)', function () {
+        $this->userWithFactor(FactorType::Sms);
+        config(['mfa.factors.sms.enabled' => false]);
+
+        $this->artisan('mfa:doctor')->assertSuccessful()->expectsOutputToContain('1 user(s) have a confirmed [sms] factor');
     });
 });
