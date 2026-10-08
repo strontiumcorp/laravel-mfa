@@ -40,12 +40,12 @@ analyse: ## Static analysis (PHPStan / Larastan)
 
 ci: lint analyse test ## Everything CI runs: lint, analyse, test
 
-test-laravel: ## Run the suite against another Laravel major in a scratch copy, e.g. make test-laravel VERSION=11
-	@test -n "$(VERSION)" || (echo 'Usage: make test-laravel VERSION=11|12|13' && exit 1)
-	scripts/test-laravel.sh $(VERSION)
+test-laravel: ## Run the suite against another Laravel major in a scratch copy, e.g. make test-laravel VERSION=11 [LOWEST=1]
+	@test -n "$(VERSION)" || (echo 'Usage: make test-laravel VERSION=11|12|13 [LOWEST=1]' && exit 1)
+	scripts/test-laravel.sh $(VERSION) $(if $(LOWEST),lowest,stable)
 
-test-matrix: ## Run the suite against Laravel 11, 12 and 13
-	scripts/test-laravel.sh 11 && scripts/test-laravel.sh 12 && scripts/test-laravel.sh 13
+test-matrix: ## Run the suite against Laravel 11, 12 and 13, newest and lowest dependencies (like CI)
+	for v in 11 12 13; do scripts/test-laravel.sh $$v stable && scripts/test-laravel.sh $$v lowest || exit 1; done
 
 typecheck-stubs: ## Type-check the React stubs against host apps, e.g. make typecheck-stubs APPS="../podcast-flow ../artistly"
 	@test -n "$(APPS)" || (echo 'Usage: make typecheck-stubs APPS="../app-one ../app-two"' && exit 1)

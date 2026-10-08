@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
 # Run the test suite against a given Laravel major (11, 12 or 13) in a scratch
 # copy, so the main vendor/ is left alone. The copy is reused between runs.
+# A second argument "lowest" installs the lowest allowed dependencies, like
+# CI's prefer-lowest jobs.
 set -euo pipefail
 
-version="${1:?Usage: scripts/test-laravel.sh 11|12|13}"
+version="${1:?Usage: scripts/test-laravel.sh 11|12|13 [lowest]}"
+stability="${2:-stable}"
+case "$stability" in
+  stable) lowest='' ;;
+  lowest) lowest='--prefer-lowest --prefer-stable' ;;
+  *) echo "Unknown stability: $stability (use lowest)" >&2; exit 1 ;;
+esac
 case "$version" in
   11) testbench='^9.0' ;;
   12) testbench='^10.0' ;;
@@ -12,7 +20,7 @@ case "$version" in
 esac
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-work="${TMPDIR:-/tmp}/laravel-mfa-l${version}"
+work="${TMPDIR:-/tmp}/laravel-mfa-l${version}-${stability}"
 mkdir -p "$work"
 
 rsync -a --delete --exclude vendor --exclude composer.lock --exclude .git \
@@ -24,7 +32,8 @@ cd "$work"
 [ "$version" = "11" ] && composer config audit.block-insecure false
 
 if [ ! -f "vendor/.laravel-$version" ]; then
-  composer update --no-interaction --no-progress -q -W \
+  # shellcheck disable=SC2086 # $lowest is a list of flags
+  composer update --no-interaction --no-progress -q -W $lowest \
     --with "laravel/framework:^${version}.0" --with "orchestra/testbench:${testbench}"
   touch "vendor/.laravel-$version"
 fi
@@ -32,5 +41,5 @@ fi
 # Always refresh the autoloader: sources (and namespaces) change between runs.
 composer dump-autoload -q
 
-echo "Laravel $(composer show laravel/framework 2>/dev/null | awk '/^versions/ {print $NF}')"
+echo "Laravel $(composer show laravel/framework 2>/dev/null | awk '/^versions/ {print $NF}') ($stability dependencies)"
 vendor/bin/pest --parallel
