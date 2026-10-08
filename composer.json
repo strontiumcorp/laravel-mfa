@@ -1,0 +1,74 @@
+{
+    "name": "strontiumcorp/laravel-mfa",
+    "description": "Drop-in multi-factor authentication (TOTP, email OTP, SMS OTP) for Laravel 11, 12 and 13.",
+    "type": "library",
+    "license": "proprietary",
+    "keywords": ["laravel", "mfa", "2fa", "totp", "otp", "two-factor"],
+    "homepage": "https://github.com/strontiumcorp/laravel-mfa",
+    "authors": [
+        {
+            "name": "Mojahidul Islam",
+            "email": "itsemon245@gmail.com",
+            "homepage": "https://github.com/itsemon245",
+            "role": "Maintainer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/strontiumcorp/laravel-mfa/issues",
+        "source": "https://github.com/strontiumcorp/laravel-mfa"
+    },
+    "require": {
+        "php": "^8.2",
+        "bacon/bacon-qr-code": "^2.0|^3.0",
+        "illuminate/auth": "^11.0|^12.0|^13.0",
+        "illuminate/console": "^11.0|^12.0|^13.0",
+        "illuminate/database": "^11.0|^12.0|^13.0",
+        "illuminate/http": "^11.0|^12.0|^13.0",
+        "illuminate/notifications": "^11.0|^12.0|^13.0",
+        "illuminate/queue": "^11.0|^12.0|^13.0",
+        "illuminate/routing": "^11.0|^12.0|^13.0",
+        "illuminate/support": "^11.0|^12.0|^13.0",
+        "pragmarx/google2fa": "^8.0|^9.0"
+    },
+    "require-dev": {
+        "inertiajs/inertia-laravel": "^2.0|^3.0",
+        "larastan/larastan": "^3.0",
+        "laravel/pint": "^1.18",
+        "orchestra/testbench": "^9.0|^10.0|^11.0",
+        "pestphp/pest": "^3.0|^4.0|^5.0",
+        "pestphp/pest-plugin-laravel": "^3.0|^4.0|^5.0"
+    },
+    "suggest": {
+        "inertiajs/inertia-laravel": "Required for the default 'inertia' UI driver."
+    },
+    "autoload": {
+        "psr-4": {
+            "StrontiumCorp\\LaravelMfa\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "StrontiumCorp\\LaravelMfa\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/pest --parallel",
+        "test:coverage": "@php -d xdebug.mode=coverage vendor/bin/pest --parallel --passthru-php=\"'-d' 'xdebug.mode=coverage'\" --coverage --min=85",
+        "analyse": "vendor/bin/phpstan analyse --memory-limit=1G",
+        "format": "vendor/bin/pint",
+        "lint": "vendor/bin/pint --test",
+        "ci": ["@lint", "@analyse", "@test"]
+    },
+    "extra": {
+        "laravel": {
+            "providers": ["StrontiumCorp\\LaravelMfa\\MfaServiceProvider"],
+            "aliases": {"Mfa": "StrontiumCorp\\LaravelMfa\\Facades\\Mfa"}
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {"pestphp/pest-plugin": true}
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

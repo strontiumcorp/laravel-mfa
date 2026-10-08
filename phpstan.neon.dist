@@ -1,0 +1,14 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 6
+    paths:
+        - src
+        - database
+        - routes
+    tmpDir: build/phpstan
+    treatPhpDocTypesAsCertain: false
+    ignoreErrors:
+        # Traits meant for host applications (User model, test cases).
+        - identifier: trait.unused

@@ -1,0 +1,11 @@
+/.github            export-ignore
+/tests              export-ignore
+/.gitattributes     export-ignore
+/.gitignore         export-ignore
+/phpunit.xml        export-ignore
+/phpstan.neon.dist  export-ignore
+/pint.json          export-ignore
+/Makefile          export-ignore
+/scripts           export-ignore
+/.codex            export-ignore
+/build             export-ignore
