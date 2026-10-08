@@ -36,7 +36,7 @@ jobs:
             php: '8.2'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -49,7 +49,7 @@ jobs:
       - name: Locate the Composer cache
         id: composer-cache
         run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
           key: composer-${{ runner.os }}-php${{ matrix.php }}-l${{ matrix.laravel }}-${{ matrix.stability }}-${{ hashFiles('composer.json') }}
@@ -80,7 +80,7 @@ jobs:
     name: Static analysis & style
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
@@ -88,14 +88,14 @@ jobs:
       - name: Locate the Composer cache
         id: composer-cache
         run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ${{ steps.composer-cache.outputs.dir }}
           key: composer-${{ runner.os }}-quality-${{ hashFiles('composer.json') }}
           restore-keys: composer-${{ runner.os }}-quality-
       # PHPStan's result cache: only changed files are re-analysed. Keyed per
       # commit, restored from the latest one.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: build/phpstan
           key: phpstan-${{ runner.os }}-${{ github.sha }}
