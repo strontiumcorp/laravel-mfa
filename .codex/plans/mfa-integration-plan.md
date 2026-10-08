@@ -419,3 +419,13 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
     - 347 tests pass; PHPStan and Pint clean; the stubs (pages and components) type-check in all three apps
   - R5 done (user decision): MFA rows moved from a polymorphic relation to a `user_id` foreign key. Factors, OTP codes and recovery codes cascade on user delete (query-builder deletes included); audit rows are kept with `user_id` null until the prune. New `mfa.user_model` setting and a doctor check that every MFA guard uses it. R8 confirmed as implemented. 348 tests pass on Laravel 11/12/13.
   - Release tooling: `scripts/release.sh` (`make release`) adapted from the clonevoice script. It infers the bump from Conventional Commits, groups the changelog by type, checks branch/clean tree/up to date/`make ci`, makes an annotated tag with the notes, and pushes atomically after confirmation. Tested end to end against a scratch bare remote. The clonevoice-only helpers (plugin manifest versions, skill packaging) were dropped; Composer versions come from tags.
+  - Coverage-gap pass (from the CI coverage report): 22 tests for behaviour nothing exercised. Covered:
+    - resend refused for another session's pending factor
+    - recovery codes shown to Inertia exactly once
+    - recovery-code attempts share the verify rate limit
+    - malformed codes don't spend an attempt
+    - critical log level for the send circuit breaker
+    - failing log/metrics sinks never block a login
+    - `mfa:reset` decline, mfa:doctor D5/D8/production/Kernel-style TrustProxies checks
+    - FK relations, `append_to_web_group = false`
+  - Bugs found: a late `Mfa::extend()` was ignored once a factor driver was built; `mfa:doctor` counted failures across runs in one process. README's "custom factor" section promised new factor types (e.g. passkeys) that the closed `FactorType` enum can't store; reworded to "replace a built-in factor". 370 tests; coverage 98.4%.

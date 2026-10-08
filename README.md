@@ -231,9 +231,15 @@ Mfa::extendSms('acme', fn ($app, array $config) => new AcmeSmsSender($config['to
 // config/mfa.php → 'sms' => ['driver' => 'acme', 'drivers' => ['acme' => ['token' => env('ACME_TOKEN')]]]
 ```
 
-### Custom factor
+### Replacing a factor's implementation
 
-Implement `Contracts\Factor` and register it with `Mfa::extend('passkey', fn ($app) => new PasskeyFactor(...))`.
+`Mfa::extend()` swaps the implementation of a built-in factor type (`totp`, `email` or `sms`), for example to deliver email codes through your own channel. Implement `Contracts\Factor` and register it in a service provider:
+
+```php
+Mfa::extend('email', fn ($app) => new MyEmailFactor(...));
+```
+
+The factor types themselves are fixed (`FactorType`). A new kind of factor, such as passkeys, needs package support; it's on the roadmap.
 
 ## Observability
 
