@@ -329,7 +329,7 @@ make typecheck-stubs APPS="../podcast-flow ../artistly"   # React stubs vs real 
 
 `composer test` and `composer test:coverage` run the same parallel commands.
 
-**Releasing.** `make release` tags a release from `main`. It infers the version from the commits since the last tag (Conventional Commits: a breaking change bumps major, or minor below 1.0; `feat` bumps minor; anything else bumps patch). It runs `make ci`, prepends grouped release notes to `CHANGELOG.md`, commits `chore: release vX.Y.Z`, creates an annotated tag carrying the notes, and pushes both atomically after you confirm. Composer reads the version from the tag; no file carries it.
+**Releasing.** `make release` tags a release from `main`. It infers the version from the commits since the last tag (Conventional Commits: a breaking change bumps major, or minor below 1.0; `feat` bumps minor; anything else bumps patch). It runs `make ci`, prepends grouped release notes to `CHANGELOG.md`, commits `chore: release vX.Y.Z`, creates an annotated tag carrying the notes, and pushes both atomically after you confirm. Composer reads the version from the tag; no file carries it. The tag triggers the full CI matrix, and when it passes, CI publishes the GitHub Release with the same notes.
 
 ```bash
 make release ARGS="--dry-run"      # preview the tag and notes
