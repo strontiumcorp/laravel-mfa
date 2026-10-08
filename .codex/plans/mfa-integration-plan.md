@@ -61,7 +61,7 @@ One installable package that adds MFA (authenticator app, email OTP, SMS OTP, pl
 | D7 | Rollout order | `[x]` | **artistly first** (L11, most quirks), then clone-voice (L12), then podcast-flow (L13), so the newer apps get the least friction. Phases 3–5 reordered accordingly. |
 | D8 | Code delivery mode | `[x]` | **Queued from day one.** `delivery.queue` alone queues on the default connection; `delivery.queue_connection` picks one. A `sync` connection falls back to inline sending. Failed queued deliveries discard the unsent code. Implemented 2026-10-09. Note: artistly's `.env.example` has `QUEUE_CONNECTION=sync`; confirm production runs a real queue and worker. |
 | D9 | Impersonating with an admin who has no MFA (security review #7) | `[x]` | **Option A**, implemented 2026-10-09: if the target has MFA, `grantForImpersonation()` requires the impersonator to have actually passed MFA in the session. Free with D5, since admins must enroll. |
-| D10 | Disabling a factor type in config (security review #9) | `[x]` | **Option A: keep fail-open** and document "disable a type only after users migrate" (README). `mfa:doctor` now counts users who still have factors of a disabled type. |
+| D10 | Disabling a factor type in config (security review #9) | `[x]` | **Option A: keep fail-open** and document "disable a type only after users migrate" (docs/configuration.md). `mfa:doctor` now counts users who still have factors of a disabled type. |
 
 ---
 
@@ -217,6 +217,8 @@ Scope: security core, `src/Sms/`, integration ergonomics, docs. `make ci`, `make
 ---
 
 ## Phase 2 — Integration steps (the same checklist in every app)
+
+The step-by-step guide for developers is [docs/integration.md](../../docs/integration.md); this checklist tracks it per app.
 
 Each app gets these steps on its own feature branch. App-specific deviations are in Phases 3–5.
 

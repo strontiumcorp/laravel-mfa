@@ -105,7 +105,7 @@ Don't break these. Each one is covered by tests; read them before changing the a
 - JSON responses ↔ [docs/json-mode.md](docs/json-mode.md) ↔ `tests/Feature/JsonContractTest.php`.
 - `Support\MfaContext` (PHP) ↔ `stubs/inertia-react/components/mfa-context.ts` (TypeScript) ↔ `tests/Feature/MfaContextTest.php`.
 - Inertia page props ↔ `stubs/inertia-react/*.tsx` → run `make typecheck-stubs` for all three apps.
-- Behaviour visible to integrators ↔ [README.md](README.md). New integration steps also go in the plan's Phase 2 checklist and, where sensible, `mfa:install` output or an `mfa:doctor` check.
+- Behaviour visible to integrators ↔ the docs: [README.md](README.md) is only a quickstart; integration steps go in [docs/integration.md](docs/integration.md), settings and behaviour in [docs/configuration.md](docs/configuration.md). New integration steps also go in the plan's Phase 2 checklist and, where sensible, `mfa:install` output or an `mfa:doctor` check.
 
 ## Where things live
 
