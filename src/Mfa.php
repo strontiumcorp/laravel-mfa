@@ -331,7 +331,8 @@ class Mfa
     /** Register a custom factor driver (e.g. passkeys, WhatsApp). */
     public function extend(string $type, Closure $callback): static
     {
-        $this->app->make(FactorManager::class)->extend($type, $callback);
+        // Drop drivers built already, or a late extend() would be ignored.
+        $this->app->make(FactorManager::class)->extend($type, $callback)->forgetDrivers();
 
         return $this;
     }
