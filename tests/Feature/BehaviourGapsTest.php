@@ -272,7 +272,8 @@ describe('mfa:doctor', function () {
     });
 
     it('reads trusted proxies from a Kernel-style app\'s TrustProxies (artistly)', function () {
-        require_once __DIR__.'/../Fixtures/KernelApp/TrustProxies.php';
+        // The app namespace is where mfa:doctor looks for Http\Middleware\TrustProxies.
+        (fn () => $this->namespace = 'StrontiumCorp\\LaravelMfa\\Tests\\Fixtures\\KernelApp\\')->call(app());
 
         $this->artisan('mfa:doctor')->assertSuccessful()->expectsOutputToContain('Trusted proxies configured');
     });

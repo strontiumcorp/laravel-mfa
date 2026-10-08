@@ -142,10 +142,9 @@ describe('mfa:doctor integration checks', function () {
 
     it('checks password.confirm, and warns social-login apps about it (D6)', function () {
         config(['mfa.routes.confirm_middleware' => ['password.confirm']]);
-        if (! class_exists('Laravel\Socialite\SocialiteServiceProvider')) {
-            // PHP 8.2 can't alias internal classes, so alias a fixture class.
-            class_alias(PlainUser::class, 'Laravel\Socialite\SocialiteServiceProvider');
-        }
+        // As if Socialite's (auto-discovered) provider were loaded. Per app, so
+        // nothing leaks into other tests in the same process.
+        (fn () => $this->loadedProviders['Laravel\Socialite\SocialiteServiceProvider'] = true)->call(app());
 
         $this->artisan('mfa:doctor')->assertSuccessful()
             ->expectsOutputToContain('password.confirm middleware and route exist')

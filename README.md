@@ -341,6 +341,7 @@ CI runs PHP 8.2–8.5 × Laravel 11/12/13 × lowest/stable dependencies.
 
 Notes for contributors:
 - Tests must never write into Testbench's skeleton under `vendor/`; use a temp dir (see the `mfa:install` test). Parallel runs share it.
+- Tests must not declare global classes or aliases (`class_alias`, `require` of a non-autoloaded class): each parallel worker runs many test files in one PHP process, so they leak into later files. Use fixtures under the `Tests\` namespace and per-app state instead. CI runs 2 workers; `make test PROCESSES=2` reproduces its grouping.
 - `@pest-mutate-ignore` markers in `src/` record mutants proven equivalent during a one-off mutation-testing pass, each with its reason on the line above. Mutation testing isn't part of the regular workflow (too slow).
 
 To work on it against a real app, add a path repository to the app's `composer.json`:

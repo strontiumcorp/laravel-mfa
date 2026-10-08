@@ -4,12 +4,12 @@ namespace StrontiumCorp\LaravelMfa\Console;
 
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Http\Kernel;
+use Illuminate\Foundation\Application;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
-use Laravel\Socialite\SocialiteServiceProvider;
 use StrontiumCorp\LaravelMfa\Contracts\EnforcementPolicy;
 use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
@@ -214,7 +214,8 @@ class DoctorCommand extends Command
             'Add a password-confirmation route, or set routes.confirm_middleware to []',
         );
 
-        if (class_exists(SocialiteServiceProvider::class)) {
+        // Socialite's provider is auto-discovered, so "loaded" means "installed".
+        if ($this->laravel instanceof Application && $this->laravel->providerIsLoaded('Laravel\Socialite\SocialiteServiceProvider')) {
             $this->warn_('Socialite is installed: users who signed up with a social login may have no password and can\'t pass password.confirm. Set routes.confirm_middleware to [] (an MFA-verified session is enough), or give them a set-password flow');
         }
     }
