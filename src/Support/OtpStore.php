@@ -64,9 +64,10 @@ final class OtpStore
 
                 if ($readyAt->isFuture()) {
                     return ['code' => null, 'result' => VerificationResult::failure(FailureReason::Cooldown, [
-                        // Equivalent mutants: $readyAt is in the future (so the absolute
-                        // flag doesn't matter) and timestamps are whole seconds.
-                        'retry_after' => (int) ceil(now()->diffInSeconds($readyAt, true)), // @pest-mutate-ignore: TrueToFalse,CeilToRound
+                        // Whole seconds, rounded up: $readyAt is whole seconds (from the
+                        // DB), so this is ceil() of the exact wait. Not diffInSeconds():
+                        // Carbon 2 truncates it (89 instead of 90).
+                        'retry_after' => $readyAt->getTimestamp() - now()->getTimestamp(),
                     ])];
                 }
             }
