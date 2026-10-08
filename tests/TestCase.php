@@ -18,6 +18,14 @@ abstract class TestCase extends Orchestra
 {
     use InteractsWithMfa;
 
+    /**
+     * Config applied before the providers boot, for settings read at boot
+     * (e.g. middleware.append_to_web_group). Set, then rebootWith().
+     *
+     * @var array<string, mixed>
+     */
+    public static array $bootConfig = [];
+
     protected function getPackageProviders($app): array
     {
         return [ServiceProvider::class, MfaServiceProvider::class];
@@ -37,6 +45,7 @@ abstract class TestCase extends Orchestra
             $config->set('mfa.routes.confirm_middleware', []);
             $config->set('mfa.factors.sms.enabled', true);
             $config->set('mfa.prune.schedule', false);
+            $config->set(static::$bootConfig);
         });
     }
 
@@ -119,6 +128,23 @@ abstract class TestCase extends Orchestra
     protected function freshGuards(): static
     {
         Auth::forgetGuards();
+
+        return $this;
+    }
+
+    /** Rebuild the app with boot-time config, with a migrated database. */
+    protected function rebootWith(array $config): static
+    {
+        static::$bootConfig = $config;
+
+        try {
+            $this->refreshApplication();
+        } finally {
+            static::$bootConfig = [];
+        }
+
+        $this->defineDatabaseMigrations();
+        $this->artisan('migrate');
 
         return $this;
     }
