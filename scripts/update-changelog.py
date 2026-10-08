@@ -117,12 +117,13 @@ def render_notes(tag: str, prior: str | None, commits: list[dict]) -> str:
     intro = f"Changes since `{prior}`." if prior else "Initial release."
     parts = [f"## {tag} - {today}", f"_{intro}_"]
 
-    breaking = [c for c in commits if c["breaking"]]
+    # Breaking changes are listed once, above the type sections. A first
+    # release has nothing to break, so they stay in their type section.
+    breaking = [c for c in commits if c["breaking"]] if prior else []
     if breaking:
         parts.append("### Breaking changes\n\n" + "\n".join(line(c) for c in breaking))
 
-    # Breaking changes are listed once, above the type sections.
-    rest = [c for c in commits if not c["breaking"]]
+    rest = [c for c in commits if c not in breaking]
     known = {key for key, _ in SECTIONS}
     groups = [(title, [c for c in rest if c["type"] == key]) for key, title in SECTIONS]
     groups.append((OTHER, [c for c in rest if c["type"] not in known]))
