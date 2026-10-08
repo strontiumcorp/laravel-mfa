@@ -24,7 +24,7 @@
 - **Naming:** `strontiumcorp/laravel-mfa`, namespace `StrontiumCorp\LaravelMfa`, with `@itsemon245` as maintainer and code owner
 
 **Next steps, in order**
-1. **Release (1.5):** push to `github.com/strontiumcorp/laravel-mfa`, first green CI run, tag `v0.1.0`, add `CHANGELOG.md`.
+1. **Release (1.5):** push to `github.com/strontiumcorp/laravel-mfa`, first green CI run, `make release` (tags `v0.1.0` and writes `CHANGELOG.md`).
 2. **Integrate artistly (Phase 3),** then clone-voice (Phase 4), then podcast-flow (Phase 5). All decisions are closed (see Phase 0).
 
 **Notes for picking up**
@@ -199,8 +199,8 @@ Scope: security core, `src/Sms/`, integration ergonomics, docs. `make ci`, `make
 - [x] Settle D1 (name): `strontiumcorp/laravel-mfa`, `StrontiumCorp\LaravelMfa`
 - [x] Initial commit: done as focused commits on local `main`, not pushed yet (`build/`, `vendor/` and `composer.lock` are gitignored, and `.codex/`, `Makefile`, `scripts/` are excluded from dist via `.gitattributes`)
 - [~] Create the private GitHub repo and push: repo created (`strontiumcorp/laravel-mfa`, private, empty); push pending
-- [ ] Tag `v0.1.0`
-- [ ] Add `CHANGELOG.md`
+- [ ] Tag `v0.1.0` with `make release` (dry run infers v0.1.0; needs the `origin` remote, which is not set yet)
+- [x] `CHANGELOG.md` tooling: `make release` generates it from the commits (`scripts/release.sh`, `scripts/update-changelog.py`)
 
 ### 1.6 Package follow-ups (after launch)
 - [ ] Trusted devices ("remember this device for 30 days": hashed token, revocable)
@@ -418,3 +418,4 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
     - R6 closed as won't-fix (user decision); R5 waits on the FK-vs-morph decision
     - 347 tests pass; PHPStan and Pint clean; the stubs (pages and components) type-check in all three apps
   - R5 done (user decision): MFA rows moved from a polymorphic relation to a `user_id` foreign key. Factors, OTP codes and recovery codes cascade on user delete (query-builder deletes included); audit rows are kept with `user_id` null until the prune. New `mfa.user_model` setting and a doctor check that every MFA guard uses it. R8 confirmed as implemented. 348 tests pass on Laravel 11/12/13.
+  - Release tooling: `scripts/release.sh` (`make release`) adapted from the clonevoice script. It infers the bump from Conventional Commits, groups the changelog by type, checks branch/clean tree/up to date/`make ci`, makes an annotated tag with the notes, and pushes atomically after confirmation. Tested end to end against a scratch bare remote. The clonevoice-only helpers (plugin manifest versions, skill packaging) were dropped; Composer versions come from tags.
