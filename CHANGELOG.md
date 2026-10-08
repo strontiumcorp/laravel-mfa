@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.1 - 2026-10-09
+
+_Changes since `v0.1.0`._
+
+### Other
+
+- publish the GitHub Release after a tag's full matrix passes (2f3d3cd)
+
 ## v0.1.0 - 2026-10-09
 
 _Initial release._
