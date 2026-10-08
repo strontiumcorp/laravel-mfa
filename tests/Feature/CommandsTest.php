@@ -40,12 +40,15 @@ it('resets a locked-out user with mfa:reset', function () {
         ->and(Mfa::hasConfirmedFactors($user))->toBeFalse();
 });
 
-it('publishes the UI into whichever pages directory the app uses', function (string $dir) {
+it('publishes the UI into whichever pages and components directories the app uses', function (string $dir, string $components) {
     // Never write into the shared Testbench skeleton: use a private temp dir,
     // and record the config publish instead of performing it.
     $files = new Filesystem;
     $js = sys_get_temp_dir().'/mfa-install-'.uniqid();
     $files->ensureDirectoryExists("{$js}/{$dir}");
+    // artistly has both components/ and Components/; the pages casing wins.
+    $files->ensureDirectoryExists("{$js}/components");
+    $files->ensureDirectoryExists("{$js}/Components");
     $published = [];
     Artisan::command('vendor:publish {--tag=} {--force}', function () use (&$published) {
         $published[] = $this->option('tag');
@@ -57,11 +60,17 @@ it('publishes the UI into whichever pages directory the app uses', function (str
         expect($published)->toBe(['mfa-config'])
             ->and("{$js}/{$dir}/mfa/challenge.tsx")->toBeFile()
             ->and("{$js}/{$dir}/mfa/settings.tsx")->toBeFile()
-            ->and(file_get_contents("{$js}/{$dir}/mfa/challenge.tsx"))->toBe(file_get_contents(__DIR__.'/../../stubs/inertia-react/challenge.tsx'));
+            ->and(file_get_contents("{$js}/{$dir}/mfa/challenge.tsx"))->toBe(file_get_contents(__DIR__.'/../../stubs/inertia-react/challenge.tsx'))
+            ->and("{$js}/{$components}/mfa/mfa-context.ts")->toBeFile()
+            ->and("{$js}/{$components}/mfa/api-key-notice.tsx")->toBeFile()
+            ->and("{$js}/{$dir}/mfa/components")->not->toBeDirectory();
     } finally {
         $files->deleteDirectory($js);
     }
-})->with(['Pages', 'pages']);
+})->with([
+    'Pages + Components (artistly)' => ['Pages', 'Components'],
+    'pages + components' => ['pages', 'components'],
+]);
 
 it('does not overwrite customised pages unless forced, and can skip the UI', function () {
     $files = new Filesystem;

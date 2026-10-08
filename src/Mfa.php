@@ -14,6 +14,7 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Session\Session;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 use StrontiumCorp\LaravelMfa\Contracts\CodeGenerator;
 use StrontiumCorp\LaravelMfa\Contracts\EnforcementPolicy;
 use StrontiumCorp\LaravelMfa\Contracts\Factor;
@@ -26,6 +27,7 @@ use StrontiumCorp\LaravelMfa\Exceptions\ImpersonationNotAllowed;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForRoles;
 use StrontiumCorp\LaravelMfa\Sms\SmsManager;
+use StrontiumCorp\LaravelMfa\Support\MfaContext;
 use StrontiumCorp\LaravelMfa\Support\RequestContext;
 use StrontiumCorp\LaravelMfa\Support\SessionIdentity;
 use StrontiumCorp\LaravelMfa\Testing\FakeSmsSender;
@@ -270,6 +272,40 @@ class Mfa
             'impersonator_type' => $impersonator::class,
             'impersonator_id' => $impersonator->getAuthIdentifier(),
         ]));
+    }
+
+    /**
+     * MFA state for the frontend (see Support\MfaContext), about the user who
+     * logged in to this session. Cheap: one cached lookup for unverified users.
+     */
+    public function context(?Request $request = null): MfaContext
+    {
+        $request ??= LiveContainer::getInstance()->make('request');
+        $enabled = $this->enabled();
+        $routes = $enabled && (bool) $this->config->get('mfa.routes.enabled') && Route::has('mfa.settings');
+
+        $user = null;
+        $identity = $enabled && $request->hasSession() ? $this->sessionIdentity($request) : null;
+        $model = $identity?->user();
+
+        if ($identity !== null && $model instanceof MultiFactorAuthenticatable) {
+            $user = [
+                'hasMfa' => $this->hasConfirmedFactors($model),
+                'verified' => $this->isVerifiedById($request->session(), $identity->guard, $identity->id),
+                'mustEnroll' => $this->mustEnroll($model),
+            ];
+        }
+
+        return new MfaContext(
+            enabled: $enabled,
+            factors: array_map(fn (FactorType $type) => $type->value, $this->enabledTypes()),
+            passwordConfirmation: (array) $this->config->get('mfa.routes.confirm_middleware') !== [],
+            user: $user,
+            urls: [
+                'settings' => $routes ? route('mfa.settings') : null,
+                'challenge' => $routes ? route('mfa.challenge') : null,
+            ],
+        );
     }
 
     /*

@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool mustEnroll(\StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable $user)
  * @method static \StrontiumCorp\LaravelMfa\Mfa enforceUsing(?\Closure $callback)
  * @method static bool enforcesInCode()
+ * @method static \StrontiumCorp\LaravelMfa\Support\MfaContext context(?\Illuminate\Http\Request $request = null)
  * @method static bool isVerified(\Illuminate\Contracts\Session\Session $session, \Illuminate\Contracts\Auth\Authenticatable $user, ?string $guard = null)
  * @method static bool isVerifiedFor(\Illuminate\Http\Request $request, \Illuminate\Contracts\Auth\Authenticatable $user)
  * @method static void markVerified(\Illuminate\Http\Request $request, \Illuminate\Contracts\Auth\Authenticatable $user, ?\StrontiumCorp\LaravelMfa\Enums\FactorType $via = null, array<string, mixed> $context = [])
