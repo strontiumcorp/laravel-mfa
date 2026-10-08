@@ -77,7 +77,7 @@ MFA_ENABLED=true                 # global kill switch
 MFA_TOTP_ENABLED=true
 MFA_EMAIL_ENABLED=true
 MFA_SMS_ENABLED=false
-MFA_SMS_DRIVER=twilio            # log | twilio | vonage | your own
+MFA_SMS_DRIVER=twilio            # log | twilio | vonage | infobip | sns | failover | routing | your own
 TWILIO_SID=...
 TWILIO_TOKEN=...
 TWILIO_FROM=+15550000000         # or TWILIO_MESSAGING_SERVICE_SID
@@ -87,7 +87,7 @@ MFA_LOG_CHANNEL=                 # dedicated log channel for MFA events
 
 **Enforcement.** Set `'enforce' => \StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins::class`, or point it at your own `EnforcementPolicy`. Use a class, not a closure, so `config:cache` works.
 
-**Logout link.** The challenge page's "Sign out" button posts to the route named in `routes.logout_route` (default `logout`), so an app whose logout is `POST /admin/logout` works as long as the route is named. Set it to `null` to hide the button.
+**Logout link.** The challenge page's "Sign out" button posts to the route named in `routes.logout_route` (default `logout`), so an app whose logout is `POST /admin/logout` works as long as the route is named. That route is always exempt from the middleware, so unverified users can sign out. Set it to `null` to hide the button.
 
 **Password users vs. social-login users.** Adding or removing a factor runs `password.confirm` by default (`routes.confirm_middleware`). If some users have no password, set it to `[]` or to your own middleware.
 
