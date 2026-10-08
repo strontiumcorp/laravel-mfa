@@ -34,6 +34,9 @@ class DoctorCommand extends Command
 
     public function handle(Mfa $mfa, Router $router): int
     {
+        // The command instance is reused when called more than once in a process.
+        $this->failures = $this->warnings = 0;
+
         $this->components->info('MFA integration check');
 
         $this->check('APP_KEY is set (codes are HMAC-keyed from it)', filled(config('app.key')));
