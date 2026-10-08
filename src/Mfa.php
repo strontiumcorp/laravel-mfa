@@ -206,7 +206,11 @@ class Mfa
 
     /**
      * Call right after a login-swap impersonation (Auth::loginUsingId($target)).
-     * Refuses unless the impersonator themselves is MFA-satisfied.
+     *
+     * If the target has MFA, the impersonator must have actually passed MFA
+     * in this session; having no factors is not enough (decision D9), so
+     * impersonation can never step around the target's second factor.
+     * Otherwise the impersonator only needs to be MFA-satisfied.
      */
     public function grantForImpersonation(Authenticatable $impersonator, Authenticatable $target, ?Request $request = null): void
     {
@@ -214,7 +218,11 @@ class Mfa
         // singleton was built: under Octane each request runs in a clone.
         $request ??= LiveContainer::getInstance()->make('request');
 
-        if ($impersonator instanceof MultiFactorAuthenticatable && ! $this->isSatisfied($request, $impersonator)) {
+        $allowed = $target instanceof MultiFactorAuthenticatable && $this->hasConfirmedFactors($target)
+            ? $this->isVerifiedFor($request, $impersonator)
+            : ! $impersonator instanceof MultiFactorAuthenticatable || $this->isSatisfied($request, $impersonator);
+
+        if (! $allowed) {
             throw ImpersonationNotAllowed::impersonatorNotVerified();
         }
 

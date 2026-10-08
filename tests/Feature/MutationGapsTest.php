@@ -557,7 +557,7 @@ describe('Mfa core', function () {
     });
 
     it('uses the explicitly passed request for the impersonation grant', function () {
-        [$target] = $this->userWithFactor();
+        $target = $this->makeUser(); // no MFA: an MFA target needs a verified impersonator (D9)
         $request = Request::create('/');
         $request->setLaravelSession($session = new Store('other', new ArraySessionHandler(10)));
 
@@ -569,7 +569,7 @@ describe('Mfa core', function () {
 
     it('lets an impersonator without MFA support grant, and records who it was', function () {
         Event::fake([Events\ImpersonationGranted::class]);
-        [$target] = $this->userWithFactor();
+        $target = $this->makeUser(); // no MFA: an MFA target needs a verified impersonator (D9)
         $impersonator = new GenericUser(['id' => 77]);
         $request = Request::create('/');
         $request->setLaravelSession(app('session')->driver());
@@ -581,7 +581,7 @@ describe('Mfa core', function () {
 
     it('grants under the first configured guard when the target is not logged in', function () {
         config(['auth.guards.admin' => ['driver' => 'session', 'provider' => 'users'], 'mfa.guards' => ['admin', 'web']]);
-        [$target] = $this->userWithFactor();
+        $target = $this->makeUser(); // no MFA: an MFA target needs a verified impersonator (D9)
         $request = Request::create('/');
         $request->setLaravelSession($session = app('session')->driver());
 

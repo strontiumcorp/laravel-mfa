@@ -45,13 +45,21 @@ describe('login-swap impersonation (artistly)', function () {
         Mfa::grantForImpersonation($this->admin, $this->target, request()->setLaravelSession(session()->driver()));
     })->throws(ImpersonationNotAllowed::class);
 
-    it('allows the grant for admins who have no MFA at all (not enforced)', function () {
+    it('refuses an admin without MFA when the target has MFA (D9)', function () {
         $plainAdmin = $this->makeUser(['is_admin' => true]);
+        $this->loginWithSession($plainAdmin);
+
+        Mfa::grantForImpersonation($plainAdmin, $this->target, request()->setLaravelSession(session()->driver()));
+    })->throws(ImpersonationNotAllowed::class);
+
+    it('allows an admin without MFA to impersonate a user without MFA (not enforced)', function () {
+        $plainAdmin = $this->makeUser(['is_admin' => true]);
+        $plainUser = $this->makeUser();
         $this->loginWithSession($plainAdmin);
         $request = request()->setLaravelSession(session()->driver());
 
-        Mfa::grantForImpersonation($plainAdmin, $this->target, $request);
-        Auth::loginUsingId($this->target->id);
+        Mfa::grantForImpersonation($plainAdmin, $plainUser, $request);
+        Auth::loginUsingId($plainUser->id);
 
         $this->freshGuards()->get('/dashboard')->assertOk();
     });

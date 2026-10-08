@@ -165,7 +165,7 @@ class ThrowingOtpNotification extends OtpCodeNotification
 it('[#9] resolves the current request from the live container, not the one captured at boot (Octane)', function () {
     $mfa = app(StrontiumCorp\LaravelMfa\Mfa::class);   // resolved at boot, holds the base app
     $admin = $this->makeUser();
-    [$target] = $this->userWithFactor();
+    $target = $this->makeUser(); // no MFA: an MFA target needs a verified impersonator (D9)
 
     // Octane: each request runs in a clone of the base app, set as the
     // global container instance, with its own request bound.
