@@ -31,6 +31,7 @@ function passwordRequiredJson(): array
 }
 
 it('asks for the password before adding a factor, then allows it', function () {
+    $this->freezeSecond();
     Event::fake([PasswordConfirmationRequired::class]);
     $this->loginWithSession($user = $this->makeUser());
 
