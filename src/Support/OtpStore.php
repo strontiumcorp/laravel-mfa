@@ -24,7 +24,7 @@ final class OtpStore
         private readonly CodeHasher $hasher,
     ) {}
 
-    /** Sends more than this far apart start a new cooldown streak. */
+    /** The cooldown curve counts the sends of the last hour. */
     public const STREAK_WINDOW_SECONDS = 3600;
 
     /**
@@ -34,14 +34,15 @@ final class OtpStore
      * will really be issued is $gate called (rate limits / caps), so requests
      * rejected by the cooldown never consume any quota.
      *
-     * @param  array{length: int, ttl: int, resend_cooldown: int|array<string, int|float>}  $options
+     * @param  array{length: int, ttl: int, max_attempts: int, resend_cooldown: int|array<string, int|float>}  $options
      * @param  (Closure(): (VerificationResult|null))|null  $gate  failure = refuse, null = allow
      * @return array{code: string|null, result: VerificationResult}
      */
     public function issue(MfaFactor $factor, array $options, ?Closure $gate = null): array
     {
         return DB::transaction(function () use ($factor, $options, $gate): array {
-            $cooldown = $this->cooldown($factor, $this->lock($factor), $options['resend_cooldown']);
+            $lastVerified = $this->lock($factor);
+            $cooldown = $this->cooldown($factor, $options);
 
             if ($cooldown['ready_at'] !== null && $cooldown['ready_at']->isFuture()) {
                 return ['code' => null, 'result' => VerificationResult::failure(FailureReason::Cooldown, [
@@ -56,6 +57,9 @@ final class OtpStore
                 return ['code' => null, 'result' => $refused];
             }
 
+            // Counted before the new code exists, like the streak.
+            $unverified = $this->unverifiedSends($factor, $lastVerified, $cooldown['streak']);
+
             $factor->otpCodes()->whereNull('consumed_at')->update(['consumed_at' => now()]);
 
             $code = $this->generator->otp($options['length']);
@@ -68,6 +72,9 @@ final class OtpStore
             return ['code' => $code, 'result' => VerificationResult::success([
                 'otp_id' => $otp->id,
                 'streak' => $cooldown['streak'] + 1,
+                // Sends since the last successful verification (for the
+                // "codes keep being requested" warning), this one included.
+                'unverified_sends' => $unverified + 1,
                 // When the next resend unlocks: the curve, or code expiry if sooner.
                 // Equivalent mutant: ttl is an int in config.
                 'retry_after' => min(Cooldown::after($cooldown['streak'] + 1, $options['resend_cooldown']), (int) $options['ttl']), // @pest-mutate-ignore: RemoveIntegerCast
@@ -78,66 +85,81 @@ final class OtpStore
     /**
      * Read-only view of the resend cooldown, for the challenge page: whether
      * a usable code is out, the whole seconds until a resend is allowed, and
-     * until that code expires.
+     * until that code expires. After a successful verification no code is
+     * out, but the next send may still have to wait.
      * Same maths as issue(), but no lock and no writes.
      *
-     * @param  array{length: int, resend_cooldown: int|array<string, int|float>}  $options
+     * @param  array{length: int, max_attempts: int, resend_cooldown: int|array<string, int|float>}  $options
      */
     public function status(MfaFactor $factor, array $options): ChallengeState
     {
-        $lastVerified = $factor->last_used_at === null ? null : Carbon::instance($factor->last_used_at);
-        $cooldown = $this->cooldown($factor, $lastVerified, $options['resend_cooldown']);
-
-        if ($cooldown['usable'] === null) {
-            return ChallengeState::none($options['length']);
-        }
-
+        $cooldown = $this->cooldown($factor, $options);
         // Whole seconds from timestamps, not diffInSeconds() (Carbon 2 truncates).
         $now = now()->getTimestamp();
+        $retryAfter = $cooldown['ready_at'] === null ? null : $cooldown['ready_at']->getTimestamp() - $now;
 
-        return ChallengeState::sent(
-            $cooldown['ready_at'] === null ? null : $cooldown['ready_at']->getTimestamp() - $now,
-            $cooldown['usable']->expires_at->getTimestamp() - $now,
-            $options['length'],
-        );
+        if ($cooldown['usable'] === null) {
+            return ChallengeState::none($options['length'], $retryAfter);
+        }
+
+        return ChallengeState::sent($retryAfter, $cooldown['usable']->expires_at->getTimestamp() - $now, $options['length']);
     }
 
     /**
      * The resend cooldown as issue() applies it.
      *
-     * Streak: sends since the later of "an hour ago" and the last successful
-     * verification (both reset the curve). A resend is always allowed once
-     * the latest code is unusable (expired or burned), so ready_at is null
-     * then; otherwise it is when the curve allows the next send, or when the
-     * code expires if that is sooner (it is unusable from then on). issue()'s
-     * refusal and status() both read it, so they always agree.
+     * Streak: every code sent for the factor in the last hour, whether or not
+     * it was verified, so logging in, verifying and logging out again can't
+     * restart the curve. ready_at is when the next send is allowed (null =
+     * now):
+     *  - a usable code is out: when the curve allows a resend, or when the
+     *    code expires if that is sooner (it is unusable from then on);
+     *  - the latest code was used by a successful verification: one step
+     *    lower on the curve, from that code's send (the first re-login after
+     *    a single send is free: Cooldown::after(0) is 0);
+     *  - the latest code expired or was burned by wrong guesses: now.
+     * issue()'s refusal and status() both read it, so they always agree.
      *
-     * @param  int|array<string, int|float>  $config
+     * @param  array{max_attempts: int, resend_cooldown: int|array<string, int|float>}  $options
      * @return array{streak: int, usable: MfaOtpCode|null, ready_at: Carbon|null}
      */
-    private function cooldown(MfaFactor $factor, ?Carbon $lastVerified, int|array $config): array
+    private function cooldown(MfaFactor $factor, array $options): array
     {
-        $since = now()->subSeconds(self::STREAK_WINDOW_SECONDS);
-        if ($lastVerified !== null && $lastVerified->gt($since)) {
-            $since = $lastVerified;
-        }
-
-        $streak = $factor->otpCodes()->where('created_at', '>', $since)->count();
+        $streak = $factor->otpCodes()->where('created_at', '>', now()->subSeconds(self::STREAK_WINDOW_SECONDS))->count();
 
         /** @var MfaOtpCode|null $latest */
         $latest = $factor->otpCodes()->latest('id')->first();
+
+        if ($latest !== null && $latest->wasVerified($options['max_attempts'])) {
+            $readyAt = $latest->created_at?->copy()->addSeconds(Cooldown::after($streak - 1, $options['resend_cooldown']));
+
+            return ['streak' => $streak, 'usable' => null, 'ready_at' => $readyAt];
+        }
 
         if ($latest === null || $latest->consumed_at !== null || ! $latest->expires_at->isFuture()) {
             return ['streak' => $streak, 'usable' => null, 'ready_at' => null];
         }
 
-        $readyAt = $latest->created_at?->copy()->addSeconds(Cooldown::after($streak, $config));
+        $readyAt = $latest->created_at?->copy()->addSeconds(Cooldown::after($streak, $options['resend_cooldown']));
 
         return [
             'streak' => $streak,
             'usable' => $latest,
             'ready_at' => $readyAt !== null && $readyAt->gt($latest->expires_at) ? Carbon::instance($latest->expires_at) : $readyAt,
         ];
+    }
+
+    /**
+     * Sends in the last hour since the factor's last successful verification
+     * ($streak when it wasn't verified in that hour).
+     */
+    private function unverifiedSends(MfaFactor $factor, ?Carbon $lastVerified, int $streak): int
+    {
+        if ($lastVerified === null || $lastVerified->lte(now()->subSeconds(self::STREAK_WINDOW_SECONDS))) {
+            return $streak;
+        }
+
+        return $factor->otpCodes()->where('created_at', '>', $lastVerified)->count();
     }
 
     /** @param array{max_attempts: int} $options */

@@ -148,8 +148,8 @@ abstract class OtpFactor implements Factor
             'queued' => $queued,
         ]));
 
-        // Equivalent mutant(s): streak is computed as an int.
-        $streak = (int) $issued['result']->context['streak']; // @pest-mutate-ignore: RemoveIntegerCast
+        // Equivalent mutant(s): unverified_sends is computed as an int.
+        $streak = (int) $issued['result']->context['unverified_sends']; // @pest-mutate-ignore: RemoveIntegerCast
         // Equivalent mutant(s): config ints, or numeric env strings that PHP compares numerically.
         $warnAfter = (int) config('mfa.rate_limit.warn_after_unverified_sends'); // @pest-mutate-ignore: RemoveIntegerCast
 

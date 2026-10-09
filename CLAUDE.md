@@ -86,7 +86,7 @@ Don't break these. Each one is covered by tests; read them before changing the a
 - `FactorType` is a closed enum (totp, email, sms). `Mfa::extend()` replaces a built-in implementation; it can't add types.
 
 **Concurrency and cost**
-- OTP issue/verify run under a row lock on the factor (`OtpStore`); only the latest code is valid, burned after `max_attempts`. TOTP replay protection is a compare-and-set on `last_totp_timestep`. Recovery codes are consumed with an atomic conditional update.
+- OTP issue/verify run under a row lock on the factor (`OtpStore`); only the latest code is valid, burned after `max_attempts`. The resend cooldown curve counts every send of the last hour and spans logins: a successful verification no longer resets it (the next send waits one step lower, from the used code's send; `MfaOtpCode::wasVerified()` tells a used code from a burned or expired one, no extra column). An expired or burned code still allows a send at once. TOTP replay protection is a compare-and-set on `last_totp_timestep`. Recovery codes are consumed with an atomic conditional update.
 - Rate limits count **before** checking (atomic increment), so parallel bursts can't slip through.
 - Sends (`SendGuard`) have two budgets: confirmed destinations (cooldown curve + per-account hourly cap + app-wide hourly cap, no per-IP cap) and unconfirmed ones (per-destination daily cap across all accounts, distinct new destinations per account and per IP with IPv6 grouped per /64, global circuit breaker). The cooldown is checked first; every counter is rolled back if any limit refuses.
 - A verified session costs zero MFA queries. "Has MFA" is cached; factor model events write through, and fills use `add()` so a stale read can't win.

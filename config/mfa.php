@@ -102,8 +102,11 @@ return [
             'ttl' => 600,               // seconds a code stays valid
             'max_attempts' => 5,        // wrong guesses before a code is burned
             // Wait between sends: base × multiplier^(n-1), capped at max
-            // (2 → 4 → 8 → 15 min). Resets after a successful verification
-            // or an hour without sends. A resend is always allowed once the
+            // (2 → 4 → 8 → 15 min), where n counts the codes sent in the last
+            // hour. A successful verification doesn't reset it, so logging in
+            // again and again can't send a code each time: after a used code
+            // the next one waits one step lower, from that code's send (the
+            // first re-login is free). A resend is allowed at once when the
             // current code has expired or been burned. Use an int for a flat
             // cooldown.
             'resend_cooldown' => ['base' => 120, 'multiplier' => 2, 'max' => 900],

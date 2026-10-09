@@ -41,6 +41,21 @@ class MfaOtpCode extends Model
         ];
     }
 
+    /**
+     * Used by a successful verification. verify() sets consumed_at in three
+     * cases, told apart without another column: a burned code has
+     * max_attempts wrong guesses, and an expired one was consumed after
+     * expires_at. A code consumed in the second it expired counts as
+     * verified (timestamps are whole seconds), which only makes the next
+     * send wait, never sooner.
+     */
+    public function wasVerified(int $maxAttempts): bool
+    {
+        return $this->consumed_at !== null
+            && $this->attempts < $maxAttempts
+            && $this->consumed_at->lte($this->expires_at);
+    }
+
     /** @return BelongsTo<MfaFactor, $this> */
     public function factor(): BelongsTo
     {

@@ -20,10 +20,15 @@ final class ChallengeState
         public readonly int $codeLength,
     ) {}
 
-    /** No code is out (never sent, expired or burned), or the factor isn't delivered (TOTP). */
-    public static function none(int $codeLength): self
+    /**
+     * No code is out (never sent, expired, burned or used), or the factor
+     * isn't delivered (TOTP). After a code was used by a successful
+     * verification the next send may still wait $retryAfter seconds (null or
+     * <= 0 = now): the cooldown curve spans logins.
+     */
+    public static function none(int $codeLength, ?int $retryAfter = null): self
     {
-        return new self(false, null, null, $codeLength);
+        return new self(false, $retryAfter !== null && $retryAfter > 0 ? $retryAfter : null, null, $codeLength);
     }
 
     /**

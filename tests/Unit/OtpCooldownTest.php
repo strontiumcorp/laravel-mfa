@@ -52,14 +52,31 @@ it('allows a resend as soon as the current code has been burned by wrong guesses
     expect(($this->send)()->successful)->toBeTrue();
 });
 
-it('resets the curve after a successful verification', function () {
+it('keeps the curve across a successful verification, one step lower, from that code\'s send', function () {
+    $this->freezeSecond(); // exact waits
+    $verify = fn (string $code) => expect($this->store->verify($this->factor, $code, $this->opts)->successful)->toBeTrue();
+
+    $verify($this->store->issue($this->factor, $this->opts)['code']);   // 1st send, verified
+    $verify($this->store->issue($this->factor, $this->opts)['code']);   // 2nd: at once (after(0))
+    $this->travel(30)->seconds();
+
+    $refused = ($this->send)();                                         // 3rd: one step lower than a resend
+    expect($refused->reason)->toBe(FailureReason::Cooldown)
+        ->and($refused->context['retry_after'])->toBe(90);              // 120 from the 2nd send
+
+    $this->travel(90)->seconds();
+    expect(($this->send)()->context['retry_after'])->toBe(480);         // the 3rd send: the curve goes on
+});
+
+it('does not reset the curve when last_used_at alone moves (e.g. a TOTP factor)', function () {
+    $this->freezeSecond();
     ($this->send)();
     $this->travel(120)->seconds();
-    ($this->send)();                                   // 2nd send → next wait 240
-    $this->factor->forceFill(['last_used_at' => now()])->save();   // verified
+    ($this->send)();
+    $this->factor->forceFill(['last_used_at' => now()])->save();
     $this->travel(1)->seconds();
 
-    expect(($this->send)()->context['retry_after'])->toBe(120);    // back to the start
+    expect(($this->send)()->context['retry_after'])->toBe(239);       // refused: still the 2nd send's wait
 });
 
 it('resets the curve after an hour without sends', function () {

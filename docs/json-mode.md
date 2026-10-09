@@ -74,7 +74,7 @@ The messages are written for end users and are safe to display as-is. For the ma
 ```
 
 - `factors` is ordered by most recently used. Destinations are always masked.
-- `code_sent` is `true` while an email/SMS factor has a usable code out (sent, not expired, not used or burned). `retry_after` is the whole seconds until a resend is allowed, or `null` when it is allowed now. Both survive a refresh, so use them to restore the countdown, and to skip sending a new code when one is already out. `expires_in` is the whole seconds until that code expires, or `null` when none is out: once it runs out, treat the code as gone (a resend is allowed then). TOTP factors always have `false`, `null` and `null`. Opening the page never sends a code: call `POST /mfa/challenge/send` yourself.
+- `code_sent` is `true` while an email/SMS factor has a usable code out (sent, not expired, not used or burned). `retry_after` is the whole seconds until a resend is allowed, or `null` when it is allowed now. Both survive a refresh, so use them to restore the countdown, and to skip sending a new code when one is already out. `code_sent: false` with a `retry_after` means a code was just used to verify and the next one has to wait (the cooldown spans logins): show the countdown and send when it ends, rather than sending at once (that send would get `429`). `expires_in` is the whole seconds until that code expires, or `null` when none is out: once it runs out, treat the code as gone (a resend is allowed then). TOTP factors always have `false`, `null` and `null`. Opening the page never sends a code: call `POST /mfa/challenge/send` yourself.
 - `code_length` is how many digits the factor's codes have: always `6` for TOTP, `factors.{type}.length` for email and SMS.
 - `urls.logout` is `null` when `config('mfa.routes.logout_route')` doesn't name an existing route.
 - If the session is already verified, or the user has no factors, the endpoint redirects to the intended page instead.
@@ -86,7 +86,7 @@ The messages are written for end users and are safe to display as-is. For the ma
 ```
 → `{ "status": "code-sent", "retry_after": 120 }`.
 
-- `retry_after` is the number of seconds until the next resend unlocks. The cooldown grows 2 → 4 → 8 → 15 minutes, but is never longer than the code's lifetime, so use it to drive a countdown.
+- `retry_after` is the number of seconds until the next resend unlocks. The cooldown grows 2 → 4 → 8 → 15 minutes over the codes sent in the last hour, and a successful verification doesn't reset it (the next login's code waits one step lower, from the used code's send). It is never longer than the code's lifetime, so use it to drive a countdown.
 - A resend during the cooldown gets `429` with the remaining `retry_after`, which also never runs past the current code's expiry (a resend is allowed once it has expired), so it always matches the challenge page's `retry_after`.
 - TOTP factors return `{ "status": "code-sent" }`, and nothing is sent.
 
