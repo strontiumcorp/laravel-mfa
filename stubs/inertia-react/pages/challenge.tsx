@@ -5,7 +5,7 @@ import MfaChallengeForm, { type MfaChallengeFactor } from '@/components/vendor/l
 import MfaRecoveryCodeForm from '@/components/vendor/laravel-mfa/recovery-code-form';
 import MfaSendCodeButton from '@/components/vendor/laravel-mfa/send-code-button';
 import { Head, router, useForm } from '@inertiajs/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 type Props = {
     factors: MfaChallengeFactor[];
@@ -65,6 +65,17 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
         recover.post(urls.recover, { preserveScroll: true });
     };
 
+    // retry_after is relative to the response, so pin each one to the clock
+    // when props arrive: a method shown a minute later still counts from then.
+    // The factor's own state comes first (the server's view after any send);
+    // the last send's flashed retryAfter fills in for the factor it went to.
+    const resendAt = useMemo(() => {
+        const at = (seconds: number | null | undefined) => (seconds ? Date.now() + seconds * 1000 : null);
+
+        return new Map(factors.map((f) => [f.id, at(f.retry_after) ?? (f.id === sentToId ? at(retryAfter) : null)]));
+    }, [factors, retryAfter, status]);
+    const resendIn = (id: number) => Math.max(0, Math.ceil(((resendAt.get(id) ?? 0) - Date.now()) / 1000));
+
     const signOut = logoutUrl ? () => router.post(logoutUrl) : undefined;
     const sentHere = sentToId === factorId;
     // A code is out: from the server (it survives a refresh), or the send just answered.
@@ -106,8 +117,7 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
                             <MfaSendCodeButton
                                 onSend={sendCode}
                                 processing={send.processing}
-                                // After a send, the flash; after a refresh, the server's cooldown for this factor.
-                                retryAfter={(sentHere ? retryAfter : null) ?? factor.retry_after ?? null}
+                                retryAfter={resendIn(factor.id) || null}
                                 sent={codeOut}
                                 error={send.errors.code}
                             />

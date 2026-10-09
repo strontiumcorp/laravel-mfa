@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import MfaChallenge from '../../stubs/inertia-react/pages/challenge';
@@ -146,6 +146,35 @@ describe('challenge page', () => {
         expect(description()).toHaveTextContent('Enter the 6-digit code we sent to j***@example.com.');
         expect(screen.getByText(/Didn't get it\?/)).toHaveTextContent("Didn't get it? Resend in 0:58");
         expect(screen.getByRole('button', { name: 'Resend in 0:58' })).toBeDisabled();
+    });
+
+    describe('countdowns while the page is open', () => {
+        // Real time still moves, so userEvent works; advanceTimersByTime() jumps ahead.
+        beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
+        const wait = (seconds: number) => act(() => vi.advanceTimersByTime(seconds * 1000));
+
+        it("counts each method's cooldown from page load, not from when it is shown", async () => {
+            const sent = factors.map((f) => (f.id === 2 ? { ...f, code_sent: true, retry_after: null } : f.id === 3 ? { ...f, code_sent: true, retry_after: 60 } : f));
+            render(<MfaChallenge {...props} factors={sent} defaultFactorId={2} />);
+
+            wait(50);
+            await choose('Text message');
+
+            expect(screen.getByRole('button', { name: 'Resend in 0:10' })).toBeDisabled();
+            expect(inertia.requests).toEqual([]);
+        });
+
+        it('counts a send from when it answered, across switching methods', async () => {
+            const { rerender } = render(<MfaChallenge {...props} defaultFactorId={2} />);
+            rerender(<MfaChallenge {...props} factors={withSent(2, 120)} defaultFactorId={2} status="code-sent" retryAfter={120} />);
+
+            await choose('Authenticator app');
+            wait(30);
+            await choose('Email');
+
+            expect(screen.getByRole('button', { name: 'Resend in 1:30' })).toBeDisabled();
+            expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 2 } }]);
+        });
     });
 
     it('switches to a recovery code and back to the list, and signs out', async () => {
