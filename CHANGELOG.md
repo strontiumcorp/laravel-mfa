@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.0 - 2026-10-09
+
+_Changes since `v0.1.1`._
+
+### Breaking changes
+
+- standalone React components, recommended types, required factor types for enforced users (c8139e4)
+
+### Documentation
+
+- split the README into a quickstart, an integration guide and a reference (a0f7c41)
+
 ## v0.1.1 - 2026-10-09
 
 _Changes since `v0.1.0`._
