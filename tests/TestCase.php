@@ -42,7 +42,8 @@ abstract class TestCase extends Orchestra
             $config->set('cache.default', 'array');
             $config->set('session.driver', 'array');
             $config->set('mfa.ui.driver', 'json');
-            $config->set('mfa.routes.confirm_middleware', []);
+            // Tests that need the password prompt turn it on.
+            $config->set('mfa.routes.password_confirmation', false);
             $config->set('mfa.factors.sms.enabled', true);
             $config->set('mfa.prune.schedule', false);
             $config->set(static::$bootConfig);

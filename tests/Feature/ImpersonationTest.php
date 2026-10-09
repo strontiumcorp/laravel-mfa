@@ -39,6 +39,17 @@ describe('login-swap impersonation (artistly)', function () {
             ->toMatchArray(['impersonator_id' => $this->admin->id]);
     });
 
+    it('does not let the admin\'s own password confirmation change the target\'s factors', function () {
+        config(['mfa.routes.password_confirmation' => true]);
+        $factor = $this->target->mfaFactors()->sole();
+        $this->actingAsMfaVerified($this->admin)->withConfirmedPassword()->post("/admin/switch/{$this->target->id}", ['grant' => 1]);
+
+        $this->freshGuards()->deleteJson(route('mfa.factors.destroy', $factor))->assertStatus(423);
+        // Only the target's password would do, which the admin doesn't have.
+        $this->postJson(route('mfa.password.confirm'), ['password' => 'admin-guess'])->assertStatus(422);
+        expect($factor->fresh())->not->toBeNull();
+    });
+
     it('refuses the grant when the admin has not passed MFA', function () {
         $this->loginWithSession($this->admin);
 

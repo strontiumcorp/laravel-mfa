@@ -7,6 +7,7 @@ use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Support\Facades\Artisan;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
+use StrontiumCorp\LaravelMfa\Tests\Fixtures\ExemptSocialLogins;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\PlainUser;
 
 it('passes mfa:doctor on a correctly integrated app', function () {
@@ -63,13 +64,14 @@ it('publishes the pages into the app\'s pages directory and the components into 
             ->expectsOutputToContain("{$js}/components/vendor/laravel-mfa/challenge-form.tsx")
             ->expectsOutputToContain("from '@/{$dir}/mfa/mfa-context'")
             ->expectsOutputToContain("from '@/components/vendor/laravel-mfa/api-key-notice'")
+            ->expectsOutputToContain('routes.password_confirmation_policy')
             ->doesntExpectOutputToContain('earlier version');
 
         expect($published)->toBe(['mfa-config'])
             ->and($names("{$js}/{$dir}/mfa"))->toBe(['challenge.tsx', 'mfa-context.ts', 'settings.tsx'])
             ->and(file_get_contents("{$js}/{$dir}/mfa/challenge.tsx"))->toBe(file_get_contents("{$stubs}/pages/challenge.tsx"))
             ->and($names("{$js}/components/vendor/laravel-mfa"))->toBe($names("{$stubs}/components"))
-            ->and($names("{$js}/components/vendor/laravel-mfa"))->toContain('api-key-notice.tsx', 'challenge-form.tsx', 'totp-setup.tsx')
+            ->and($names("{$js}/components/vendor/laravel-mfa"))->toContain('api-key-notice.tsx', 'challenge-form.tsx', 'totp-setup.tsx', 'password-confirm-form.tsx')
             ->and(file_get_contents("{$js}/components/vendor/laravel-mfa/totp-setup.tsx"))->toBe(file_get_contents("{$stubs}/components/totp-setup.tsx"))
             ->and("{$js}/Components/vendor")->not->toBeDirectory()
             ->and("{$js}/{$dir}/mfa/components")->not->toBeDirectory();
@@ -185,7 +187,51 @@ describe('mfa:doctor integration checks', function () {
 
         $this->artisan('mfa:doctor')->assertSuccessful()
             ->expectsOutputToContain('password.confirm middleware and route exist')
-            ->expectsOutputToContain('Socialite is installed');
+            ->expectsOutputToContain("can't pass password.confirm (routes.confirm_middleware)");
+    });
+
+    it('fails when confirm_middleware names password.confirm but the app has no such route', function () {
+        config(['mfa.routes.confirm_middleware' => ['password.confirm']]);
+        app('router')->getRoutes()->getByName('password.confirm')->name('renamed');
+        app('router')->getRoutes()->refreshNameLookups();
+
+        $this->artisan('mfa:doctor')->assertFailed()->expectsOutputToContain('or set routes.confirm_middleware to []');
+    });
+
+    it('reports the settings page\'s own password prompt, and asks social-login apps to exempt password-less users', function () {
+        config(['mfa.routes.password_confirmation' => true]);
+        (fn () => $this->loadedProviders['Laravel\Socialite\SocialiteServiceProvider'] = true)->call(app());
+
+        $this->artisan('mfa:doctor')->assertSuccessful()
+            ->expectsOutputToContain('Password asked on the MFA settings page (routes.password_confirmation)')
+            ->expectsOutputToContain('exempt the others with routes.password_confirmation_policy')
+            ->doesntExpectOutputToContain('Password confirmation is off');
+    });
+
+    it('trusts a password confirmation policy to exempt social-login users, and checks the class', function () {
+        config(['mfa.routes.password_confirmation' => true, 'mfa.routes.password_confirmation_policy' => ExemptSocialLogins::class]);
+        (fn () => $this->loadedProviders['Laravel\Socialite\SocialiteServiceProvider'] = true)->call(app());
+
+        $this->artisan('mfa:doctor')->assertSuccessful()
+            ->expectsOutputToContain('Password confirmation policy ['.ExemptSocialLogins::class.'] implements PasswordConfirmationPolicy')
+            ->doesntExpectOutputToContain('Socialite is installed');
+
+        config(['mfa.routes.password_confirmation_policy' => PlainUser::class]);
+        $this->artisan('mfa:doctor')->assertFailed()->expectsOutputToContain('implements PasswordConfirmationPolicy');
+    });
+
+    it('fails when auth.password_timeout is not set (MFA reads it as is)', function () {
+        config(['mfa.routes.password_confirmation' => true, 'auth.password_timeout' => null]);
+
+        $this->artisan('mfa:doctor')->assertFailed()->expectsOutputToContain('auth.password_timeout is set');
+    });
+
+    it('warns when password confirmation is off entirely', function () {
+        config(['mfa.routes.password_confirmation' => false, 'mfa.routes.confirm_middleware' => []]);
+
+        $this->artisan('mfa:doctor')->assertSuccessful()
+            ->expectsOutputToContain('Password confirmation is off (routes.password_confirmation)')
+            ->doesntExpectOutputToContain('Password asked on the MFA settings page');
     });
 
     it('warns when Sanctum gives api routes a session that MFA does not cover', function () {

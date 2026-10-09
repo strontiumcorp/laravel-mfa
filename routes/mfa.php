@@ -5,8 +5,11 @@ use StrontiumCorp\LaravelMfa\Http\Controllers\ChallengeController;
 use StrontiumCorp\LaravelMfa\Http\Controllers\SettingsController;
 use StrontiumCorp\LaravelMfa\Http\Middleware\BindMfaContext;
 use StrontiumCorp\LaravelMfa\Http\Middleware\EnsureMfaVerified;
+use StrontiumCorp\LaravelMfa\Http\Middleware\RequirePasswordConfirmation;
 
-$confirm = (array) config('mfa.routes.confirm_middleware');
+// The app's own middleware first (e.g. password.confirm), then MFA's inline
+// check, which passes once either one has confirmed the password.
+$confirm = [...(array) config('mfa.routes.confirm_middleware'), RequirePasswordConfirmation::class];
 $throttle = config('mfa.routes.throttle') ? ['throttle:'.config('mfa.routes.throttle')] : [];
 
 Route::prefix(config('mfa.routes.prefix'))
@@ -20,6 +23,7 @@ Route::prefix(config('mfa.routes.prefix'))
         Route::post('challenge/recover', [ChallengeController::class, 'recover'])->name('challenge.recover');
 
         Route::get('settings', [SettingsController::class, 'show'])->name('settings');
+        Route::post('confirm-password', [SettingsController::class, 'confirmPassword'])->name('password.confirm');
         Route::post('factors', [SettingsController::class, 'store'])->middleware($confirm)->name('factors.store');
         Route::post('factors/{factor}/confirm', [SettingsController::class, 'confirm'])->name('factors.confirm');
         Route::post('factors/{factor}/resend', [SettingsController::class, 'resend'])->name('factors.resend');

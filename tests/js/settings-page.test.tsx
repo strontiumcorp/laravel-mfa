@@ -11,7 +11,9 @@ const urls = {
     resend: '/mfa/factors/__ID__/resend',
     destroy: '/mfa/factors/__ID__',
     recoveryCodes: '/mfa/recovery-codes',
+    confirmPassword: '/mfa/confirm-password',
 };
+const passwordRequired = { password_confirmation_required: 'Please confirm your password to continue.' };
 const email = { id: 7, type: 'email' as const, type_label: 'Email', label: null, destination: 'j***@example.com', last_used_at: null };
 const props = {
     factors: [email],
@@ -23,13 +25,14 @@ const props = {
     recoveryCodesRemaining: 9,
     recoveryCodes: null,
     retryAfter: null,
+    passwordRetryAfter: null,
     mustEnroll: false,
     requiredTypes: [],
     status: null,
     urls,
 };
 
-beforeEach(() => inertia.requests.splice(0));
+beforeEach(() => inertia.reset());
 
 describe('settings page', () => {
     it('starts an authenticator app and an SMS method', async () => {
@@ -84,5 +87,81 @@ describe('settings page', () => {
         render(<MfaSettings {...props} factors={[]} recoveryCodes={['aaaaa-11111']} />);
 
         expect(screen.getByRole('listitem')).toHaveTextContent('aaaaa-11111');
+    });
+
+    it('asks for the password when adding a method needs it, then retries the same request', async () => {
+        inertia.respondWith(passwordRequired);
+        render(<MfaSettings {...props} />);
+
+        await userEvent.click(screen.getByRole('button', { name: 'SMS' }));
+        await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+15555550100{Enter}');
+        expect(screen.getByRole('heading', { name: 'Confirm your password' })).toBeInTheDocument();
+
+        await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
+
+        expect(inertia.requests).toEqual([
+            { method: 'post', url: urls.store, data: { type: 'sms', destination: '+15555550100' } },
+            { method: 'post', url: urls.confirmPassword, data: { password: 'secret' } },
+            { method: 'post', url: urls.store, data: { type: 'sms', destination: '+15555550100' } },
+        ]);
+        expect(screen.queryByRole('heading', { name: 'Confirm your password' })).not.toBeInTheDocument();
+    });
+
+    it('retries removing a factor and regenerating codes after the password, without asking "are you sure" again', async () => {
+        const sure = vi.spyOn(window, 'confirm').mockReturnValue(true);
+        render(<MfaSettings {...props} />);
+
+        inertia.respondWith(passwordRequired);
+        await userEvent.click(screen.getByRole('button', { name: 'Remove Email' }));
+        await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
+
+        inertia.respondWith(passwordRequired);
+        await userEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
+        await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
+
+        expect(inertia.requests.map((r) => `${r.method} ${r.url}`)).toEqual([
+            'delete /mfa/factors/7',
+            `post ${urls.confirmPassword}`,
+            'delete /mfa/factors/7',
+            `post ${urls.recoveryCodes}`,
+            `post ${urls.confirmPassword}`,
+            `post ${urls.recoveryCodes}`,
+        ]);
+        expect(sure).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps asking after a wrong password, and drops the change on cancel', async () => {
+        inertia.respondWith(passwordRequired, { password: 'The provided password is incorrect.' });
+        render(<MfaSettings {...props} />);
+
+        await userEvent.click(screen.getByRole('button', { name: 'Authenticator app (recommended)' }));
+        await userEvent.type(screen.getByLabelText('Password'), 'wrong{Enter}');
+        expect(screen.getByRole('heading', { name: 'Confirm your password' })).toBeInTheDocument();
+
+        await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+        expect(screen.queryByRole('heading', { name: 'Confirm your password' })).not.toBeInTheDocument();
+        expect(inertia.requests.map((r) => r.url)).toEqual([urls.store, urls.confirmPassword]);
+    });
+
+    it('does not ask for the password on other errors', async () => {
+        inertia.respondWith({ destination: "We can't send verification codes to this destination." });
+        render(<MfaSettings {...props} />);
+
+        await userEvent.click(screen.getByRole('button', { name: 'SMS' }));
+        await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+15555550100{Enter}');
+
+        expect(screen.queryByRole('heading', { name: 'Confirm your password' })).not.toBeInTheDocument();
+    });
+
+    it('gives the password prompt the password countdown, and the code setups only theirs', async () => {
+        const pendingSms = { ...email, id: 9, type: 'sms' as const, type_label: 'SMS', destination: '+*******0100' };
+        inertia.respondWith(passwordRequired);
+        render(<MfaSettings {...props} pending={[pendingSms]} passwordRetryAfter={60} />);
+
+        await userEvent.click(screen.getByRole('button', { name: 'Authenticator app (recommended)' }));
+
+        expect(screen.getByRole('button', { name: 'Try again in 1:00' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Resend' })).toBeEnabled();
     });
 });

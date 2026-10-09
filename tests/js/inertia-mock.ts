@@ -1,20 +1,37 @@
 // A stand-in for @inertiajs/react: records every request a page makes, so
 // tests can assert the URL and payload without a server. Use it with
 //     vi.mock('@inertiajs/react', async () => (await import('./inertia-mock')).inertia.module);
+//
+// Every request succeeds, unless a test queues errors for the next ones:
+//     inertia.respondWith({ password_confirmation_required: '...' });
 export type Request = { method: string; url: string; data: unknown };
+
+type Errors = Record<string, string>;
+type Options = { onStart?: () => void; onSuccess?: () => void; onError?: (errors: Errors) => void; onFinish?: () => void };
 
 export const inertia = (() => {
     const requests: Request[] = [];
+    const responses: (Errors | null)[] = [];
+
+    // Callbacks run in Inertia's order: start, then success or error, then finish.
+    const send = (request: Request, options: Options = {}) => {
+        requests.push(request);
+        options.onStart?.();
+        const errors = responses.shift() ?? null;
+        if (errors) options.onError?.(errors);
+        else options.onSuccess?.();
+        options.onFinish?.();
+    };
 
     const useForm = () => {
         let transform = (data: unknown) => data;
         const form = {
             processing: false,
-            errors: {} as Record<string, string>,
+            errors: {} as Errors,
             transform: (callback: (data: unknown) => unknown) => {
                 transform = callback;
             },
-            post: (url: string) => requests.push({ method: 'post', url, data: transform({}) }),
+            post: (url: string, options?: Options) => send({ method: 'post', url, data: transform({}) }, options),
             clearErrors: () => {},
         };
 
@@ -23,12 +40,18 @@ export const inertia = (() => {
 
     return {
         requests,
+        /** Answer the next requests (in order) with these validation errors; null = success. */
+        respondWith: (...errors: (Errors | null)[]) => responses.push(...errors),
+        reset: () => {
+            requests.splice(0);
+            responses.splice(0);
+        },
         module: {
             Head: () => null,
             useForm,
             router: {
-                post: (url: string, data: unknown = {}) => requests.push({ method: 'post', url, data }),
-                delete: (url: string) => requests.push({ method: 'delete', url, data: null }),
+                post: (url: string, data: unknown = {}, options?: Options) => send({ method: 'post', url, data }, options),
+                delete: (url: string, options?: Options) => send({ method: 'delete', url, data: null }, options),
             },
         },
     };

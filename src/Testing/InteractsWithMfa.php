@@ -21,6 +21,7 @@ use StrontiumCorp\LaravelMfa\Models\MfaFactor;
  *   uses(InteractsWithMfa::class);
  *   $this->loginWithSession($user)->get('/dashboard')->assertRedirect(route('mfa.challenge'));
  *   $this->actingAsMfaVerified($user)->get('/dashboard')->assertOk();
+ *   $this->actingAsMfaVerified($user)->withConfirmedPassword()->post(route('mfa.recovery-codes.store'));
  */
 trait InteractsWithMfa
 {
@@ -37,6 +38,17 @@ trait InteractsWithMfa
     {
         $this->loginWithSession($user, $guard);
         $this->app['session']->put(app(Mfa::class)->sessionKey($guard, $user->getAuthIdentifier()), now()->getTimestamp());
+
+        return $this;
+    }
+
+    /**
+     * Mark this session's password as just confirmed, so factor changes don't
+     * answer "password confirmation required" (routes.password_confirmation).
+     */
+    public function withConfirmedPassword(): static
+    {
+        app(Mfa::class)->markPasswordConfirmed($this->app['session']->driver());
 
         return $this;
     }

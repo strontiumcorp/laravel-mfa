@@ -6,12 +6,15 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Enums\FailureReason;
+use StrontiumCorp\LaravelMfa\Events\PasswordConfirmationFailed;
+use StrontiumCorp\LaravelMfa\Events\PasswordConfirmed;
 use StrontiumCorp\LaravelMfa\Exceptions\EnrollmentFailed;
 use StrontiumCorp\LaravelMfa\Http\UiResponse;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Support\EnrollmentService;
 use StrontiumCorp\LaravelMfa\Support\PendingEnrollments;
+use StrontiumCorp\LaravelMfa\Support\RateLimits;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
 use StrontiumCorp\LaravelMfa\Support\VerificationResult;
 use Symfony\Component\HttpFoundation\Response;
@@ -54,7 +57,10 @@ class SettingsController extends Controller
                 'resend' => route('mfa.factors.resend', ['factor' => '__ID__']),
                 'destroy' => route('mfa.factors.destroy', ['factor' => '__ID__']),
                 'recoveryCodes' => route('mfa.recovery-codes.store'),
+                'confirmPassword' => route('mfa.password.confirm'),
             ],
+            // Seconds until the password prompt may be tried again (its own countdown).
+            'passwordRetryAfter' => $request->session()->get(UiResponse::PASSWORD_RETRY_AFTER),
         ]);
     }
 
@@ -165,5 +171,32 @@ class SettingsController extends Controller
         return $this->ui->success(route('mfa.settings'), 'recovery-codes-generated', [
             'recovery_codes' => $this->enrollment->regenerateRecoveryCodes($user),
         ]);
+    }
+
+    /**
+     * The settings page's own password prompt (routes.password_confirmation):
+     * checks the password with the session guard's user provider and records
+     * it like Laravel's confirm-password page does (auth.password_confirmed_at).
+     */
+    public function confirmPassword(Request $request, RateLimits $limits): Response
+    {
+        $validated = $request->validate(['password' => ['required', 'string', 'max:1000']]);
+        $user = $this->sessionUser($request, $this->mfa);
+
+        if (! $limits->attemptPassword($user)) {
+            event(new PasswordConfirmationFailed($user, null, FailureReason::RateLimited));
+            $this->ui->failure(VerificationResult::failure(FailureReason::RateLimited, ['retry_after' => $limits->passwordAvailableIn($user)]), 'password');
+        }
+
+        if (! $this->mfa->validatePassword($request, $user, $validated['password'])) {
+            event(new PasswordConfirmationFailed($user, null, FailureReason::InvalidPassword));
+            $this->ui->failure(FailureReason::InvalidPassword, 'password');
+        }
+
+        $limits->clearPassword($user);
+        $this->mfa->markPasswordConfirmed($request->session());
+        event(new PasswordConfirmed($user));
+
+        return $this->ui->success(route('mfa.settings'), 'password-confirmed');
     }
 }

@@ -57,6 +57,60 @@ The server enforces this, not just the pages: a non-required factor is refused a
 
 **Upgrading from v0.1:** the top-level `'enforce'` key is now `enforcement.roles` (a list) or `enforcement.policy` (a class). The old key is still honoured when neither is set, and `mfa:doctor` warns until you move it.
 
+## Password confirmation
+
+Adding or removing a factor and regenerating recovery codes ask for the account password first, at most once per `auth.password_timeout`, Laravel's own setting (3 hours in Laravel's `config/auth.php`). MFA reads it as is, with no default of its own, and `mfa:doctor` fails if it isn't set. The MFA settings page asks itself: it shows a password prompt, then retries the change. The app needs no confirm-password page. Confirming a pending enrollment, resending its code and viewing the page never ask.
+
+```php
+'routes' => [
+    'password_confirmation' => true,             // MFA's own prompt; false = never ask
+    'password_confirmation_policy' => null,      // a Contracts\PasswordConfirmationPolicy class; null = everyone with a password
+    'confirm_middleware' => [],                  // extra middleware, e.g. ['password.confirm'] for the app's own page
+],
+```
+
+Who is asked:
+
+| Setting | Users asked |
+|---|---|
+| `password_confirmation => true` (default) | Everyone with a password, except users the `password_confirmation_policy` exempts. Users whose stored password is empty are never asked. |
+| `password_confirmation => false` | Nobody. Passing MFA in the session is enough to change factors. |
+| `confirm_middleware => ['password.confirm']` | Runs before MFA's own check, so the app's confirm page asks first. Both use the session key `auth.password_confirmed_at`, so whichever confirmed the password satisfies the other. |
+
+**Users without a password** (social login). Users whose stored password is empty (a nullable `password` column) are never asked. If social-login users have a password they don't know (e.g. a random one set at sign-up), exempt them with a policy class:
+
+```php
+class AskPasswordUsers implements \StrontiumCorp\LaravelMfa\Contracts\PasswordConfirmationPolicy
+{
+    public function mustConfirmPassword(MultiFactorAuthenticatable $user): bool
+    {
+        return $user->google_id === null;
+    }
+}
+
+// config/mfa.php
+'password_confirmation_policy' => \App\Mfa\AskPasswordUsers::class,
+```
+
+Or set `password_confirmation` to `false` to ask nobody. `mfa:doctor` checks that the policy class implements the contract, and warns when Socialite is installed with no policy, and when confirmation is off entirely.
+
+The password is checked by the session guard's user provider, as `Auth::validate()` would. Attempts are limited per account (`rate_limit.password_per_minute`, 5, and `rate_limit.password_per_day`, 20), counted before checking and cleared on success. While locked, the prompt counts down to the next allowed attempt.
+
+Events, which reach the log, the audit table and metrics like every MFA event (the password itself is never logged):
+- `PasswordConfirmationRequired`: a factor change was refused until the password is confirmed (context: `path`).
+- `PasswordConfirmed`: the password was right.
+- `PasswordConfirmationFailed`: the password was wrong (`invalid_password`), or the account is over its attempt limit (`rate_limited`).
+
+A request with no password, or one over 1000 characters, gets a validation error before any of this: it isn't counted and fires no event.
+
+`Mfa::grantForImpersonation()` drops any password confirmation in the session, because it was the impersonator's: an admin impersonating a user can't add or remove that user's factors without the user's password.
+
+In host-app tests, `$this->actingAsMfaVerified($user)->withConfirmedPassword()` (from `InteractsWithMfa`) skips the prompt.
+
+**Upgrading from v0.2:** `confirm_middleware` now defaults to `[]`, and the new `password_confirmation` (default `true`) asks on the MFA settings page instead.
+- A published config that still has `'confirm_middleware' => ['password.confirm']` keeps sending users to the app's confirm page, and works as before. Set it to `[]` to use MFA's prompt.
+- A published config with `'confirm_middleware' => []` to turn confirmation **off** (social login) now asks for the password. Add `'password_confirmation' => false`, or exempt password-less users with `password_confirmation_policy`.
+
 ## Sending limits
 
 Two separate budgets, so the protection against message bombing can't be used to lock an owner out:
@@ -136,6 +190,7 @@ php artisan mfa:reset jane@example.com             # locked-out user; verify the
 - The session ID changes after verification. Logging out clears verification even if the app doesn't invalidate the session.
 - Each logged-in guard must pass MFA on its own.
 - A user who has factors but hasn't verified can't open the MFA settings, so a stolen password can't add a factor.
+- Adding or removing a factor and regenerating recovery codes ask for the password again (see [Password confirmation](#password-confirmation)), so a stolen session alone can't change them (unless confirmation is off or the user is exempt).
 - A pending enrollment belongs to the browser session that started it and expires after 30 minutes.
 - Deleting a user deletes their factors and codes. Their audit rows stay, unlinked, until pruned.
 

@@ -28,7 +28,7 @@ class EnsureMfaVerified
     private const CHALLENGE_ROUTES = ['mfa.challenge', 'mfa.challenge.*'];
 
     /** Reachable by users who must enroll (no factor yet, or no required type). */
-    private const ENROLLMENT_ROUTES = ['mfa.settings', 'mfa.factors.*', 'mfa.recovery-codes.*'];
+    private const ENROLLMENT_ROUTES = ['mfa.settings', 'mfa.factors.*', 'mfa.recovery-codes.*', 'mfa.password.confirm'];
 
     public function __construct(private readonly Mfa $mfa) {}
 

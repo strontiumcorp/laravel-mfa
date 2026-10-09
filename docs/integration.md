@@ -38,7 +38,7 @@ services:
 ```
 
 ```bash
-composer require strontiumcorp/laravel-mfa:^0.1
+composer require strontiumcorp/laravel-mfa:^0.3
 ```
 
 The repo is private. Locally your SSH key works. CI and servers need a deploy key, or a token: `composer config --global github-oauth.github.com <token>`.
@@ -102,7 +102,8 @@ MFA_LOG_CHANNEL=mfa              # optional dedicated channel
 | `enforcement.required_types` | What those users must set up and sign in with. Default `['totp']`: an admin with only email is sent to add an authenticator app. `[]` accepts any factor. |
 | `routes.home` | Where users land after the challenge when there's no intended page. Default `/dashboard`. |
 | `routes.logout_route` | The app's named logout route. Default `logout`. |
-| `routes.confirm_middleware` | `[]` if some users have no password (social login), otherwise keep `password.confirm`. `mfa:doctor` warns when Socialite is installed. |
+| `routes.password_confirmation` | Keep `true`: the MFA settings page asks for the password before factor changes, with no confirm page needed in the app. Users with an empty password are never asked. If social-login users have a password they don't know, exempt them with `routes.password_confirmation_policy` (a `Contracts\PasswordConfirmationPolicy` class), or set `false` to ask nobody. `mfa:doctor` warns when Socialite is installed. See [configuration.md](configuration.md#password-confirmation). |
+| `routes.confirm_middleware` | `[]` (default). `['password.confirm']` sends users to the app's own confirm-password page instead of MFA's prompt. |
 | `middleware.except` | Routes a logged-in user must reach before passing MFA (e.g. a language switcher). Requests without a session login, such as webhooks, already pass. |
 
 ## 5. Check the app's auth code
@@ -119,7 +120,7 @@ Auth::loginUsingId($request->user_id);
 Mfa::grantForImpersonation($admin, auth()->user());
 ```
 
-It throws if the target has MFA and the admin hasn't passed MFA in this session. Per-request impersonation through `Auth::setUser()` needs nothing.
+It throws if the target has MFA and the admin hasn't passed MFA in this session. It also drops the admin's password confirmation, so the admin can't change the target's factors. Per-request impersonation through `Auth::setUser()` needs nothing.
 
 **`login()` or `loginUsingId()` outside browser requests** (jobs, commands). Fine when queued, because nothing is persisted. Dispatched synchronously from a web request, it would change that request's logged-in user.
 
@@ -162,8 +163,11 @@ The published files are the app's own: restyle and rearrange them freely. `mfa:i
 | `destination-setup` | `label`, `destination`, `onConfirm(code)`, `onResend()`, `processing`, `resending`, `retryAfter`, `sent`, `error` |
 | `recovery-codes-panel` | `remaining`, `codes`, `onRegenerate()`, `processing`, `confirmRegenerate?` |
 | `api-key-notice` | `enabled`, `settingsUrl`, `className` |
+| `password-confirm-form` | `onConfirm(password)`, `onCancel?`, `processing`, `error`, `retryAfter` (the settings page's `passwordRetryAfter`), `className` |
 
-The code inputs clear themselves after a failed attempt (`processing` goes back to false with an `error`). `retryAfter` drives a countdown; a new value restarts it. `totp-setup` renders `qrSvg` as HTML, so pass only the server's `qr_svg`.
+The settings page shows `password-confirm-form` when a change answers "password confirmation required" (`routes.password_confirmation`), and retries the change once the password is confirmed. The code and password inputs clear themselves after a failed attempt (`processing` goes back to false with an `error`). `retryAfter` drives a countdown; a new value restarts it. `totp-setup` renders `qrSvg` as HTML, so pass only the server's `qr_svg`.
+
+**Upgrading from v0.2.** A new component (`password-confirm-form`) and a settings page that asks for the password inline. Run `php artisan mfa:install` to add the new component (existing files are skipped); to get the new settings page, re-publish with `--force` (this overwrites customised pages) or copy the changes from `stubs/inertia-react/pages/` in the package. Then check `routes.password_confirmation` in step 4: the [config upgrade note](configuration.md#password-confirmation) says what changed.
 
 **Upgrading from v0.1.** v0.1 published `api-key-notice.tsx` and `mfa-context.ts` to `{Components|components}/mfa/`, and self-contained pages. Run `php artisan mfa:install --force` (this overwrites customised pages), change the imports as above (`<MfaApiKeyNotice />` now takes its state as props), then delete `{Components|components}/mfa/`. `mfa:install` warns while those old files remain.
 

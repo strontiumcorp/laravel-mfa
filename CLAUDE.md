@@ -73,6 +73,7 @@ Don't break these. Each one is covered by tests; read them before changing the a
 - Enforced users must hold a factor of `enforcement.required_types` (default totp). Without one they verify with what they have, then a session flag (`mfa.enroll.{guard}.{id}`, set in `markVerified()`, refreshed on factor confirm/remove) holds them on the enrollment routes, so verified requests still cost no query. With one, the challenge lists and accepts only required types (`Mfa::challengeTypes()`, checked server-side in `ChallengeService`); recovery codes still work.
 - The configured `routes.logout_route` is always reachable; MFA's own challenge routes are always reachable while a challenge is pending.
 - Settings routes are unreachable for an unverified user who has factors (a stolen password can't add a factor). Pending enrollments are bound to the session that started them (`PendingEnrollments`, 30 minutes).
+- Adding/removing a factor and regenerating recovery codes need a password confirmed within `auth.password_timeout` (`routes.password_confirmation`, `Http\Middleware\RequirePasswordConfirmation`): JSON gets `423` + `confirm_url`, Inertia a `password_confirmation_required` validation error; the page asks inline (`POST mfa.password.confirm`, rate-limited, evented) and retries. Same session key as Laravel's `password.confirm` (`auth.password_confirmed_at`), so either satisfies the other. Users with an empty password, or exempted by `routes.password_confirmation_policy`, are never asked. `auth.password_timeout` is read as is (no fallback; `mfa:doctor` fails without it). A password lockout flashes `mfa.password_retry_after`, never `mfa.retry_after` (the code countdown). `grantForImpersonation()` forgets the confirmation (it was the impersonator's).
 - `Mfa::grantForImpersonation()` (login-swap impersonation): if the target has MFA, the impersonator must have actually passed MFA in this session (D9).
 - Disabling a factor type fails open (D10): those users aren't challenged by it any more; `mfa:doctor` counts them.
 
@@ -100,7 +101,7 @@ Don't break these. Each one is covered by tests; read them before changing the a
 
 **Config**
 - `config/mfa.php` is deep-merged with the app's published copy (`ConfigMerge`), so new nested keys reach apps with old configs. Every new key needs its default in `config/mfa.php`; don't add `config('…', fallback)` defaults in code.
-- Closures can't go in config (`config:cache`). Code-level rules are classes named in config that implement a contract (`enforcement.policy`), resolved per call; the `Mfa` singleton holds no closures for them.
+- Closures can't go in config (`config:cache`). Code-level rules are classes named in config that implement a contract (`enforcement.policy`, `routes.password_confirmation_policy`), resolved per call; the `Mfa` singleton holds no closures for them.
 
 ## Contracts that must change together
 

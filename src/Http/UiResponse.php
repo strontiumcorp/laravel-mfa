@@ -15,6 +15,9 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class UiResponse
 {
+    /** Flashed instead of mfa.retry_after for the password prompt, so it never drives a code countdown. */
+    public const PASSWORD_RETRY_AFTER = 'mfa.password_retry_after';
+
     public function __construct(private readonly Request $request) {}
 
     /** @param array<string, mixed> $props */
@@ -104,10 +107,33 @@ final class UiResponse
         }
 
         if ($retryAfter !== null) {
-            $this->request->session()->flash('mfa.retry_after', $retryAfter);
+            $this->request->session()->flash($field === 'password' ? self::PASSWORD_RETRY_AFTER : 'mfa.retry_after', $retryAfter);
         }
 
         throw ValidationException::withMessages([$field => $reason->message()])->status($status);
+    }
+
+    /**
+     * A factor change that needs the password first. JSON gets 423 (like
+     * Laravel's password.confirm) with the URL to post the password to;
+     * Inertia gets a validation error under "password_confirmation_required",
+     * so the page can ask inline and retry.
+     *
+     * @throws ValidationException
+     */
+    public function passwordConfirmationRequired(string $confirmUrl): never
+    {
+        $message = 'Please confirm your password to continue.';
+
+        if ($this->wantsJson()) {
+            throw new HttpResponseException(response()->json([
+                'message' => $message,
+                'error' => 'password_confirmation_required',
+                'confirm_url' => $confirmUrl,
+            ], 423));
+        }
+
+        throw ValidationException::withMessages(['password_confirmation_required' => $message])->status(423);
     }
 
     private function wantsJson(): bool

@@ -49,6 +49,7 @@ axios.interceptors.response.use(null, (error) => {
 | `429` | Rate limited; resend during the cooldown; too many codes to one destination today (`destination_limit`) | Same shape, plus `"retry_after": <seconds>` when known |
 | `503` | The app-wide send breaker is open (likely an attack). Logins with confirmed factors are unaffected. | Same shape |
 | `403` | Not verified yet (see above), or settings opened while a challenge is pending | `{ "error": "mfa_required", ... }` |
+| `423` | A factor change needs the password first (see [Password confirmation](#password-confirmation)) | `{ "message": "...", "error": "password_confirmation_required", "confirm_url": "…/mfa/confirm-password" }` |
 
 The messages are written for end users and are safe to display as-is. For the machine-readable reason, check the audit log or the `VerificationFailed` event, not the message text.
 
@@ -106,7 +107,32 @@ Codes are matched case-insensitively, ignoring spaces and dashes. When `remainin
 
 ## Settings (managing factors)
 
-These routes are reachable when the session is verified, or when the user has no factors yet (first enrollment). Adding or removing a factor and regenerating codes run `config('mfa.routes.confirm_middleware')` (default `password.confirm`). Over JSON, that middleware returns `423 Password confirmation required`; send the user to your confirm-password page, then retry.
+These routes are reachable when the session is verified, or when the user has no factors yet (first enrollment).
+
+### Password confirmation
+
+Adding or removing a factor and regenerating recovery codes need a recently confirmed password (`config('mfa.routes.password_confirmation')`, on by default; see [configuration.md](configuration.md#password-confirmation)). Until then they answer:
+
+```http
+HTTP/1.1 423 Locked
+
+{ "message": "Please confirm your password to continue.", "error": "password_confirmation_required", "confirm_url": "https://app.test/mfa/confirm-password" }
+```
+
+Ask for the password, post it to `confirm_url`, then retry the same request. A confirmation lasts `auth.password_timeout` (3 hours in Laravel's default config). Users with an empty password, and users exempted by `routes.password_confirmation_policy`, never get the `423`.
+
+If the app sets `routes.confirm_middleware` to `['password.confirm']`, Laravel's middleware runs first and answers `423 { "message": "Password confirmation required." }` without `error`; send the user to the app's confirm-password page, then retry.
+
+### `POST /mfa/confirm-password`
+
+```json
+{ "password": "…" }
+```
+→ `{ "status": "password-confirmed" }`
+
+- A wrong password gets `422` on `password`: `{ "message": "The provided password is incorrect.", "errors": { "password": ["…"] } }`.
+- Attempts are limited per account (5 per minute, 20 per day); over the limit gets `429` on `password` with `retry_after`, even for the right password.
+- The URL is also in the settings response, as `urls.confirmPassword`. After an Inertia request is refused by the limit, the settings page's `passwordRetryAfter` holds the wait instead of `retryAfter`, which stays for code sends.
 
 ### `GET /mfa/settings`
 
@@ -118,8 +144,9 @@ These routes are reachable when the session is verified, or when the user has no
     "recoveryCodesRemaining": 10,
     "mustEnroll": false,
     "requiredTypes": [],
+    "passwordRetryAfter": null,
     "urls": { "store": "…/mfa/factors", "confirm": "…/mfa/factors/__ID__/confirm", "resend": "…/mfa/factors/__ID__/resend",
-              "destroy": "…/mfa/factors/__ID__", "recoveryCodes": "…/mfa/recovery-codes" },
+              "destroy": "…/mfa/factors/__ID__", "recoveryCodes": "…/mfa/recovery-codes", "confirmPassword": "…/mfa/confirm-password" },
     "status": null,
     "recoveryCodes": null,
     "retryAfter": null

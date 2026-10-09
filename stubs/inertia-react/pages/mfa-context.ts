@@ -21,7 +21,7 @@ export type MfaContext = {
     enabled: boolean;
     /** Factor types users can enroll. */
     factors: MfaFactorType[];
-    /** Adding/removing factors asks for the password first (routes.confirm_middleware). */
+    /** Adding/removing factors may ask for the password first (routes.password_confirmation or routes.confirm_middleware). */
     passwordConfirmation: boolean;
     /** The logged-in user; null for guests. */
     user: {

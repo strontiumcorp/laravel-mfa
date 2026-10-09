@@ -2,6 +2,7 @@
 
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\EnforceForEveryone;
+use StrontiumCorp\LaravelMfa\Tests\Fixtures\ExemptSocialLogins;
 
 // Pins the shape mirrored by stubs/inertia-react/pages/mfa-context.ts.
 // Change both together.
@@ -17,7 +18,7 @@ it('describes a guest', function () {
 });
 
 it('describes the session user', function () {
-    config(['mfa.enforcement.roles' => ['admin'], 'mfa.routes.confirm_middleware' => ['password.confirm']]);
+    config(['mfa.enforcement.roles' => ['admin'], 'mfa.routes.password_confirmation' => true]);
     [$user] = $this->userWithFactor();
     $this->loginWithSession($user);
     $request = request()->setLaravelSession(session()->driver());
@@ -37,6 +38,25 @@ it('flags users who must enroll', function () {
 
     expect(Mfa::context(request()->setLaravelSession(session()->driver()))->user)
         ->toBe(['hasMfa' => false, 'verified' => false, 'mustEnroll' => true]);
+});
+
+it('says whether the session user would be asked for their password', function () {
+    config(['mfa.routes.password_confirmation' => true, 'mfa.routes.password_confirmation_policy' => ExemptSocialLogins::class]);
+    $request = fn () => request()->setLaravelSession(session()->driver());
+
+    // A guest: whether anyone may be asked.
+    expect(Mfa::context($request())->passwordConfirmation)->toBeTrue();
+
+    $this->loginWithSession($this->makeUser(['name' => 'Google user']));
+    expect(Mfa::context($request())->passwordConfirmation)->toBeFalse();
+
+    $this->freshGuards()->loginWithSession($this->makeUser());
+    expect(Mfa::context($request())->passwordConfirmation)->toBeTrue();
+
+    // The app's own middleware may ask anyone.
+    $this->freshGuards()->loginWithSession($this->makeUser(['name' => 'Google user']));
+    config(['mfa.routes.confirm_middleware' => ['password.confirm']]);
+    expect(Mfa::context($request())->passwordConfirmation)->toBeTrue();
 });
 
 it('serialises as JSON for Inertia shared props', function () {

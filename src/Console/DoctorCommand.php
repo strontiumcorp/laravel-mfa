@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use StrontiumCorp\LaravelMfa\Contracts\EnforcementPolicy;
 use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
+use StrontiumCorp\LaravelMfa\Contracts\PasswordConfirmationPolicy;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Http\Middleware\EnsureMfaVerified;
 use StrontiumCorp\LaravelMfa\Mfa;
@@ -190,26 +191,55 @@ class DoctorCommand extends Command
     }
 
     /**
-     * password.confirm before factor changes (decision D6): the middleware
-     * must exist, and users without a password (social login) can't pass it.
+     * Password confirmation before factor changes (decision D6): MFA's own
+     * prompt (routes.password_confirmation) and/or the app's middleware
+     * (routes.confirm_middleware). Users without a password (social login)
+     * can't pass either, so apps with Socialite must exempt them.
      */
     private function checkPasswordConfirmation(Router $router): void
     {
         $middleware = (array) config('mfa.routes.confirm_middleware');
+        $appPage = in_array('password.confirm', $middleware, true);
+        $inline = (bool) config('mfa.routes.password_confirmation');
+        $policy = config('mfa.routes.password_confirmation_policy');
+        $policy = is_string($policy) && $policy !== '' ? $policy : null;
 
-        if (! in_array('password.confirm', $middleware, true)) {
+        if ($appPage) {
+            $this->check(
+                'password.confirm middleware and route exist (routes.confirm_middleware)',
+                isset($router->getMiddleware()['password.confirm']) && $router->has('password.confirm'),
+                'Add a password-confirmation route, or set routes.confirm_middleware to [] (MFA asks for the password itself: routes.password_confirmation)',
+            );
+        }
+
+        if (! $inline && $middleware === []) {
+            $this->warn_('Password confirmation is off (routes.password_confirmation): an MFA-verified session can add or remove factors without the password');
+
             return;
         }
 
-        $this->check(
-            'password.confirm middleware and route exist (routes.confirm_middleware)',
-            isset($router->getMiddleware()['password.confirm']) && $router->has('password.confirm'),
-            'Add a password-confirmation route, or set routes.confirm_middleware to []',
-        );
+        if ($inline) {
+            $this->components->twoColumnDetail('Password asked on the MFA settings page (routes.password_confirmation)', '<fg=green;options=bold>OK</>');
+            $this->check(
+                'auth.password_timeout is set (how long a confirmed password lasts)',
+                (int) config('auth.password_timeout') > 0,
+                'Set password_timeout in config/auth.php (Laravel\'s default: 10800 seconds)',
+            );
+        }
+
+        if ($policy !== null) {
+            $this->check("Password confirmation policy [{$policy}] implements PasswordConfirmationPolicy", is_subclass_of($policy, PasswordConfirmationPolicy::class));
+        }
 
         // Socialite's provider is auto-discovered, so "loaded" means "installed".
-        if ($this->laravel instanceof Application && $this->laravel->providerIsLoaded('Laravel\Socialite\SocialiteServiceProvider')) {
-            $this->warn_('Socialite is installed: users who signed up with a social login may have no password and can\'t pass password.confirm. Set routes.confirm_middleware to [] (an MFA-verified session is enough), or give them a set-password flow');
+        if (! $this->laravel instanceof Application || ! $this->laravel->providerIsLoaded('Laravel\Socialite\SocialiteServiceProvider')) {
+            return;
+        }
+
+        if ($appPage) {
+            $this->warn_('Socialite is installed: users who signed up with a social login may have no password and can\'t pass password.confirm (routes.confirm_middleware). Remove it and exempt them from MFA\'s own prompt with routes.password_confirmation_policy, or give them a set-password flow');
+        } elseif ($inline && $policy === null) {
+            $this->warn_('Socialite is installed: users who signed up with a social login may not know a password and can\'t confirm one. Users with an empty password are never asked; exempt the others with routes.password_confirmation_policy, or set routes.password_confirmation to false');
         }
     }
 

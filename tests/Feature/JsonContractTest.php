@@ -61,7 +61,7 @@ it('GET /mfa/settings and the enrollment endpoints', function () {
 
     $this->getJson('/mfa/settings')->assertOk()->assertExactJsonStructure([
         'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label', 'recommended']], 'recoveryCodesRemaining', 'mustEnroll', 'requiredTypes',
-        'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes'], 'status', 'recoveryCodes', 'retryAfter',
+        'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'confirmPassword'], 'passwordRetryAfter', 'status', 'recoveryCodes', 'retryAfter',
     ]);
 
     $created = $this->postJson('/mfa/factors', ['type' => 'totp'])->assertOk()->assertExactJsonStructure([
@@ -90,7 +90,41 @@ it('POST /mfa/factors with a delivered type returns a masked destination', funct
         ->assertJsonPath('setup.destination', '+*******0142');
 });
 
-it('password confirmation answers 423 over JSON', function () {
+it('POST /mfa/factors (and the other factor changes) answer 423 until the password is confirmed', function () {
+    config(['mfa.routes.password_confirmation' => true]);
+    $this->loginWithSession($this->makeUser());
+
+    $this->postJson('/mfa/factors', ['type' => 'totp'])->assertStatus(423)->assertExactJson([
+        'message' => 'Please confirm your password to continue.',
+        'error' => 'password_confirmation_required',
+        'confirm_url' => route('mfa.password.confirm'),
+    ]);
+});
+
+it('POST /mfa/confirm-password', function () {
+    $this->loginWithSession($this->makeUser());
+
+    $this->postJson('/mfa/confirm-password', ['password' => 'nope'])->assertStatus(422)->assertExactJson([
+        'message' => 'The provided password is incorrect.',
+        'errors' => ['password' => ['The provided password is incorrect.']],
+    ]);
+    $this->postJson('/mfa/confirm-password', ['password' => 'password'])->assertExactJson(['status' => 'password-confirmed']);
+});
+
+it('POST /mfa/confirm-password over the attempt limit', function () {
+    $this->freezeSecond();
+    config(['mfa.rate_limit.password_per_minute' => 1]);
+    $this->loginWithSession($this->makeUser());
+    $this->postJson('/mfa/confirm-password', ['password' => 'nope'])->assertStatus(422);
+
+    $this->postJson('/mfa/confirm-password', ['password' => 'password'])->assertStatus(429)->assertExactJson([
+        'message' => 'Too many attempts. Please try again later.',
+        'errors' => ['password' => ['Too many attempts. Please try again later.']],
+        'retry_after' => 60,
+    ]);
+});
+
+it('the app\'s password.confirm middleware answers 423 over JSON', function () {
     config(['mfa.routes.confirm_middleware' => ['password.confirm']]);
     require __DIR__.'/../../routes/mfa.php';
     app('router')->getRoutes()->refreshNameLookups();

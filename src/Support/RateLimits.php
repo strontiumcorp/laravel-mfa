@@ -6,7 +6,8 @@ use Illuminate\Cache\RateLimiter;
 use Illuminate\Contracts\Auth\Authenticatable;
 
 /**
- * Per-user limits for verification attempts (sends: see SendGuard).
+ * Per-user limits for verification and password-confirmation attempts
+ * (sends: see SendGuard).
  *
  * Every attempt is counted BEFORE it is checked: the cache increment is
  * atomic, so a burst of parallel requests cannot all pass a "too many?"
@@ -41,8 +42,33 @@ final class RateLimits
      */
     public function verifyAvailableIn(Authenticatable $user): int
     {
-        $limits = ['verify' => 'verify_per_minute', 'verify-day' => 'verify_per_day'];
+        return $this->availableIn($user, ['verify' => 'verify_per_minute', 'verify-day' => 'verify_per_day']);
+    }
 
+    /** Record a password attempt on the MFA password prompt; false if it exceeds a limit. */
+    public function attemptPassword(Authenticatable $user): bool
+    {
+        $minute = $this->limiter->hit($this->key('password', $user), self::MINUTE);
+        $day = $this->limiter->hit($this->key('password-day', $user), self::DAY);
+
+        return $minute <= $this->limit('password_per_minute') && $day <= $this->limit('password_per_day');
+    }
+
+    public function clearPassword(Authenticatable $user): void
+    {
+        $this->limiter->clear($this->key('password', $user));
+        $this->limiter->clear($this->key('password-day', $user));
+    }
+
+    /** Seconds until a password may be tried again (see verifyAvailableIn()). */
+    public function passwordAvailableIn(Authenticatable $user): int
+    {
+        return $this->availableIn($user, ['password' => 'password_per_minute', 'password-day' => 'password_per_day']);
+    }
+
+    /** @param array<string, string> $limits cache key => config limit name */
+    private function availableIn(Authenticatable $user, array $limits): int
+    {
         // Equivalent mutant(s): only called after a refusal, so at least one window raises the wait above 1.
         $wait = 0; // @pest-mutate-ignore: IncrementInteger,DecrementInteger
         foreach ($limits as $key => $limit) {

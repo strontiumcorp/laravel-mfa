@@ -249,6 +249,11 @@ return [
         'verify_per_day' => 50,
         // Every code sent, per account (login and enrollment).
         'send_per_hour' => 10,
+        // Password attempts at the MFA settings page's password prompt, per
+        // account; the daily cap stops slow guessing from a stolen session.
+        // Both are cleared when the password is confirmed.
+        'password_per_minute' => 5,
+        'password_per_day' => 20,
 
         // Unconfirmed destinations — a number/email being added, which anyone
         // can trigger toward anyone. Kept separate from login sends, so these
@@ -303,8 +308,9 @@ return [
         ],
 
         // Reachable by users who must enroll but have no factor yet, so the
-        // password confirmation step before enrollment doesn't loop back to
-        // the settings page. Route names or paths.
+        // app's own password confirmation page (routes.confirm_middleware)
+        // doesn't loop back to the settings page. Route names or paths.
+        // MFA's own password prompt needs no entry here.
         'allow_while_enrolling' => [
             'password.confirm',
             'confirm-password',
@@ -321,9 +327,24 @@ return [
         'enabled' => true,
         'prefix' => 'mfa',
         'middleware' => ['web', 'auth'],
-        // Extra middleware on enrollment changes (add/remove factor, recovery
-        // codes). Set to [] if your users have no passwords (social login).
-        'confirm_middleware' => ['password.confirm'],
+        // Ask for the password again before adding or removing a factor or
+        // regenerating recovery codes, at most once per auth.password_timeout
+        // (Laravel's setting, read as is). The MFA settings page asks itself,
+        // so the app needs no confirm-password page. It shares Laravel's
+        // session key (auth.password_confirmed_at) with password.confirm.
+        //
+        // Never asked: users whose stored password is empty, and users the
+        // policy below exempts. Set to false to never ask anyone: an
+        // MFA-verified session is then enough.
+        'password_confirmation' => true,
+        // A class implementing Contracts\PasswordConfirmationPolicy that
+        // decides per user, e.g. exempting social-login accounts that never
+        // chose a password. null = ask everyone who has a password.
+        'password_confirmation_policy' => null,
+        // Extra middleware on those same routes, run before the check above,
+        // e.g. ['password.confirm'] to use the app's own confirm-password
+        // page instead (it sets the same session key, so MFA won't ask again).
+        'confirm_middleware' => [],
         // Where to send the user after a successful challenge when there is
         // no "intended" URL.
         'home' => '/dashboard',

@@ -13,7 +13,7 @@ const factors = [
 const urls = { send: '/mfa/challenge/send', verify: '/mfa/challenge/verify', recover: '/mfa/challenge/recover', logout: '/logout' };
 const props = { factors, defaultFactorId: 1, hasRecoveryCodes: true, status: null, retryAfter: null, urls };
 
-beforeEach(() => inertia.requests.splice(0));
+beforeEach(() => inertia.reset());
 
 describe('challenge page', () => {
     it('verifies with the selected factor', async () => {

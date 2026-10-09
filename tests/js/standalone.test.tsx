@@ -15,6 +15,7 @@ describe('published components', () => {
             'challenge-form.tsx',
             'destination-setup.tsx',
             'factor-list.tsx',
+            'password-confirm-form.tsx',
             'recovery-code-form.tsx',
             'recovery-codes-panel.tsx',
             'send-code-button.tsx',

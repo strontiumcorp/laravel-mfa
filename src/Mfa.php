@@ -3,6 +3,7 @@
 namespace StrontiumCorp\LaravelMfa;
 
 use Closure;
+use Illuminate\Auth\SessionGuard;
 use Illuminate\Container\Container as LiveContainer;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
@@ -19,6 +20,7 @@ use StrontiumCorp\LaravelMfa\Contracts\CodeGenerator;
 use StrontiumCorp\LaravelMfa\Contracts\EnforcementPolicy;
 use StrontiumCorp\LaravelMfa\Contracts\Factor;
 use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
+use StrontiumCorp\LaravelMfa\Contracts\PasswordConfirmationPolicy;
 use StrontiumCorp\LaravelMfa\Contracts\SmsSender;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Events\ImpersonationGranted;
@@ -38,7 +40,8 @@ use StrontiumCorp\LaravelMfa\Testing\FixedCodeGenerator;
  *
  * Holds no per-request state — the session/request are always passed in —
  * so it is safe as a singleton under Octane. Code-level rules are classes
- * named in config (enforcement.policy), resolved per call.
+ * named in config (enforcement.policy, routes.password_confirmation_policy),
+ * resolved per call.
  */
 class Mfa
 {
@@ -46,6 +49,9 @@ class Mfa
 
     /** Set on a verified session whose user still lacks a required factor type. */
     public const ENROLL_PREFIX = 'mfa.enroll';
+
+    /** When the password was last confirmed: Laravel's own key, shared with password.confirm. */
+    public const PASSWORD_CONFIRMED_AT = 'auth.password_confirmed_at';
 
     /** Set to false (Mfa::ignoreMigrations()) if you publish and own the migrations. */
     public static bool $runsMigrations = true;
@@ -303,6 +309,60 @@ class Mfa
         return array_map(fn (FactorType $type) => $type->value, $types);
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Password confirmation (routes.password_confirmation)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Whether this user must confirm their password before factor changes:
+     * routes.password_confirmation is on, they have a password (an empty
+     * stored password can't be confirmed), and the policy class in
+     * routes.password_confirmation_policy, if set, says so (e.g. not for
+     * social-login accounts).
+     */
+    public function requiresPasswordConfirmation(MultiFactorAuthenticatable $user): bool
+    {
+        if (! $this->config->get('mfa.routes.password_confirmation') || (string) $user->getAuthPassword() === '') {
+            return false;
+        }
+
+        $policy = $this->config->get('mfa.routes.password_confirmation_policy');
+
+        /** @var PasswordConfirmationPolicy|null $instance */
+        $instance = is_string($policy) && $policy !== '' ? $this->app->make($policy) : null;
+
+        return $instance === null || $instance->mustConfirmPassword($user);
+    }
+
+    /**
+     * Whether this session confirmed the password within auth.password_timeout,
+     * by MFA's prompt or the app's own password.confirm (the same key).
+     */
+    public function passwordRecentlyConfirmed(Session $session): bool
+    {
+        $confirmedAt = (int) $session->get(self::PASSWORD_CONFIRMED_AT, 0);
+
+        return now()->getTimestamp() - $confirmedAt <= (int) $this->config->get('auth.password_timeout');
+    }
+
+    public function markPasswordConfirmed(Session $session): void
+    {
+        $session->put(self::PASSWORD_CONFIRMED_AT, now()->getTimestamp());
+    }
+
+    /**
+     * Check the password with the user provider of the session guard this
+     * user is logged in with, as Auth::validate() would.
+     */
+    public function validatePassword(Request $request, MultiFactorAuthenticatable $user, string $password): bool
+    {
+        $guard = LiveContainer::getInstance()->make(AuthFactory::class)->guard($this->guardFor($request, $user));
+
+        return $guard instanceof SessionGuard && $guard->getProvider()->validateCredentials($user, ['password' => $password]);
+    }
+
     /** Whether this user would be let through without a challenge right now. */
     public function isSatisfied(Request $request, MultiFactorAuthenticatable $user): bool
     {
@@ -394,7 +454,8 @@ class Mfa
      * If the target has MFA, the impersonator must have actually passed MFA
      * in this session; having no factors is not enough (decision D9), so
      * impersonation can never step around the target's second factor.
-     * Otherwise the impersonator only needs to be MFA-satisfied.
+     * Otherwise the impersonator only needs to be MFA-satisfied. Any password
+     * confirmation in the session is dropped: it was the impersonator's.
      */
     public function grantForImpersonation(Authenticatable $impersonator, Authenticatable $target, ?Request $request = null): void
     {
@@ -414,6 +475,10 @@ class Mfa
             $this->sessionKey($this->guardFor($request, $target), $target->getAuthIdentifier()),
             now()->getTimestamp(),
         );
+        // A password confirmed by the impersonator is not the target's: it
+        // must not let them change the target's factors (or pass the app's
+        // own password.confirm as the target).
+        $request->session()->forget(self::PASSWORD_CONFIRMED_AT);
 
         $this->events->dispatch(new ImpersonationGranted($target, null, null, [
             'impersonator_type' => $impersonator::class,
@@ -446,10 +511,16 @@ class Mfa
             ];
         }
 
+        // For the session user: whether they would be asked. For guests: whether anyone may be.
+        $passwordConfirmation = (array) $this->config->get('mfa.routes.confirm_middleware') !== []
+            || ($model instanceof MultiFactorAuthenticatable && $user !== null
+                ? $this->requiresPasswordConfirmation($model)
+                : (bool) $this->config->get('mfa.routes.password_confirmation'));
+
         return new MfaContext(
             enabled: $enabled,
             factors: array_map(fn (FactorType $type) => $type->value, $this->enabledTypes()),
-            passwordConfirmation: (array) $this->config->get('mfa.routes.confirm_middleware') !== [],
+            passwordConfirmation: $passwordConfirmation,
             user: $user,
             urls: [
                 'settings' => $routes ? route('mfa.settings') : null,

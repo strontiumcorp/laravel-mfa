@@ -22,6 +22,7 @@ enum FailureReason: string
     case DestinationNotAllowed = 'destination_not_allowed';
     case DeliveryFailed = 'delivery_failed';
     case InvalidRecoveryCode = 'invalid_recovery_code';
+    case InvalidPassword = 'invalid_password';
 
     public function message(): string
     {
@@ -38,6 +39,7 @@ enum FailureReason: string
             self::FactorDisabled => 'This verification method is currently disabled.',
             self::DestinationNotAllowed => "We can't send verification codes to this destination.",
             self::DeliveryFailed => 'We could not send your code. Please try again.',
+            self::InvalidPassword => 'The provided password is incorrect.',
         };
     }
 }
