@@ -4,7 +4,8 @@ namespace StrontiumCorp\LaravelMfa\Events;
 
 /**
  * An app-wide send cap was hit — likely a distributed SMS pumping or email
- * bombing attempt. Dispatched once per hour for each cap.
+ * bombing attempt. Dispatched once per window (at most once an hour) for
+ * each cap.
  *
  * context.scope:
  *  - "unconfirmed" (rate_limit.unconfirmed_global_per_hour): new enrollments

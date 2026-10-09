@@ -130,6 +130,25 @@ describe('unconfirmed destinations (enrollment)', function () {
         Event::assertDispatchedTimes(SendingCircuitTripped::class, 1);
     });
 
+    it('raises the breaker event once per window, so a new window that trips alerts again', function () {
+        Event::fake([SendingCircuitTripped::class]);
+        // 2, not 1: Laravel 11.22's RateLimiter re-puts a counter rolled back
+        // to 1 with a fresh decay, which would stretch the first window.
+        config(['mfa.rate_limit.unconfirmed_global_per_hour' => 2]);
+        Mfa::fakeSms();
+
+        enrollSms('+15555550101', '203.0.113.1')->assertOk();
+        enrollSms('+15555550102', '203.0.113.2')->assertOk();
+        $this->travel(50)->minutes();
+        enrollSms('+15555550103', '203.0.113.3')->assertStatus(503);   // trips, 10 minutes left
+        $this->travel(11)->minutes();                                   // a new window
+        enrollSms('+15555550104', '203.0.113.4')->assertOk();
+        enrollSms('+15555550105', '203.0.113.5')->assertOk();
+        enrollSms('+15555550106', '203.0.113.6')->assertStatus(503);   // trips again
+
+        Event::assertDispatchedTimes(SendingCircuitTripped::class, 2);
+    });
+
     it('does not create a pending factor when the send is refused', function () {
         config(['mfa.rate_limit.new_destinations_per_ip_per_hour' => 0]);
         Mfa::fakeSms();

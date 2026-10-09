@@ -140,7 +140,10 @@ final class SendGuard
 
     private function refuse(MfaFactor $factor, string $key, FailureReason $reason, string $scope): VerificationResult
     {
-        // An app-wide cap: alert once per hour for each.
+        $retryAfter = $this->limiter->availableIn($key);
+
+        // An app-wide cap: alert once per window for each (the flag expires
+        // when the window frees up, so the next window that trips alerts too).
         $breaker = match ($scope) {
             'global' => ['mfa:circuit-tripped', 'unconfirmed_global_per_hour', 'unconfirmed'],
             'confirmed_global' => ['mfa:circuit-tripped:confirmed', 'confirmed_global_per_hour', 'confirmed'],
@@ -148,7 +151,7 @@ final class SendGuard
         };
 
         // Equivalent mutant: the flag's value is never read, only its presence.
-        if ($breaker !== null && $this->cache->add($breaker[0], true, self::HOUR)) { // @pest-mutate-ignore: TrueToFalse
+        if ($breaker !== null && $this->cache->add($breaker[0], true, max(1, $retryAfter))) { // @pest-mutate-ignore: TrueToFalse
             $this->events->dispatch(new SendingCircuitTripped(null, $factor->type, $reason, ['limit' => $this->limit($breaker[1]), 'scope' => $breaker[2]]));
         }
 
@@ -156,7 +159,7 @@ final class SendGuard
             $this->warnOnce($factor, 'send_cap_reached');
         }
 
-        return VerificationResult::failure($reason, ['scope' => $scope, 'retry_after' => $this->limiter->availableIn($key)]);
+        return VerificationResult::failure($reason, ['scope' => $scope, 'retry_after' => $retryAfter]);
     }
 
     /**
