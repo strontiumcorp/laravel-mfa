@@ -230,7 +230,7 @@ php artisan mfa:reset jane@example.com             # locked-out user; verify the
 
 ## Performance
 
-- A verified session costs no MFA queries. Whether a user has MFA is cached and refreshed when their factors change. The cache holds the user's factor types, and the enabled types are applied on each read, so turning a type off or on takes effect at once.
+- A verified session costs no MFA queries. Whether a user has MFA is cached and refreshed when their factors change. The cache holds the user's factor types, and the enabled types are applied on each read, so turning a type off or on takes effect at once. Within one request the cache is read once per user (kept on the request, never on a singleton), however often the gate, the shared context and the nudge ask.
 - The nudge adds nothing for users with MFA, and at most one cache read per page for users without it (none once the session knows it was dismissed).
 - Safe under Octane: no request state is kept between requests.
 - On multiple servers, use a shared cache and session store (Redis or database). `mfa:doctor` warns otherwise.

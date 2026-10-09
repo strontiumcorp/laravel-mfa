@@ -1,6 +1,8 @@
 <?php
 
 use Illuminate\Auth\Middleware\Authenticate;
+use Illuminate\Cache\Events\CacheHit;
+use Illuminate\Cache\Events\CacheMissed;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Routing\SortedMiddleware;
@@ -178,6 +180,33 @@ describe('performance', function () {
         $this->get('/dashboard');
 
         expect(mfaQueries(fn () => $this->get('/dashboard')->assertOk()))->toBeEmpty();
+    });
+
+    it('reads the "has MFA" cache once per request, however often it is asked', function () {
+        // The gate, the shared context (as HandleInertiaRequests would) and
+        // the nudge all ask; the answer is kept on the request.
+        Route::middleware(['web', 'auth'])->get('/shared', fn () => Mfa::context()->toArray());
+        $reads = [];
+        Event::listen([CacheHit::class, CacheMissed::class], function ($e) use (&$reads) {
+            if (str_contains($e->key, 'factor-types')) {
+                $reads[] = $e->key;
+            }
+        });
+        $user = $this->makeUser();
+        $this->loginWithSession($user)->get('/shared')->assertOk(); // fills the cache
+        $reads = [];
+        $this->get('/shared')->assertOk()->assertJsonPath('nudge.show', true);
+        expect($reads)->toHaveCount(1);
+
+        // A factor added mid-request is seen at once (the write-through updates it).
+        $reads = [];
+        Route::middleware(['web', 'auth'])->get('/add', function () use ($user) {
+            $before = Mfa::hasConfirmedFactors($user);
+            test()->createMfaFactor($user);
+
+            return [$before, Mfa::hasConfirmedFactors($user)];
+        });
+        $this->get('/add')->assertOk()->assertExactJson([false, true]);
     });
 
     it('busts the cache when a factor is added', function () {

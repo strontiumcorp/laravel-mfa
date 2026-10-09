@@ -54,6 +54,9 @@ class Mfa
     /** When the password was last confirmed: Laravel's own key, shared with password.confirm. */
     public const PASSWORD_CONFIRMED_AT = 'auth.password_confirmed_at';
 
+    /** Request attribute holding a user's cached confirmed types for the rest of the request. */
+    private const MEMO_PREFIX = 'mfa.factor-types.';
+
     /** Set to false (Mfa::ignoreMigrations()) if you publish and own the migrations. */
     public static bool $runsMigrations = true;
 
@@ -131,22 +134,40 @@ class Mfa
      */
     public function hasConfirmedFactors(MultiFactorAuthenticatable $user): bool
     {
-        $key = $this->cacheKey($user->getAuthIdentifier());
-        $cached = $this->cacheStore()->get($key);
+        return $this->anyEnabled($this->cachedConfirmedTypes($user->getAuthIdentifier()));
+    }
 
-        if (is_string($cached)) {
-            return $this->anyEnabled($cached);
+    /**
+     * The user's confirmed types from the cache (filled on a miss), kept on
+     * the live request for the rest of it: the gate, the shared context and
+     * the nudge all ask, and the cache is read once. Only for a request with
+     * a session (a long-lived queue worker's request must never keep one).
+     */
+    private function cachedConfirmedTypes(int|string $userId): string
+    {
+        $request = $this->liveRequest();
+        $memo = self::MEMO_PREFIX.$userId;
+
+        if ($request?->attributes->has($memo)) {
+            return (string) $request->attributes->get($memo);
         }
 
-        $types = $this->queryConfirmedTypes($user->getAuthIdentifier());
+        $key = $this->cacheKey($userId);
+        $types = $this->cacheStore()->get($key);
 
-        // add(), not put(): if a factor changed while we were querying, its
-        // model event has already written the fresh answer — never let this
-        // possibly-stale read overwrite it.
-        // Equivalent mutant(s): ttl is an int.
-        $this->cacheStore()->add($key, $types, (int) $this->config->get('mfa.cache.ttl')); // @pest-mutate-ignore: RemoveIntegerCast
+        if (! is_string($types)) {
+            $types = $this->queryConfirmedTypes($userId);
 
-        return $this->anyEnabled($types);
+            // add(), not put(): if a factor changed while we were querying, its
+            // model event has already written the fresh answer — never let this
+            // possibly-stale read overwrite it.
+            // Equivalent mutant(s): ttl is an int.
+            $this->cacheStore()->add($key, $types, (int) $this->config->get('mfa.cache.ttl')); // @pest-mutate-ignore: RemoveIntegerCast
+        }
+
+        $request?->attributes->set($memo, $types);
+
+        return $types;
     }
 
     public function forgetCachedState(MultiFactorAuthenticatable $user): void
@@ -161,11 +182,10 @@ class Mfa
      */
     public function refreshCachedStateFor(int|string $userId): void
     {
-        $this->cacheStore()->put(
-            $this->cacheKey($userId),
-            $this->queryConfirmedTypes($userId),
-            (int) $this->config->get('mfa.cache.ttl'),
-        );
+        $types = $this->queryConfirmedTypes($userId);
+
+        $this->cacheStore()->put($this->cacheKey($userId), $types, (int) $this->config->get('mfa.cache.ttl'));
+        $this->liveRequest()?->attributes->set(self::MEMO_PREFIX.$userId, $types);
     }
 
     /**
@@ -732,6 +752,15 @@ class Mfa
     private function live(): Container
     {
         return LiveContainer::getInstance();
+    }
+
+    /** The request being handled, if it has a session (see cachedConfirmedTypes()). */
+    private function liveRequest(): ?Request
+    {
+        $container = $this->live();
+        $request = $container->bound('request') ? $container->make('request') : null;
+
+        return $request instanceof Request && $request->hasSession() ? $request : null;
     }
 
     private function cacheKey(int|string $userId): string
