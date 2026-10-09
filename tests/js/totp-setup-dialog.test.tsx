@@ -64,7 +64,7 @@ describe('MfaTotpSetupDialog', () => {
         expect(screen.getByLabelText('Setup key')).toBeInTheDocument();
     });
 
-    it('shows the error and clears the code after a failed attempt', async () => {
+    it('shows the error and keeps the code, selected, after a failed attempt', async () => {
         const { rerender } = render(<MfaTotpSetupDialog {...base} />);
         await userEvent.click(screen.getByRole('button', { name: 'Next' }));
         await userEvent.type(screen.getByRole('textbox'), '111111');
@@ -73,7 +73,11 @@ describe('MfaTotpSetupDialog', () => {
         rerender(<MfaTotpSetupDialog {...base} error="The provided code is invalid." />);
 
         expect(screen.getByRole('alert')).toHaveTextContent('The provided code is invalid.');
-        expect(screen.getByRole('textbox')).toHaveValue('');
+        const input = screen.getByRole('textbox') as HTMLInputElement;
+        expect(input).toHaveValue('111111');
+        // Kept so the user sees what they typed, and selected so typing replaces it.
+        expect(input).toHaveFocus();
+        expect([input.selectionStart, input.selectionEnd]).toEqual([0, 6]);
     });
 
     it('closes with the Close button or Escape before the code is confirmed', async () => {

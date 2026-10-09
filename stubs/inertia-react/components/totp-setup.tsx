@@ -58,10 +58,15 @@ export default function MfaTotpSetup({
             () => setCopied(false),
         );
 
-    // After a failed attempt, clear the input for the next try.
+    // After a failed attempt, keep the code so the user sees what they typed,
+    // and select it so typing straight away replaces it.
+    const input = useRef<HTMLInputElement>(null);
     const wasProcessing = useRef(processing);
     useEffect(() => {
-        if (wasProcessing.current && !processing && error) setCode('');
+        if (wasProcessing.current && !processing && error) {
+            input.current?.focus();
+            input.current?.select();
+        }
         wasProcessing.current = processing;
     }, [processing, error]);
 
@@ -116,6 +121,7 @@ export default function MfaTotpSetup({
 
             <form onSubmit={submit} className="flex gap-2">
                 <input
+                    ref={input}
                     aria-label="Code from your authenticator app"
                     value={code}
                     onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}

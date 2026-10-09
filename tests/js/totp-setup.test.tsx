@@ -41,7 +41,7 @@ describe('MfaTotpSetup', () => {
         expect(screen.getByRole('button', { name: 'Confirm' })).toBeDisabled();
     });
 
-    it('shows the error and clears the input after a failed attempt', async () => {
+    it('shows the error and keeps the code, selected, after a failed attempt', async () => {
         const { rerender } = render(<MfaTotpSetup secret="S" onConfirm={() => {}} />);
         await userEvent.type(screen.getByRole('textbox'), '123456');
 
@@ -49,7 +49,11 @@ describe('MfaTotpSetup', () => {
         rerender(<MfaTotpSetup secret="S" onConfirm={() => {}} error="Invalid code." />);
 
         expect(screen.getByRole('alert')).toHaveTextContent('Invalid code.');
-        expect(screen.getByRole('textbox')).toHaveValue('');
+        const input = screen.getByRole('textbox') as HTMLInputElement;
+        expect(input).toHaveValue('123456');
+        // Kept so the user sees what they typed, and selected so typing replaces it.
+        expect(input).toHaveFocus();
+        expect([input.selectionStart, input.selectionEnd]).toEqual([0, 6]);
     });
 
     it('drops its own box and heading inside a card (framed={false})', () => {

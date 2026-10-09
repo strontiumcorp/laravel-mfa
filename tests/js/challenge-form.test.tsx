@@ -78,7 +78,7 @@ describe('MfaChallengeForm', () => {
         expect(screen.getByRole('button', { name: 'Verify' })).toBeDisabled();
     });
 
-    it('shows the error and clears the input after a failed attempt', async () => {
+    it('shows the error and keeps the code, selected, after a failed attempt', async () => {
         const { rerender, onSubmit, onSelectFactor } = setup();
         const input = screen.getByRole('textbox', { name: 'Verification code' });
         await userEvent.type(input, '123456');
@@ -87,10 +87,13 @@ describe('MfaChallengeForm', () => {
         rerender(<MfaChallengeForm factors={[totp, email]} selectedFactorId={1} onSubmit={onSubmit} onSelectFactor={onSelectFactor} error="Invalid code." />);
 
         expect(screen.getByRole('alert')).toHaveTextContent('Invalid code.');
-        expect(input).toHaveValue('');
+        expect(input).toHaveValue('123456');
+        // Kept so the user sees what they typed, and selected so typing replaces it.
+        expect(input).toHaveFocus();
+        expect([(input as HTMLInputElement).selectionStart, (input as HTMLInputElement).selectionEnd]).toEqual([0, 6]);
     });
 
-    it('clears the input after a second failure with the same message', async () => {
+    it('selects the code again after a second failure with the same message', async () => {
         const { rerender, onSubmit, onSelectFactor } = setup({ error: 'Invalid code.' });
         const input = screen.getByRole('textbox', { name: 'Verification code' });
         await userEvent.type(input, '123456');
@@ -98,7 +101,10 @@ describe('MfaChallengeForm', () => {
         rerender(<MfaChallengeForm factors={[totp, email]} selectedFactorId={1} onSubmit={onSubmit} onSelectFactor={onSelectFactor} processing error="Invalid code." />);
         rerender(<MfaChallengeForm factors={[totp, email]} selectedFactorId={1} onSubmit={onSubmit} onSelectFactor={onSelectFactor} error="Invalid code." />);
 
-        expect(input).toHaveValue('');
+        expect(input).toHaveValue('123456');
+        // Kept so the user sees what they typed, and selected so typing replaces it.
+        expect(input).toHaveFocus();
+        expect([(input as HTMLInputElement).selectionStart, (input as HTMLInputElement).selectionEnd]).toEqual([0, 6]);
     });
 
     it('keeps the input when there is an old error but no new attempt', async () => {

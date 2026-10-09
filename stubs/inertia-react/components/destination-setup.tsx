@@ -66,10 +66,15 @@ export default function MfaDestinationSetup({
     const wait = useCountdown(retryAfter);
     const [code, setCode] = useState('');
 
-    // After a failed attempt, clear the input for the next try.
+    // After a failed attempt, keep the code so the user sees what they typed,
+    // and select it so typing straight away replaces it.
+    const input = useRef<HTMLInputElement>(null);
     const wasProcessing = useRef(processing);
     useEffect(() => {
-        if (wasProcessing.current && !processing && error) setCode('');
+        if (wasProcessing.current && !processing && error) {
+            input.current?.focus();
+            input.current?.select();
+        }
         wasProcessing.current = processing;
     }, [processing, error]);
 
@@ -95,6 +100,7 @@ export default function MfaDestinationSetup({
 
             <form onSubmit={submit} className="flex gap-2">
                 <input
+                    ref={input}
                     aria-label="Verification code"
                     value={code}
                     onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 10))}

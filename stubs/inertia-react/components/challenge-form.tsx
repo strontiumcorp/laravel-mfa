@@ -51,10 +51,15 @@ export default function MfaChallengeForm({
     // A new factor means a new code.
     useEffect(() => setCode(''), [selectedFactorId]);
 
-    // After a failed attempt, clear the input for the next try.
+    // After a failed attempt, keep the code so the user sees what they typed,
+    // and select it so typing straight away replaces it.
+    const input = useRef<HTMLInputElement>(null);
     const wasProcessing = useRef(processing);
     useEffect(() => {
-        if (wasProcessing.current && !processing && error) setCode('');
+        if (wasProcessing.current && !processing && error) {
+            input.current?.focus();
+            input.current?.select();
+        }
         wasProcessing.current = processing;
     }, [processing, error]);
 
@@ -95,6 +100,7 @@ export default function MfaChallengeForm({
 
             <form onSubmit={submit} className="space-y-3">
                 <input
+                    ref={input}
                     aria-label="Verification code"
                     value={code}
                     onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 10))}
