@@ -26,9 +26,13 @@ use StrontiumCorp\LaravelMfa\Models\MfaFactor;
  *    hourly cap against pumping through many accounts (off with null/0).
  *    No per-IP cap, so many users behind one NAT are fine.
  *
- * Both budgets also count toward a per-account daily cap for each factor type
- * (factors.{type}.send_per_day, off with null/0), so someone with the password
- * and the inbox/phone can't run up costs by logging in again and again.
+ * Both budgets also count toward a daily cap per account, factor type and
+ * network (factors.{type}.send_per_day, off with null/0), so someone with the
+ * password and the inbox/phone can't run up costs by logging in again and
+ * again. Per network (the client IP, IPv6 per /64, like the per-IP limits)
+ * so that someone with only the password, elsewhere, can't spend the owner's
+ * budget: they use up their own network's. Sends with no client IP (e.g. a
+ * challenge started outside a request) share one bucket per account and type.
  *
  * Called only when a code will really be sent (after the cooldown check), so
  * rejected requests never consume budget.
@@ -65,14 +69,15 @@ final class SendGuard
         if ($user !== null) {
             $counters[] = [CacheKey::for('send', CacheKey::user($user)), $this->limit('send_per_hour'), self::HOUR, FailureReason::RateLimited, 'account'];
 
-            // Every code of this type for the account (login and enrollment),
-            // over the RateLimiter's 24h window from the first send, like the
-            // hourly cap. Not counted at all when off. On Laravel 11.22 a
-            // rollback to 1 re-puts the counter with a fresh 24h, so that one
-            // count can outlive the window: stricter by one, never looser.
+            // Every code of this type for the account (login and enrollment)
+            // from this network, over the RateLimiter's 24h window from the
+            // first send, like the hourly cap. Not counted at all when off. On
+            // Laravel 11.22 a rollback to 1 re-puts the counter with a fresh
+            // 24h, so that one count can outlive the window: stricter by one,
+            // never looser.
             $perDay = $this->perDay($factor);
             if ($perDay > 0) {
-                $subject = CacheKey::user($user).'|'.$factor->type->value;
+                $subject = CacheKey::user($user).'|'.$factor->type->value.'|'.(self::ipBucket($ip) ?? 'no-ip');
                 $counters[] = [CacheKey::for('send-daily', $subject), $perDay, self::DAY, FailureReason::DailyLimit, 'account_daily'];
             }
         }

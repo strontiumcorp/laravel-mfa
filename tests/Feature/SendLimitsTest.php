@@ -9,17 +9,20 @@
  *  - confirmed destinations (login): cooldown curve + per-account hourly cap
  *    only. Strangers can never consume this budget.
  * And on 2026-10-09: per-account daily caps per method, across both budgets
- * (factors.email.send_per_day 15, factors.sms.send_per_day 5).
+ * (factors.email.send_per_day 15, factors.sms.send_per_day 5), counted per
+ * network (the client IP; IPv6 per /64).
  */
 
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
+use StrontiumCorp\LaravelMfa\Enums\FailureReason;
 use StrontiumCorp\LaravelMfa\Events\SendingCircuitTripped;
 use StrontiumCorp\LaravelMfa\Events\SuspiciousCodeRequests;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
+use StrontiumCorp\LaravelMfa\Support\SendGuard;
 
 const VICTIM = '+15555550199';
 
@@ -513,6 +516,104 @@ describe('daily caps per method (factors.{type}.send_per_day)', function () {
         }
 
         expect(MfaAuditLog::where('reason', 'daily_limit')->count())->toBe(1);
+    });
+});
+
+/*
+ * Reported 2026-10-09: with the password alone, an attacker could log in, burn
+ * each code with wrong guesses (a burned code allows a send at once) and use up
+ * the owner's daily SMS cap in about five minutes. The daily caps count per
+ * user, per method and per network (the client's IP; IPv6 per /64), so the
+ * attacker only spends their own network's budget.
+ */
+describe('daily caps per network', function () {
+    beforeEach(function () {
+        $this->freezeSecond();
+        Mfa::fakeCodes('123456');
+        Notification::fake();
+        // Only the daily caps: the hourly and the verification caps out of the way.
+        config(['mfa.rate_limit.send_per_hour' => 100, 'mfa.rate_limit.verify_per_day' => 1000]);
+    });
+
+    /** Log in from $ip and ask for a code. */
+    $loginAndSend = fn ($user, $factor, string $ip) => test()->freshGuards()->loginWithSession($user)
+        ->withServerVariables(['REMOTE_ADDR' => $ip])
+        ->postJson('/mfa/challenge/send', ['factor_id' => $factor->id]);
+
+    /** Burn the code out with wrong guesses, then wait out the per-minute verify limit. */
+    $burn = function ($factor): void {
+        foreach (range(1, 5) as $_) {
+            test()->postJson('/mfa/challenge', ['factor_id' => $factor->id, 'code' => '000000'])->assertUnprocessable();
+        }
+        test()->travel(61)->seconds();
+    };
+
+    it('cannot be used up by someone with only the password, from another network', function (FactorType $type, int $cap) use ($loginAndSend, $burn) {
+        $sms = Mfa::fakeSms();
+        [$owner, $factor] = $this->userWithFactor($type);
+
+        foreach (range(1, $cap) as $_) {
+            $loginAndSend($owner, $factor, '198.51.100.66')->assertOk();   // the attacker
+            $burn($factor);
+        }
+        $loginAndSend($owner, $factor, '198.51.100.66')->assertStatus(429)->assertJsonPath('message', fn (string $m) => str_starts_with($m, "You've had too many codes today."));
+
+        // The owner, at home, still gets a login code.
+        $loginAndSend($owner, $factor, '203.0.113.10')->assertOk();
+        if ($type === FactorType::Sms) {
+            $sms->assertSentTo('+15555550100', $cap + 1);
+        }
+    })->with([[FactorType::Sms, 5], [FactorType::Email, 15]]);
+
+    it('still caps a loop from one network', function (FactorType $type, int $cap) use ($loginAndSend, $burn) {
+        Mfa::fakeSms();
+        [$user, $factor] = $this->userWithFactor($type);
+
+        foreach (range(1, $cap) as $_) {
+            $loginAndSend($user, $factor, '203.0.113.10')->assertOk();
+            $burn($factor);
+        }
+
+        $loginAndSend($user, $factor, '203.0.113.10')->assertStatus(429)->assertJsonPath('message', fn (string $m) => str_starts_with($m, "You've had too many codes today."));
+    })->with([[FactorType::Sms, 5], [FactorType::Email, 15]]);
+
+    it('groups IPv6 clients by /64', function () use ($loginAndSend) {
+        config(['mfa.factors.sms.send_per_day' => 1, 'mfa.factors.sms.resend_cooldown' => 0]);
+        Mfa::fakeSms();
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+
+        $loginAndSend($user, $factor, '2001:db8:aa:bb::1')->assertOk();
+        $loginAndSend($user, $factor, '2001:db8:aa:bb:ffff::2')->assertStatus(429)->assertJsonPath('message', fn (string $m) => str_starts_with($m, "You've had too many codes today.")); // same /64
+        $loginAndSend($user, $factor, '2001:db8:aa:cc::1')->assertOk();                                                    // another /64
+    });
+
+    it('counts sends with no client IP in one shared bucket, still capped', function () use ($loginAndSend) {
+        config(['mfa.factors.sms.send_per_day' => 2, 'mfa.factors.sms.resend_cooldown' => 0]);
+        Mfa::fakeSms();
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $send = fn () => app(SendGuard::class)->attempt($factor, null);
+
+        expect($send())->toBeNull()
+            ->and($send())->toBeNull()
+            ->and($send()?->reason)->toBe(FailureReason::DailyLimit)
+            ->and(app(SendGuard::class)->attempt($factor, '')?->reason)->toBe(FailureReason::DailyLimit);
+
+        // A client with an IP has its own budget.
+        $loginAndSend($user, $factor, '203.0.113.10')->assertOk();
+    });
+
+    it('rolls back the daily count of the right network when another limit refuses', function () use ($loginAndSend) {
+        config(['mfa.factors.sms.send_per_day' => 1, 'mfa.factors.sms.resend_cooldown' => 0, 'mfa.rate_limit.confirmed_global_per_hour' => 1]);
+        Mfa::fakeSms();
+        loginSendSms()[2]->assertOk();                                 // someone else uses the app-wide 1
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+
+        $loginAndSend($user, $factor, '203.0.113.10')->assertStatus(503); // counted, then rolled back
+
+        config(['mfa.rate_limit.confirmed_global_per_hour' => 100]);
+        $loginAndSend($user, $factor, '203.0.113.10')->assertOk();        // its 1 was still there
+        $loginAndSend($user, $factor, '203.0.113.10')->assertStatus(429)->assertJsonPath('message', fn (string $m) => str_starts_with($m, "You've had too many codes today."));
+        $loginAndSend($user, $factor, '198.51.100.66')->assertOk();       // another network's budget
     });
 });
 

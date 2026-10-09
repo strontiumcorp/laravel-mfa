@@ -110,11 +110,15 @@ return [
             // current code has expired or been burned. Use an int for a flat
             // cooldown.
             'resend_cooldown' => ['base' => 120, 'multiplier' => 2, 'max' => 900],
-            // Email codes per account per 24 hours (login and enrollment, every
-            // address), counted from the first. Bounds someone who has the
-            // password and the inbox and keeps logging in again. When it is
-            // reached the user is told when to try again, and an authenticator
-            // app or recovery code still works. null or 0 = no cap.
+            // Email codes per account per network (client IP; IPv6 per /64)
+            // per 24 hours (login and enrollment, every address), counted
+            // from the first. Bounds someone who has the password and the
+            // inbox and keeps logging in again; per network, so someone with
+            // only the password, elsewhere, can't use up the owner's codes.
+            // Users behind one IP share it, and sends with no IP share one
+            // bucket. When it is reached the user is told when to try again,
+            // and an authenticator app or recovery code still works.
+            // null or 0 = no cap.
             'send_per_day' => 15,
             'notification' => OtpCodeNotification::class,
         ],
@@ -126,8 +130,9 @@ return [
             'ttl' => 600,               // carriers can be slow; matches email
             'max_attempts' => 5,
             'resend_cooldown' => ['base' => 120, 'multiplier' => 2, 'max' => 900],
-            // SMS codes per account per 24 hours, counted apart from email and
-            // lower, since every text costs money. As for email: null or 0 = no cap.
+            // SMS codes per account per network per 24 hours, counted apart
+            // from email and lower, since every text costs money. As for
+            // email (per network, IPv6 per /64): null or 0 = no cap.
             'send_per_day' => 5,
             // E.164 calling codes allowed to receive SMS (toll-fraud guard).
             // Empty array = allow all (not recommended in production).
