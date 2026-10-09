@@ -77,27 +77,25 @@ final class OtpStore
 
     /**
      * Read-only view of the resend cooldown, for the challenge page: whether
-     * a usable code is out, and the whole seconds until a resend is allowed
-     * (null = now). Same maths as issue(), but no lock and no writes.
+     * a usable code is out, and the whole seconds until a resend is allowed.
+     * Same maths as issue(), but no lock and no writes.
      *
-     * @param  array{resend_cooldown: int|array<string, int|float>}  $options
-     * @return array{code_sent: bool, retry_after: int|null}
+     * @param  array{length: int, resend_cooldown: int|array<string, int|float>}  $options
      */
-    public function status(MfaFactor $factor, array $options): array
+    public function status(MfaFactor $factor, array $options): ChallengeState
     {
         $lastVerified = $factor->last_used_at === null ? null : Carbon::instance($factor->last_used_at);
         $cooldown = $this->cooldown($factor, $lastVerified, $options['resend_cooldown']);
 
         if ($cooldown['usable'] === null) {
-            return ['code_sent' => false, 'retry_after' => null];
+            return ChallengeState::none($options['length']);
         }
 
         // A resend unlocks at the end of the curve, or when the code expires
         // (it is no longer usable then), whichever comes first.
         $readyAt = $cooldown['ready_at'] === null ? 0 : min($cooldown['ready_at']->getTimestamp(), $cooldown['usable']->expires_at->getTimestamp());
-        $wait = $readyAt - now()->getTimestamp();
 
-        return ['code_sent' => true, 'retry_after' => $wait > 0 ? $wait : null];
+        return ChallengeState::sent($readyAt - now()->getTimestamp(), $options['length']);
     }
 
     /**

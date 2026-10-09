@@ -14,6 +14,7 @@ use StrontiumCorp\LaravelMfa\Exceptions\DeliveryFailed;
 use StrontiumCorp\LaravelMfa\Exceptions\EnrollmentFailed;
 use StrontiumCorp\LaravelMfa\Jobs\DeliverOtp;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
+use StrontiumCorp\LaravelMfa\Support\ChallengeState;
 use StrontiumCorp\LaravelMfa\Support\Mask;
 use StrontiumCorp\LaravelMfa\Support\OtpStore;
 use StrontiumCorp\LaravelMfa\Support\RequestContext;
@@ -150,22 +151,12 @@ abstract class OtpFactor implements Factor
     }
 
     /**
-     * Whether a usable code is out and the seconds until a resend is allowed
-     * (null = now). Read-only, for the challenge page.
-     *
-     * @return array{code_sent: bool, retry_after: int|null}
+     * The code already out, its resend cooldown and the code length
+     * (factors.{type}.length). Read-only, for the challenge page.
      */
-    public function sendState(MfaFactor $factor): array
+    public function challengeState(MfaFactor $factor): ChallengeState
     {
         return $this->store->status($factor, $this->config);
-    }
-
-    /**
-     * Digits in this factor's codes (factors.{type}.length), for the code input.
-     */
-    public function codeLength(): int
-    {
-        return $this->config['length'];
     }
 
     /**
