@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.2 - 2026-10-10
+
+_Changes since `v0.5.1`._
+
+### Fixes
+
+- **ui:** use an example recovery code that can never be a real one (ec74500)
+- **ui:** say that each recovery code is a separate, one-line code (1466a48)
+
 ## v0.5.1 - 2026-10-10
 
 _Changes since `v0.5.0`._
