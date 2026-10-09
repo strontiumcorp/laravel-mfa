@@ -234,7 +234,7 @@ The step-by-step guide for developers is [docs/integration.md](../../docs/integr
 Each app gets these steps on its own feature branch. App-specific deviations are in Phases 3–5.
 
 1. **Install**
-   - Add the Composer repository: `path` (`../laravel-mfa`, symlinked) during development, `vcs` after v0.1.0.
+   - Add the Composer repository: `vcs` with the public HTTPS URL (`https://github.com/strontiumcorp/laravel-mfa`), no credentials; require `^0.4` (raise it for each new minor below 1.0).
    - `composer require strontiumcorp/laravel-mfa`
    - `php artisan mfa:install` (publishes `config/mfa.php`, the pages and `mfa-context.ts` into `resources/js/{Pages|pages}/mfa/`, and the components into `resources/js/components/vendor/laravel-mfa/`)
    - `php artisan migrate`
@@ -488,3 +488,4 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
   - Account settings card redesign (maintainer's pick, direction A of three shown in the design canvas; user report: artistly wrapped the card in its own profile-section card, so it showed a box in a box): `settings-card` is now a complete section in light and dark (`rounded-2xl` surface, `text-lg sm:text-xl` heading with the On / Off / Required badge, the text, then Manage with a shield icon as a secondary button or Set up as the primary one), so it needs no wrapper. `className` now replaces the surface rather than adding to it (Tailwind can't reliably override by appending); upgrade note in integration.md. `api-key-notice` had no dark-mode colours: it now uses the settings page's amber note style. Tests first; checked in `make preview` at phone and desktop, light and dark.
   - Direct releases again (the maintainer removed the rulesets on `main`): `make release` is back to the original flow (on an up-to-date `main`: `make ci`, changelog commit, annotated tag, `git push --atomic` of both after confirming). The pull-request flow stays as `make release-pr` plus `make release-tag` for a protected `main`; both refuse while a pull-request release is untagged. Tested end to end against a scratch bare remote (direct, off-main and behind guards, PR then tag).
   - Settings card `className` adds again (user report from artistly: `className="max-w-xl"` left the card with no surface at all, since v0.4.1 made `className` replace it). The maintainer chose extending over replacing: overrides use Tailwind's important modifier. Test first; docs and the component comment updated.
+  - The repository is public now: the install docs (README quickstart, integration.md step 1) use the HTTPS VCS URL with no credentials and `^0.4`, and the local symlinked path-repository instructions are gone.

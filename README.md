@@ -6,16 +6,16 @@ Owned by [Strontium Corp](https://github.com/strontiumcorp). Maintained by [Moja
 
 ## Quickstart
 
-Add the private repository to the app's `composer.json`, then install:
+The package isn't on Packagist yet, so add the (public) repository to the app's `composer.json`, then install:
 
 ```json
 "repositories": [
-    { "type": "vcs", "url": "git@github.com:strontiumcorp/laravel-mfa.git" }
+    { "type": "vcs", "url": "https://github.com/strontiumcorp/laravel-mfa" }
 ]
 ```
 
 ```bash
-composer require strontiumcorp/laravel-mfa
+composer require strontiumcorp/laravel-mfa:^0.4
 php artisan mfa:install
 php artisan migrate
 ```

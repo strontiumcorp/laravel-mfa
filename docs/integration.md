@@ -4,44 +4,19 @@ The same steps for every app. Each step says when it applies.
 
 ## 1. Install
 
-**Local development (symlinked).** Add a path repository to the app's `composer.json`:
+The repository is public, but the package isn't on Packagist, so add it as a VCS repository in the app's `composer.json`:
 
 ```json
 "repositories": [
-    { "type": "path", "url": "../laravel-mfa", "options": { "symlink": true } }
+    { "type": "vcs", "url": "https://github.com/strontiumcorp/laravel-mfa" }
 ]
 ```
 
 ```bash
-composer require strontiumcorp/laravel-mfa:@dev
+composer require strontiumcorp/laravel-mfa:^0.4
 ```
 
-Edits in `../laravel-mfa` apply to the app immediately.
-
-If the app runs in Docker or Sail, the container only sees the app folder, so the symlink breaks there. Mount the package next to it, in a `docker-compose.override.yml` that you don't commit:
-
-```yaml
-services:
-  laravel.test:                       # the app service's name
-    volumes:
-      - ../laravel-mfa:/var/www/laravel-mfa
-```
-
-`/var/www/html/../laravel-mfa` then resolves inside the container too.
-
-**Released version.** Use a VCS repository and a version constraint instead:
-
-```json
-"repositories": [
-    { "type": "vcs", "url": "git@github.com:strontiumcorp/laravel-mfa.git" }
-]
-```
-
-```bash
-composer require strontiumcorp/laravel-mfa:^0.3
-```
-
-The repo is private. Locally your SSH key works. CI and servers need a deploy key, or a token: `composer config --global github-oauth.github.com <token>`.
+No credentials are needed, locally, in CI or on servers. Below 1.0 a caret only allows patch releases (`^0.4` takes 0.4.x, not 0.5), so raise the constraint when you upgrade to a new minor version. If Composer hits GitHub's limit for anonymous API requests (busy CI runners), give it a token: `composer config --global github-oauth.github.com <token>`.
 
 ## 2. Publish and migrate
 
