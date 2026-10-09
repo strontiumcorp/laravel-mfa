@@ -57,6 +57,15 @@ it('error shapes: 422 invalid, 429 throttled, 403 from the middleware', function
         ->assertStatus(429)->assertExactJsonStructure(['message', 'errors' => ['code'], 'retry_after']);
 });
 
+it('error shape: 422 under code when several recovery codes are sent', function () {
+    [$user] = $this->userWithFactor();
+    app(RecoveryCodes::class)->generate($user);
+
+    $this->loginWithSession($user)->postJson('/mfa/challenge/recover', ['code' => "ab3de-fg7hk\nvfw8q-zmmh8"])
+        ->assertStatus(422)->assertExactJsonStructure(['message', 'errors' => ['code']])
+        ->assertJsonPath('errors.code.0', 'Enter one recovery code. Each code works once.');
+});
+
 it('error shape: 503 when an app-wide send cap is hit', function () {
     config(['mfa.rate_limit.confirmed_global_per_hour' => 1]);
     Mfa::fakeSms();

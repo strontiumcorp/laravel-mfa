@@ -205,6 +205,35 @@ it('accepts a recovery code once', function () {
     $this->loginWithSession($user)->postJson(route('mfa.challenge.recover'), ['code' => $code])->assertUnprocessable();
 });
 
+it('asks for one recovery code when several are pasted', function () {
+    [$user] = $this->userWithFactor();
+    $codes = app(RecoveryCodes::class)->generate($user);
+    $this->loginWithSession($user);
+
+    foreach (["{$codes[0]} {$codes[1]}", "{$codes[0]}\n{$codes[1]}\n{$codes[2]}", implode("\n", $codes)] as $pasted) {
+        $this->postJson(route('mfa.challenge.recover'), ['code' => $pasted])
+            ->assertUnprocessable()
+            ->assertExactJson([
+                'message' => 'Enter one recovery code. Each code works once.',
+                'errors' => ['code' => ['Enter one recovery code. Each code works once.']],
+            ]);
+    }
+
+    // Nothing was used up.
+    expect(app(RecoveryCodes::class)->remaining($user))->toBe(10);
+
+    // One code, with the spaces a copy picks up, still works.
+    $this->postJson(route('mfa.challenge.recover'), ['code' => "  {$codes[1]}\n"])->assertOk()->assertJson(['remaining' => 9]);
+});
+
+it('accepts a recovery code typed in groups with spaces', function () {
+    [$user] = $this->userWithFactor();
+    $code = app(RecoveryCodes::class)->generate($user)[0];
+    $this->loginWithSession($user);
+
+    $this->postJson(route('mfa.challenge.recover'), ['code' => strtoupper(substr($code, 0, 5).' '.substr($code, 6))])->assertOk();
+});
+
 it('will not verify against another user\'s factor', function () {
     [, $otherFactor] = $this->userWithFactor();
     [$user] = $this->userWithFactor();

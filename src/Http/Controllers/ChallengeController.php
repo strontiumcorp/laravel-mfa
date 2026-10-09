@@ -16,6 +16,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 class ChallengeController extends Controller
 {
+    private const ONE_RECOVERY_CODE = 'Enter one recovery code. Each code works once.';
+
     public function __construct(
         private readonly Mfa $mfa,
         private readonly ChallengeService $challenges,
@@ -89,7 +91,16 @@ class ChallengeController extends Controller
 
     public function recover(Request $request): Response
     {
-        $validated = $request->validate(['code' => ['required', 'string', 'max:32']]);
+        // A paste of several codes (the saved list is one per line) gets a
+        // plain answer instead of a length error or "invalid code".
+        $validated = $request->validate(
+            ['code' => ['bail', 'required', 'string', 'max:32', function (string $attribute, mixed $value, \Closure $fail): void {
+                if (is_string($value) && RecoveryCodes::looksLikeSeveral($value)) {
+                    $fail(self::ONE_RECOVERY_CODE);
+                }
+            }]],
+            ['code.max' => self::ONE_RECOVERY_CODE],
+        );
         $user = $this->sessionUser($request, $this->mfa);
 
         $result = $this->challenges->recover($user, $validated['code']);

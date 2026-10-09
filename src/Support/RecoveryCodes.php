@@ -79,6 +79,25 @@ final class RecoveryCodes
         $user->mfaRecoveryCodes()->delete();
     }
 
+    /**
+     * Whether the input holds more than one whole code, e.g. a few lines
+     * pasted from the saved list ("ab3de-fg7hk vfw8q-zmmh8"). A single code
+     * typed in groups ("ab3de fg7hk") is one code.
+     */
+    public static function looksLikeSeveral(string $input): bool
+    {
+        $tokens = preg_split('/[\s,;]+/', trim($input), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+        return count(array_filter($tokens, fn (string $token): bool => self::looksLikeOne($token))) > 1;
+    }
+
+    /** A whole code on its own: groups joined by dashes, or a long enough run of letters and digits. */
+    private static function looksLikeOne(string $token): bool
+    {
+        return preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)+$/i', $token) === 1
+            || preg_match('/^[a-z0-9]{8,}$/i', $token) === 1;
+    }
+
     public static function normalize(string $code): string
     {
         // Equivalent mutant(s): preg_replace only returns null on a regex error.

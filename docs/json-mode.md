@@ -106,7 +106,7 @@ The session ID is regenerated on success, so take the new cookie from the respon
 ```
 → `{ "status": "verified-with-recovery-code", "redirect": "…", "remaining": 9 }`
 
-Codes are matched case-insensitively, ignoring spaces and dashes. When `remaining` gets low, prompt the user to regenerate their codes.
+Codes are matched case-insensitively, ignoring spaces and dashes. Send one code: input holding several (e.g. lines pasted from the saved list) or longer than 32 characters gets `422` with "Enter one recovery code. Each code works once." under `code`, and uses up no attempt. When `remaining` gets low, prompt the user to regenerate their codes.
 
 ## Settings (managing factors)
 

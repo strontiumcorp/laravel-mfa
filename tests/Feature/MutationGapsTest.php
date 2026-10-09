@@ -972,7 +972,7 @@ describe('final triage round', function () {
         $this->postJson('/mfa/challenge', ['factor_id' => $factor->id, 'code' => str_repeat('1', 17)])
             ->assertJsonValidationErrors(['code' => 'must not be greater than 16']);
         $this->postJson('/mfa/challenge/recover', ['code' => str_repeat('a', 33)])
-            ->assertJsonValidationErrors(['code' => 'must not be greater than 32']);
+            ->assertJsonValidationErrors(['code' => 'Enter one recovery code. Each code works once.']);
 
         $this->freshGuards()->post('/logout');
         $this->loginWithSession($this->makeUser());
