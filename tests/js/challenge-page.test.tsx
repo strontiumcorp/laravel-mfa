@@ -15,6 +15,13 @@ const urls = { send: '/mfa/challenge/send', verify: '/mfa/challenge/verify', rec
 /** The factors, with a code already out for one of them (as after a refresh). */
 const withSent = (id: number, retryAfter: number | null) => factors.map((f) => (f.id === id ? { ...f, code_sent: true, retry_after: retryAfter } : f));
 const props = { factors, defaultFactorId: 1, hasRecoveryCodes: true, status: null, retryAfter: null, urls };
+/** "Try another way", then the method whose row starts with this name. */
+const choose = async (name: string) => {
+    await userEvent.click(screen.getByRole('button', { name: 'Try another way' }));
+    await userEvent.click(screen.getByRole('button', { name: new RegExp(`^${name}`) }));
+};
+/** The line under the title. */
+const description = () => document.querySelector('[aria-live="polite"]');
 
 beforeEach(() => inertia.reset());
 
@@ -31,7 +38,9 @@ describe('challenge page', () => {
         render(<MfaChallenge {...props} />);
         expect(inertia.requests).toEqual([]); // TOTP: nothing to send
 
-        await userEvent.click(screen.getByRole('button', { name: 'Email' }));
+        await choose('Email');
+        expect(screen.getByRole('heading', { name: 'Check your email' })).toBeInTheDocument();
+        expect(screen.getByRole('textbox', { name: 'Verification code' })).toHaveFocus();
         await userEvent.type(screen.getByRole('textbox', { name: 'Verification code' }), '654321{Enter}');
 
         expect(inertia.requests).toEqual([
@@ -43,24 +52,27 @@ describe('challenge page', () => {
     it('sends a new code on request', async () => {
         render(<MfaChallenge {...props} factors={withSent(2, null)} defaultFactorId={2} />);
 
-        await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Send a new code' }));
 
         expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 2 } }]);
     });
 
     it('shows "code sent" and the countdown only for the factor the code went to', async () => {
-        const sent = withSent(3, null);
-        const { rerender } = render(<MfaChallenge {...props} factors={sent} />);
-        await userEvent.click(screen.getByRole('button', { name: 'Email' }));
+        const { rerender } = render(<MfaChallenge {...props} />);
+        await choose('Email');
+        expect(description()).toHaveTextContent("We're sending a code to j***@example.com.");
 
         // The server redirects back with the status and the cooldown.
-        rerender(<MfaChallenge {...props} factors={sent} status="code-sent" retryAfter={120} />);
-        expect(screen.getByRole('status')).toHaveTextContent('Code sent.');
+        rerender(<MfaChallenge {...props} status="code-sent" retryAfter={120} />);
+        expect(description()).toHaveTextContent('Enter the 6-digit code we sent to j***@example.com.');
+        expect(screen.getByText(/Didn't get it\?/)).toHaveTextContent("Didn't get it? Resend in 2:00");
         expect(screen.getByRole('button', { name: 'Resend in 2:00' })).toBeDisabled();
 
-        await userEvent.click(screen.getByRole('button', { name: 'SMS' }));
-        expect(screen.queryByRole('status')).not.toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Send code' })).toBeEnabled();
+        // A code already out for SMS (an earlier visit): its own state, no new send.
+        rerender(<MfaChallenge {...props} factors={withSent(3, null)} status="code-sent" retryAfter={120} />);
+        await choose('Text message');
+        expect(description()).toHaveTextContent('Enter the 6-digit code we sent to +*******0100.');
+        expect(screen.getByRole('button', { name: 'Send a new code' })).toBeEnabled();
         expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 2 } }]);
     });
 
@@ -90,7 +102,7 @@ describe('challenge page', () => {
         it('does not send again when a code is already out, and shows the countdown', () => {
             render(<MfaChallenge {...props} factors={withSent(2, 75)} defaultFactorId={2} />);
 
-            expect(screen.getByText('We sent a code to j***@example.com.')).toBeInTheDocument();
+            expect(description()).toHaveTextContent('Enter the 6-digit code we sent to j***@example.com.');
             expect(screen.getByRole('button', { name: 'Resend in 1:15' })).toBeDisabled();
             expect(inertia.requests).toEqual([]);
         });
@@ -98,8 +110,8 @@ describe('challenge page', () => {
         it('sends once per method, however often the user switches', async () => {
             render(<MfaChallenge {...props} />);
 
-            for (const name of ['Email', 'Authenticator app', 'Email', 'SMS', 'Email', 'SMS']) {
-                await userEvent.click(screen.getByRole('button', { name }));
+            for (const name of ['Email', 'Authenticator app', 'Email', 'Text message', 'Email', 'Text message']) {
+                await choose(name);
             }
 
             expect(inertia.requests).toEqual([
@@ -122,6 +134,7 @@ describe('challenge page', () => {
             rerender(<MfaChallenge {...props} defaultFactorId={2} />);
 
             expect(screen.getByRole('alert')).toHaveTextContent('We could not send your code.');
+            expect(description()).toHaveTextContent("We couldn't send a code to j***@example.com.");
             expect(screen.getByRole('button', { name: 'Send code' })).toBeEnabled();
             expect(inertia.requests).toHaveLength(1);
         });
@@ -130,29 +143,50 @@ describe('challenge page', () => {
     it('keeps the countdown after a refresh, from the server\'s send state', () => {
         render(<MfaChallenge {...props} factors={withSent(2, 58)} defaultFactorId={2} />);
 
-        expect(screen.getByText('We sent a code to j***@example.com.')).toBeInTheDocument();
+        expect(description()).toHaveTextContent('Enter the 6-digit code we sent to j***@example.com.');
+        expect(screen.getByText(/Didn't get it\?/)).toHaveTextContent("Didn't get it? Resend in 0:58");
         expect(screen.getByRole('button', { name: 'Resend in 0:58' })).toBeDisabled();
     });
 
-    it('switches to recovery codes and back, and signs out', async () => {
+    it('switches to a recovery code and back to the list, and signs out', async () => {
         render(<MfaChallenge {...props} />);
 
-        await userEvent.click(screen.getByRole('button', { name: 'Use a recovery code' }));
+        await choose('Recovery code');
+        expect(screen.getByRole('heading', { name: 'Use a recovery code' })).toBeInTheDocument();
         await userEvent.type(screen.getByRole('textbox', { name: 'Recovery code' }), 'abcde-12345{Enter}');
         await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
-        await userEvent.click(screen.getByRole('button', { name: 'Use a verification code' }));
 
-        expect(screen.getByRole('textbox', { name: 'Verification code' })).toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: 'Try another way' }));
+        expect(screen.getByRole('heading', { name: 'Choose how to verify' })).toHaveFocus();
+        await userEvent.click(screen.getByRole('button', { name: /^Authenticator app/ }));
+
+        expect(screen.getByRole('textbox', { name: 'Verification code' })).toHaveFocus();
         expect(inertia.requests).toEqual([
             { method: 'post', url: urls.recover, data: { code: 'abcde-12345' } },
             { method: 'post', url: urls.logout, data: {} },
         ]);
     });
 
-    it('hides recovery codes and sign-out when unavailable', () => {
+    it('hides recovery codes and sign-out when unavailable', async () => {
         render(<MfaChallenge {...props} hasRecoveryCodes={false} urls={{ ...urls, logout: null }} />);
 
-        expect(screen.queryByRole('button', { name: 'Use a recovery code' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: 'Try another way' }));
+        expect(screen.queryByRole('button', { name: /^Recovery code/ })).not.toBeInTheDocument();
+    });
+
+    it('offers no other way with one method and no recovery codes', () => {
+        render(<MfaChallenge {...props} factors={[factors[0]]} hasRecoveryCodes={false} />);
+
+        expect(screen.queryByRole('button', { name: 'Try another way' })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    });
+
+    it('takes the code length from the factor', async () => {
+        render(<MfaChallenge {...props} factors={[{ ...factors[1], code_sent: true, code_length: 8 }]} defaultFactorId={2} />);
+
+        await userEvent.type(screen.getByRole('textbox', { name: 'Verification code' }), '12345678{Enter}');
+
+        expect(inertia.requests).toEqual([{ method: 'post', url: urls.verify, data: { factor_id: 2, code: '12345678' } }]);
     });
 });

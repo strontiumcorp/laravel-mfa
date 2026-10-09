@@ -143,6 +143,22 @@ export function MfaIconDownload(props: MfaIconProps) {
     );
 }
 
+export function MfaIconChevronRight(props: MfaIconProps) {
+    return (
+        <Svg strokeWidth={2} {...props}>
+            <path d="m9 6 6 6-6 6" />
+        </Svg>
+    );
+}
+
+export function MfaIconChevronLeft(props: MfaIconProps) {
+    return (
+        <Svg strokeWidth={2} {...props}>
+            <path d="m15 6-6 6 6 6" />
+        </Svg>
+    );
+}
+
 /** The icon for a factor type. */
 export function MfaFactorIcon({ type, ...props }: MfaIconProps & { type: MfaFactorType }) {
     if (type === 'totp') return <MfaIconAuthenticator {...props} />;

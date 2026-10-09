@@ -39,6 +39,23 @@ describe('MfaRecoveryCodeForm', () => {
         expect(screen.getByRole('textbox', { name: 'Recovery code' })).toHaveValue('abcde-1234');
     });
 
+    it('is its own titled step', () => {
+        render(<MfaRecoveryCodeForm onSubmit={() => {}} />);
+
+        expect(screen.getByRole('heading', { name: 'Use a recovery code' })).toBeInTheDocument();
+        expect(screen.getByRole('textbox', { name: 'Recovery code' })).toHaveFocus();
+    });
+
+    it('goes back to the other ways in, when given the callback', async () => {
+        const onTryAnotherWay = vi.fn();
+        render(<MfaRecoveryCodeForm onSubmit={() => {}} onTryAnotherWay={onTryAnotherWay} onUseVerificationCode={() => {}} />);
+
+        await userEvent.click(screen.getByRole('button', { name: 'Try another way' }));
+
+        expect(onTryAnotherWay).toHaveBeenCalledOnce();
+        expect(screen.queryByRole('button', { name: 'Use a verification code' })).not.toBeInTheDocument();
+    });
+
     it('switches back and signs out only when given callbacks', async () => {
         const onUseVerificationCode = vi.fn();
         const onSignOut = vi.fn();

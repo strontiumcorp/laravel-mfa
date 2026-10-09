@@ -8,6 +8,7 @@ export type Scenario = { id: string; page: Page; title: string; state: () => Sta
 
 const totp = () => factor('totp', { last_used_at: '2026-10-09T08:00:00Z' });
 const email = () => factor('email', { confirmed_at: '2026-10-05T10:00:00Z' });
+const sms = () => factor('sms', { confirmed_at: '2026-10-06T10:00:00Z' });
 
 export const scenarios: Scenario[] = [
     { id: 'new', page: 'settings', title: 'Settings · nothing set up', state: () => initialState() },
@@ -38,6 +39,23 @@ export const scenarios: Scenario[] = [
         state: () => initialState({ factors: [totp(), email()], recoveryCodesRemaining: 8, requirePassword: true }),
     },
     { id: 'challenge', page: 'challenge', title: 'Challenge · authenticator app and email', state: () => initialState({ factors: [totp(), email()], recoveryCodesRemaining: 8 }) },
+    {
+        id: 'challenge-all',
+        page: 'challenge',
+        title: 'Challenge · email first, with an authenticator app, SMS and recovery codes',
+        state: () => initialState({ factors: [email(), totp(), sms()], recoveryCodesRemaining: 8 }),
+    },
+    {
+        id: 'challenge-sent',
+        page: 'challenge',
+        title: 'Challenge · email code already sent (after a refresh)',
+        state: () => {
+            const f = email();
+            // Sent 62 seconds ago: the countdown shows 0:58.
+            return initialState({ factors: [f, totp()], recoveryCodesRemaining: 8, codeSentAt: { [f.id]: Date.now() - 62_000 } });
+        },
+    },
     { id: 'challenge-email', page: 'challenge', title: 'Challenge · email only', state: () => initialState({ factors: [email()], recoveryCodesRemaining: 8 }) },
+    { id: 'challenge-totp', page: 'challenge', title: 'Challenge · authenticator app only, no recovery codes', state: () => initialState({ factors: [totp()] }) },
     { id: 'account', page: 'account', title: 'Account settings · card and API-key notice', state: () => initialState({ factors: [totp()], recoveryCodesRemaining: 8 }) },
 ];

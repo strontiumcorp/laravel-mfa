@@ -19,6 +19,8 @@ type Props = {
 export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCodes, status, retryAfter, urls }: Props) {
     const [factorId, setFactorId] = useState<number | null>(defaultFactorId);
     const [useRecovery, setUseRecovery] = useState(false);
+    // Leaving the recovery form with "Try another way" reopens the list of methods.
+    const [backToList, setBackToList] = useState(false);
     // status and retryAfter describe the last send; show them only on that factor.
     const [sentToId, setSentToId] = useState<number | null>(null);
     const factor = factors.find((f) => f.id === factorId) ?? null;
@@ -63,20 +65,27 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
     };
 
     const signOut = logoutUrl ? () => router.post(logoutUrl) : undefined;
+    const delivered = factor?.type === 'email' || factor?.type === 'sms';
+    const sentHere = sentToId === factorId;
+    // A code is out: from the server (it survives a refresh), or the send just answered.
+    const codeOut = Boolean(factor?.code_sent) || (sentHere && status === 'code-sent');
 
     return (
-        <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-950">
+        <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10 dark:bg-gray-950">
             <Head title="Verify it's you" />
 
-            <div className="w-full max-w-sm space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-                <h1 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Verify it's you</h1>
+            <main className="w-full max-w-sm">
+                <h1 className="sr-only">Verify it's you</h1>
 
                 {useRecovery ? (
                     <MfaRecoveryCodeForm
                         onSubmit={submitRecovery}
                         processing={recover.processing}
                         error={recover.errors.code}
-                        onUseVerificationCode={() => setUseRecovery(false)}
+                        onTryAnotherWay={() => {
+                            setUseRecovery(false);
+                            setBackToList(true);
+                        }}
                         onSignOut={signOut}
                     />
                 ) : (
@@ -89,20 +98,23 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
                         error={verify.errors.code}
                         onUseRecoveryCode={hasRecoveryCodes ? () => setUseRecovery(true) : undefined}
                         onSignOut={signOut}
+                        initialView={backToList ? 'methods' : 'code'}
+                        sent={codeOut}
+                        sendFailed={sentHere && Boolean(send.errors.code)}
                     >
-                        {(factor?.type === 'email' || factor?.type === 'sms') && (
+                        {delivered && (
                             <MfaSendCodeButton
                                 onSend={sendCode}
                                 processing={send.processing}
                                 // After a send, the flash; after a refresh, the server's cooldown for this factor.
-                                retryAfter={(sentToId === factorId ? retryAfter : null) ?? factor.retry_after ?? null}
-                                sent={sentToId === factorId && status === 'code-sent'}
+                                retryAfter={(sentHere ? retryAfter : null) ?? factor.retry_after ?? null}
+                                sent={codeOut}
                                 error={send.errors.code}
                             />
                         )}
                     </MfaChallengeForm>
                 )}
-            </div>
+            </main>
         </div>
     );
 }
