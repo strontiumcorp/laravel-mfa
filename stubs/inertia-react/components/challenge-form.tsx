@@ -24,6 +24,8 @@ export type MfaChallengeFactor = {
     code_sent?: boolean;
     /** Email/SMS: seconds until a resend is allowed, null when allowed now. */
     retry_after?: number | null;
+    /** Email/SMS: seconds until the code that is out stops working, when the server tells. */
+    expires_in?: number | null;
     /** Digits in this method's codes (one box each); defaults to 6. */
     code_length?: number;
 };
@@ -46,6 +48,8 @@ export type MfaChallengeFormProps = {
     sent?: boolean;
     /** Email/SMS: the last send failed ("we couldn't send a code to …"; show the error in children). */
     sendFailed?: boolean;
+    /** Email/SMS: the code that was out has expired ("the code we sent to … has expired"). */
+    expired?: boolean;
     /** Open on the "Try another way" list, e.g. when coming back from the recovery code form. */
     initialView?: 'code' | 'methods';
 };
@@ -162,6 +166,7 @@ export default function MfaChallengeForm({
     onSignOut,
     sent,
     sendFailed = false,
+    expired = false,
     initialView = 'code',
 }: MfaChallengeFormProps) {
     const [code, setCode] = useState('');
@@ -276,6 +281,8 @@ export default function MfaChallengeForm({
             </>
         ) : sendFailed ? (
             <>We couldn't send a code to {strong}.</>
+        ) : expired ? (
+            <>The code we sent to {strong} has expired.</>
         ) : (
             <>We're sending a code to {strong}.</>
         );

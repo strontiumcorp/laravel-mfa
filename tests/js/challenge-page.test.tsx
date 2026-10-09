@@ -128,6 +128,17 @@ describe('challenge page', () => {
             expect(inertia.requests).toHaveLength(1);
         });
 
+        it('does not send by itself after "Send a new code" fails', async () => {
+            const { rerender } = render(<MfaChallenge {...props} factors={withSent(2, null)} defaultFactorId={2} />);
+            inertia.respondWith({ code: 'We could not send your code. Please try again.' });
+            await userEvent.click(screen.getByRole('button', { name: 'Send a new code' }));
+            // A failed delivery discards the code, and the old one was replaced: none is out now.
+            rerender(<MfaChallenge {...props} defaultFactorId={2} />);
+
+            expect(screen.getByRole('alert')).toHaveTextContent('We could not send your code.');
+            expect(inertia.requests).toHaveLength(1);
+        });
+
         it('shows a failed send and does not retry by itself', () => {
             inertia.respondWith({ code: 'We could not send your code. Please try again.' });
             const { rerender } = render(<MfaChallenge {...props} defaultFactorId={2} />);
@@ -214,6 +225,33 @@ describe('challenge page', () => {
 
             expect(screen.getByRole('button', { name: 'Resend in 1:30' })).toBeDisabled();
             expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 2 } }]);
+        });
+
+        it('treats a code as gone once it expires, and sends a new one', () => {
+            const expiring = (retryAfter: number) => factors.map((f) => (f.id === 2 ? { ...f, code_sent: true, retry_after: retryAfter, expires_in: 300 } : f));
+            const { rerender } = render(<MfaChallenge {...props} factors={expiring(30)} defaultFactorId={2} />);
+            expect(description()).toHaveTextContent('Enter the 6-digit code we sent to j***@example.com.');
+
+            wait(299);
+            expect(inertia.requests).toEqual([]);
+            wait(1);
+            expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 2 } }]);
+
+            rerender(<MfaChallenge {...props} factors={expiring(120)} defaultFactorId={2} status="code-sent" retryAfter={120} />);
+            expect(description()).toHaveTextContent('Enter the 6-digit code we sent to j***@example.com.');
+            expect(screen.getByRole('button', { name: 'Resend in 2:00' })).toBeDisabled();
+        });
+
+        it('sends on expiry at most once per method per visit', () => {
+            const expiring = (retryAfter: number) => factors.map((f) => (f.id === 2 ? { ...f, code_sent: true, retry_after: retryAfter, expires_in: 300 } : f));
+            const { rerender } = render(<MfaChallenge {...props} defaultFactorId={2} />);
+            rerender(<MfaChallenge {...props} factors={expiring(120)} defaultFactorId={2} status="code-sent" retryAfter={120} />);
+
+            wait(300);
+
+            expect(description()).toHaveTextContent('The code we sent to j***@example.com has expired.');
+            expect(screen.getByRole('button', { name: 'Send code' })).toBeEnabled();
+            expect(inertia.requests).toHaveLength(1);
         });
     });
 
