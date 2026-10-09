@@ -101,7 +101,7 @@ it('allows MFA settings for users without factors', function () {
 
 it('sends enforced users without factors to enroll', function () {
     Event::fake([EnrollmentRequired::class]);
-    config(['mfa.enforce' => EnforceForAdmins::class]);
+    config(['mfa.enforcement.policy' => EnforceForAdmins::class]);
 
     $admin = $this->makeUser(['is_admin' => true]);
     $this->loginWithSession($admin);
@@ -153,7 +153,7 @@ describe('performance', function () {
 
 describe('enforcement (D5)', function () {
     it('enforces for a list of roles, read from a string or enum "role" attribute', function () {
-        config(['mfa.enforce' => ['admin', 'super_admin']]);
+        config(['mfa.enforcement.roles' => ['admin', 'super_admin']]);
 
         expect(Mfa::mustEnroll($this->makeUser()->forceFill(['role' => 'admin'])))->toBeTrue()
             ->and(Mfa::mustEnroll($this->makeUser()->forceFill(['role' => Role::Admin])))->toBeTrue()
@@ -162,7 +162,7 @@ describe('enforcement (D5)', function () {
     });
 
     it('lets Mfa::enforceUsing() decide in code, ahead of the config', function () {
-        config(['mfa.enforce' => ['admin']]);
+        config(['mfa.enforcement.roles' => ['admin']]);
         Mfa::enforceUsing(fn ($user) => $user->email === 'boss@example.com');
 
         try {

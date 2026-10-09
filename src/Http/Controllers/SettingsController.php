@@ -41,9 +41,13 @@ class SettingsController extends Controller
         return $this->ui->page('settings', [
             'factors' => $factors->filter(fn (MfaFactor $f) => $f->isConfirmed())->map(fn (MfaFactor $f) => $f->toPublicArray())->values(),
             'pending' => $pending,
-            'availableTypes' => array_map(fn (FactorType $t) => ['type' => $t->value, 'label' => $t->label()], $this->mfa->enabledTypes()),
+            'availableTypes' => $this->availableTypes(),
             'recoveryCodesRemaining' => $recoveryCodes->remaining($user),
             'mustEnroll' => $this->mfa->mustEnroll($user),
+            // What an enforced user must set up (enforcement.required_types); [] = any type.
+            'requiredTypes' => $this->mfa->isEnforced($user)
+                ? array_map(fn (FactorType $t) => ['type' => $t->value, 'label' => $t->label()], $this->mfa->requiredTypes())
+                : [],
             'urls' => [
                 'store' => route('mfa.factors.store'),
                 'confirm' => route('mfa.factors.confirm', ['factor' => '__ID__']),
@@ -52,6 +56,20 @@ class SettingsController extends Controller
                 'recoveryCodes' => route('mfa.recovery-codes.store'),
             ],
         ]);
+    }
+
+    /**
+     * Enabled types, recommended ones first (otherwise in enum order).
+     *
+     * @return list<array{type: string, label: string, recommended: bool}>
+     */
+    private function availableTypes(): array
+    {
+        return collect($this->mfa->enabledTypes())
+            ->map(fn (FactorType $t) => ['type' => $t->value, 'label' => $t->label(), 'recommended' => $this->mfa->isTypeRecommended($t)])
+            ->sortBy(fn (array $t) => $t['recommended'] ? 0 : 1)
+            ->values()
+            ->all();
     }
 
     public function store(Request $request): Response
@@ -100,6 +118,8 @@ class SettingsController extends Controller
         // Proving possession of the new factor satisfies MFA for this session.
         if (! $this->mfa->isVerifiedFor($request, $user)) {
             $this->mfa->markVerified($request, $user, $confirmation['result']->context['factor'] ?? null, ['stage' => 'enrollment']);
+        } else {
+            $this->mfa->refreshEnrollmentRequirement($request, $user);
         }
 
         return $this->ui->success(route('mfa.settings'), 'factor-enabled', array_filter([
@@ -127,7 +147,9 @@ class SettingsController extends Controller
 
     public function destroy(Request $request, string $factor): Response
     {
-        $this->enrollment->disable($this->sessionUser($request, $this->mfa), $factor);
+        $user = $this->sessionUser($request, $this->mfa);
+        $this->enrollment->disable($user, $factor);
+        $this->mfa->refreshEnrollmentRequirement($request, $user);
 
         return $this->ui->success(route('mfa.settings'), 'factor-disabled');
     }

@@ -27,7 +27,7 @@ HTTP/1.1 403 Forbidden
 { "message": "Multi-factor authentication required.", "error": "mfa_required", "redirect": "https://app.test/mfa/challenge" }
 ```
 
-Users who are required to enroll but have no factor get `"error": "mfa_enrollment_required"`, with `redirect` pointing at `/mfa/settings`.
+Users who are required to enroll get `"error": "mfa_enrollment_required"`, with `redirect` pointing at `/mfa/settings`: enforced users with no factor, and enforced users who verified but still lack a required type (`enforcement.required_types`). The challenge lists, and accepts, only an enforced user's required types once they have one.
 
 A global response interceptor is the simplest way to handle both:
 
@@ -114,9 +114,10 @@ These routes are reachable when the session is verified, or when the user has no
 {
     "factors": [ /* confirmed factors, same shape as above */ ],
     "pending": [ /* unconfirmed factors from the last 30 minutes, same shape plus setup fields (below) */ ],
-    "availableTypes": [ { "type": "totp", "label": "Authenticator app" }, { "type": "email", "label": "Email" } ],
+    "availableTypes": [ { "type": "totp", "label": "Authenticator app", "recommended": true }, { "type": "email", "label": "Email", "recommended": false } ],
     "recoveryCodesRemaining": 10,
     "mustEnroll": false,
+    "requiredTypes": [],
     "urls": { "store": "…/mfa/factors", "confirm": "…/mfa/factors/__ID__/confirm", "resend": "…/mfa/factors/__ID__/resend",
               "destroy": "…/mfa/factors/__ID__", "recoveryCodes": "…/mfa/recovery-codes" },
     "status": null,
@@ -124,6 +125,8 @@ These routes are reachable when the session is verified, or when the user has no
     "retryAfter": null
 }
 ```
+
+`availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have one. It's `[]` for other users.
 
 Replace `__ID__` in the URLs with a factor ID.
 

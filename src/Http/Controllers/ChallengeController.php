@@ -30,8 +30,9 @@ class ChallengeController extends Controller
 
         $factors = $user->mfaFactors()
             ->whereNotNull('confirmed_at')
+            // Enforced users see only their required types (enforcement.required_types).
             // Equivalent mutant(s): Eloquent binds backed enums by value.
-            ->whereIn('type', array_map(fn ($t) => $t->value, $this->mfa->enabledTypes())) // @pest-mutate-ignore: UnwrapArrayMap
+            ->whereIn('type', array_map(fn ($t) => $t->value, $this->mfa->challengeTypes($user))) // @pest-mutate-ignore: UnwrapArrayMap
             ->orderByDesc('last_used_at')
             ->get();
 

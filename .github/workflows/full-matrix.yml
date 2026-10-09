@@ -50,11 +50,16 @@ jobs:
          "stability": ["prefer-lowest", "prefer-stable"],
          "exclude": [{"laravel": "13", "php": "8.2"}]}
 
+  ui:
+    needs: changed
+    if: needs.changed.outputs.run == 'true'
+    uses: ./.github/workflows/ui-suite.yml
+
   # Tags come from `make release`, whose annotated tag carries the release
   # notes. The Release is only published once every combination passed.
   release:
     name: Publish GitHub Release
-    needs: tests
+    needs: [tests, ui]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     permissions:

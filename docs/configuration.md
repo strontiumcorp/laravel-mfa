@@ -13,18 +13,35 @@ Everything is in `config/mfa.php`, with comments. This page covers the parts tha
 | `MFA_UI_DRIVER` | `inertia` | `json` for other frontends; see [json-mode.md](json-mode.md). |
 | `MFA_LOG_CHANNEL`, `MFA_LOG_LEVEL` | default channel, `info` | Where MFA events are logged, and the lowest level logged. |
 
+**Recommended types.** `factors.{type}.recommended` in `config/mfa.php` (default: `totp` only) lists that type first with a "Recommended" badge when users add a method. It's a hint only; nothing is enforced.
+
 **Disabling a factor type fails open:** users whose only factors are of that type are no longer challenged. Disable a type only after they enroll another factor. `mfa:doctor` counts the users affected.
 
 ## Enforcement
 
 ```php
-'enforce' => ['admin', 'support'],            // roles, from $user->getMfaRoles()
-'enforce' => \App\Mfa\MyPolicy::class,        // or a Contracts\EnforcementPolicy
+'enforcement' => [
+    'roles' => ['admin', 'support'],          // from $user->getMfaRoles()
+    'policy' => \App\Mfa\MyPolicy::class,     // a Contracts\EnforcementPolicy (optional)
+    'required_types' => ['totp'],             // what enforced users must use; [] = any
+],
 ```
 
-`getMfaRoles()` reads the `role` attribute. Override it for other role systems, e.g. spatie/laravel-permission: `return $this->getRoleNames()->all();`.
+A user is enforced when their role is listed **or** the policy says so. With neither (and no `Mfa::enforceUsing()`), MFA is opt-in. `getMfaRoles()` reads the `role` attribute. Override it for other role systems, e.g. spatie/laravel-permission: `return $this->getRoleNames()->all();`.
 
-For a rule in code, `Mfa::enforceUsing(fn ($user) => $user->isAdmin())` in a service provider takes precedence over the config. (Closures can't go in the config file: `config:cache` can't store them.)
+For a rule in code, `Mfa::enforceUsing(fn ($user) => $user->isAdmin())` in a service provider decides instead of `roles` and `policy`. (Closures can't go in the config file: `config:cache` can't store them.)
+
+**Required types.** Enforced users must have a factor of a type in `required_types` (default: an authenticator app). Their other factors don't count:
+
+| Enforced user has | At the challenge | After passing it |
+|---|---|---|
+| No factor | (not challenged) | Held on the settings page until they add a required type |
+| Only other types (e.g. email) | Verifies with what they have | Held on the settings page until they add a required type |
+| A required type (and maybe others) | Offered only the required types, plus recovery codes | Through |
+
+The server enforces this, not just the pages: a non-required factor is refused at `send` and `verify` (`FactorNotFound`). Removing their last required factor sends the user back to enroll. Users who aren't enforced can use any enabled type. Types that are disabled are ignored; if none of `required_types` is enabled, any factor satisfies enforcement and `mfa:doctor` warns.
+
+**Upgrading from v0.1:** the top-level `'enforce'` key is now `enforcement.roles` (a list) or `enforcement.policy` (a class). The old key is still honoured when neither is set, and `mfa:doctor` warns until you move it.
 
 ## Sending limits
 

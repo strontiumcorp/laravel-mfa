@@ -22,7 +22,8 @@ It must be secure, cheap per request, Octane-safe, fully tested, and observable.
 
 | Command | What it does |
 |---|---|
-| `make ci` | Pint (check), PHPStan level 6, the parallel Pest suite. Run before every commit. |
+| `make ci` | Pint (check), PHPStan level 6, the parallel Pest suite, `make test-js`. Run before every commit. |
+| `make test-js` | `tsc` and Vitest for `stubs/inertia-react` (needs `npm ci`; `make install` does both). |
 | `make test PROCESSES=2` | The suite grouped the way CI groups it (CI has 2 workers; the local default is one per CPU). |
 | `make test-filter FILTER="…"` | Run tests matching a name. |
 | `make coverage` | Parallel coverage, fails under 85% (currently ~98%). |
@@ -68,7 +69,8 @@ Don't break these. Each one is covered by tests; read them before changing the a
 **Who is checked**
 - `EnsureMfaVerified` is appended to the `web` group (deny by default). It checks the **identity stored in the session** (`Support\SessionIdentity`), never `Auth::user()`. That's why `Auth::setUser()` in webhooks, jobs and per-request impersonation is never challenged, while password, Socialite and remember-me logins always are.
 - Verification is **per guard** (`mfa.verified.{guard}.{id}` in the session). Every logged-in MFA guard must pass on its own.
-- Users with no factors pass, unless enforcement (`mfa.enforce`: roles list, policy class, or `Mfa::enforceUsing()`) says they must enroll.
+- Users with no factors pass, unless enforcement (`mfa.enforcement.roles` / `.policy`, or `Mfa::enforceUsing()`; the v0.1 `mfa.enforce` key is still honoured) says they must enroll.
+- Enforced users must hold a factor of `enforcement.required_types` (default totp). Without one they verify with what they have, then a session flag (`mfa.enroll.{guard}.{id}`, set in `markVerified()`, refreshed on factor confirm/remove) holds them on the enrollment routes, so verified requests still cost no query. With one, the challenge lists and accepts only required types (`Mfa::challengeTypes()`, checked server-side in `ChallengeService`); recovery codes still work.
 - The configured `routes.logout_route` is always reachable; MFA's own challenge routes are always reachable while a challenge is pending.
 - Settings routes are unreachable for an unverified user who has factors (a stolen password can't add a factor). Pending enrollments are bound to the session that started them (`PendingEnrollments`, 30 minutes).
 - `Mfa::grantForImpersonation()` (login-swap impersonation): if the target has MFA, the impersonator must have actually passed MFA in this session (D9).
@@ -103,8 +105,9 @@ Don't break these. Each one is covered by tests; read them before changing the a
 ## Contracts that must change together
 
 - JSON responses ↔ [docs/json-mode.md](docs/json-mode.md) ↔ `tests/Feature/JsonContractTest.php`.
-- `Support\MfaContext` (PHP) ↔ `stubs/inertia-react/components/mfa-context.ts` (TypeScript) ↔ `tests/Feature/MfaContextTest.php`.
-- Inertia page props ↔ `stubs/inertia-react/*.tsx` → run `make typecheck-stubs` for all three apps.
+- `Support\MfaContext` (PHP) ↔ `stubs/inertia-react/pages/mfa-context.ts` (TypeScript) ↔ `tests/Feature/MfaContextTest.php`.
+- Inertia page props ↔ `stubs/inertia-react/pages/*.tsx` → run `make typecheck-stubs` for all three apps.
+- Component props ↔ `tests/js/*.test.tsx` ↔ the props table in [docs/integration.md](docs/integration.md) step 6.
 - Behaviour visible to integrators ↔ the docs: [README.md](README.md) is only a quickstart; integration steps go in [docs/integration.md](docs/integration.md), settings and behaviour in [docs/configuration.md](docs/configuration.md). New integration steps also go in the plan's Phase 2 checklist and, where sensible, `mfa:install` output or an `mfa:doctor` check.
 
 ## Where things live
@@ -114,6 +117,6 @@ Don't break these. Each one is covered by tests; read them before changing the a
 - `src/Support/`: `ChallengeService`, `EnrollmentService`, `OtpStore`, `RecoveryCodes`, `RateLimits`, `SendGuard`, `CodeHasher`, `Redact`, `MfaContext`.
 - `src/Factors/`: TOTP, email, SMS. `src/Sms/`: drivers, composites, `Aws/SignatureV4`.
 - `src/Console/`: `mfa:install`, `mfa:doctor` (deploy gate; exits non-zero on failure), `mfa:status`, `mfa:reset`.
-- `stubs/inertia-react/`: pages (published to `{Pages|pages}/mfa/`) and `components/` (to `{Components|components}/mfa/`).
+- `stubs/inertia-react/pages/`: thin Inertia pages plus `mfa-context.ts` (`useMfa()`), published to `{Pages|pages}/mfa/`. `components/`: plain React components, published to `components/vendor/laravel-mfa/` (always lowercase). Components import only `react`, never Inertia, Ziggy or each other (`tests/js/standalone.test.tsx` enforces it); small helpers such as `useCountdown` are duplicated on purpose so each file stands alone. Tests in `tests/js/` (Vitest, jsdom, Testing Library): components through props and callbacks; pages with `@inertiajs/react` mocked (`tests/js/inertia-mock.ts`), asserting the URL and payload of each request.
 - `tests/Feature/*Test.php` by area; `SecurityReviewTest.php` and `BehaviourGapsTest.php` hold regression tests from the reviews.
 - `.gitattributes` keeps tests, tooling, `.codex/` and this file out of the Composer dist.

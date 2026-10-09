@@ -12,7 +12,7 @@ use JsonSerializable;
  *   // HandleInertiaRequests::share()
  *   'mfa' => fn () => Mfa::context($request),
  *
- * Mirrored by the MfaContext type in the published components/mfa/mfa-context.ts;
+ * Mirrored by the MfaContext type in the published {Pages|pages}/mfa/mfa-context.ts;
  * the shape is pinned by tests/Feature/MfaContextTest.php. Change both together.
  *
  * @implements Arrayable<string, mixed>

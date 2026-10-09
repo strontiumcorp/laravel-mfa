@@ -1,17 +1,26 @@
 // Published by strontiumcorp/laravel-mfa. This file is yours — restyle freely.
 //
 // Show next to API key management: API keys authenticate without MFA.
+// Standalone: needs only React, imports no other MFA file, and knows nothing
+// about Inertia or routes.
 //
-//     import MfaApiKeyNotice from '@/components/mfa/api-key-notice';
-//     <MfaApiKeyNotice />
-import { useMfa } from './mfa-context';
+// In an Inertia app, take the props from the shared MFA context:
+//
+//     import MfaApiKeyNotice from '@/components/vendor/laravel-mfa/api-key-notice';
+//     import { mfaApiKeyNoticeProps, useMfa } from '@/pages/mfa/mfa-context';
+//
+//     <MfaApiKeyNotice {...mfaApiKeyNoticeProps(useMfa())} />
 
-export default function MfaApiKeyNotice({ className = '' }: { className?: string }) {
-    const mfa = useMfa();
+export type MfaApiKeyNoticeProps = {
+    /** MFA is switched on (MFA_ENABLED); renders nothing when false. */
+    enabled?: boolean;
+    /** Adds a "Turn on two-factor authentication" link, for users without MFA. */
+    settingsUrl?: string | null;
+    className?: string;
+};
 
-    if (mfa && !mfa.enabled) return null;
-
-    const settingsUrl = mfa?.user && !mfa.user.hasMfa ? mfa.urls.settings : null;
+export default function MfaApiKeyNotice({ enabled = true, settingsUrl = null, className = '' }: MfaApiKeyNoticeProps) {
+    if (!enabled) return null;
 
     return (
         <div role="note" className={`rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 ${className}`}>

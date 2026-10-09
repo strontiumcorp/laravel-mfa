@@ -27,7 +27,7 @@ final class ChallengeService
     /** @param bool $confirmed false = resend during enrollment */
     public function send(MultiFactorAuthenticatable $user, int|string $factorId, bool $confirmed = true): VerificationResult
     {
-        $factor = $this->findFactor($user, $factorId, $confirmed);
+        $factor = $confirmed ? $this->findChallengeFactor($user, $factorId) : $this->findFactor($user, $factorId, false);
 
         if ($factor === null) {
             return $this->fail($user, null, FailureReason::FactorNotFound, ['factor_id' => $factorId, 'stage' => 'send']);
@@ -50,7 +50,7 @@ final class ChallengeService
 
     public function verify(MultiFactorAuthenticatable $user, int|string $factorId, string $code): VerificationResult
     {
-        $factor = $this->findFactor($user, $factorId);
+        $factor = $this->findChallengeFactor($user, $factorId);
 
         if ($factor === null) {
             return $this->fail($user, null, FailureReason::FactorNotFound, ['factor_id' => $factorId]);
@@ -101,6 +101,14 @@ final class ChallengeService
         $this->events->dispatch(new RecoveryCodeUsed($user, null, null, ['remaining' => $remaining]));
 
         return VerificationResult::success(['remaining' => $remaining]);
+    }
+
+    /** A confirmed factor the user may verify with now (see Mfa::challengeTypes()). */
+    private function findChallengeFactor(MultiFactorAuthenticatable $user, int|string $factorId): ?MfaFactor
+    {
+        $factor = $this->findFactor($user, $factorId);
+
+        return $factor !== null && in_array($factor->type, $this->mfa->challengeTypes($user), true) ? $factor : null;
     }
 
     public function findFactor(MultiFactorAuthenticatable $user, int|string $factorId, bool $confirmed = true): ?MfaFactor

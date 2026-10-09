@@ -3,6 +3,7 @@
 namespace StrontiumCorp\LaravelMfa\Http\Middleware;
 
 use Closure;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\Request;
 use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 use StrontiumCorp\LaravelMfa\Events\ChallengeRequired;
@@ -17,7 +18,8 @@ use Symfony\Component\HttpFoundation\Response;
  * Fast path for the common cases, in order:
  *  - MFA disabled / no session / excluded route  → pass, no work
  *  - guest                                      → pass
- *  - session already verified                   → pass, no queries
+ *  - session already verified                   → pass, no queries (a session
+ *    flag holds enforced users who still lack a required factor type)
  *  - user has no factors and is not enforced    → pass, one cached lookup
  */
 class EnsureMfaVerified
@@ -25,7 +27,7 @@ class EnsureMfaVerified
     /** Always reachable while a challenge is pending. */
     private const CHALLENGE_ROUTES = ['mfa.challenge', 'mfa.challenge.*'];
 
-    /** Reachable only by users who have no confirmed factor yet (enrollment). */
+    /** Reachable by users who must enroll (no factor yet, or no required type). */
     private const ENROLLMENT_ROUTES = ['mfa.settings', 'mfa.factors.*', 'mfa.recovery-codes.*'];
 
     public function __construct(private readonly Mfa $mfa) {}
@@ -39,6 +41,12 @@ class EnsureMfaVerified
         // Every logged-in session guard must be satisfied on its own.
         foreach ($this->mfa->sessionIdentities($request) as $identity) {
             if ($this->mfa->isVerifiedById($request->session(), $identity->guard, $identity->id)) {
+                // Verified, but enforced and still without a required factor type.
+                if ($this->mfa->mustEnrollAfterVerification($request->session(), $identity->guard, $identity->id)
+                    && ($denied = $this->requireEnrollment($request, $identity->user()))) {
+                    return $denied;
+                }
+
                 continue;
             }
 
@@ -67,18 +75,26 @@ class EnsureMfaVerified
         }
 
         if ($this->mfa->mustEnroll($user)) {
-            // Equivalent mutant(s): the config value is always a list.
-            if ($this->routeIs($request, self::ENROLLMENT_ROUTES) || $this->matches($request, (array) config('mfa.middleware.allow_while_enrolling'))) { // @pest-mutate-ignore: RemoveArrayCast
-                return null;
-            }
-
-            RequestContext::bind($request);
-            event(new EnrollmentRequired($user, null, null, ['path' => $request->getPathInfo()]));
-
-            return $this->deny($request, 'mfa_enrollment_required', 'You must set up multi-factor authentication.', 'mfa.settings');
+            return $this->requireEnrollment($request, $user);
         }
 
         return null;
+    }
+
+    /** Only the enrollment pages (and allow_while_enrolling) until the user enrolls. */
+    private function requireEnrollment(Request $request, ?Authenticatable $user): ?Response
+    {
+        // Equivalent mutant(s): the config value is always a list.
+        if ($this->routeIs($request, self::ENROLLMENT_ROUTES) || $this->matches($request, (array) config('mfa.middleware.allow_while_enrolling'))) { // @pest-mutate-ignore: RemoveArrayCast
+            return null;
+        }
+
+        if ($user instanceof MultiFactorAuthenticatable) {
+            RequestContext::bind($request);
+            event(new EnrollmentRequired($user, null, null, ['path' => $request->getPathInfo()]));
+        }
+
+        return $this->deny($request, 'mfa_enrollment_required', 'You must set up multi-factor authentication.', 'mfa.settings');
     }
 
     private function deny(Request $request, string $error, string $message, string $route): Response

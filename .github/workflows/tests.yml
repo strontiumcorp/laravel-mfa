@@ -29,6 +29,10 @@ jobs:
           {"php": "8.5", "laravel": "13", "stability": "prefer-stable"}
         ]}
 
+  # The published React components and pages: tsc and Vitest.
+  ui:
+    uses: ./.github/workflows/ui-suite.yml
+
   quality:
     name: Static analysis & style
     runs-on: ubuntu-24.04

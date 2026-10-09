@@ -32,6 +32,8 @@ class User extends Authenticatable implements MultiFactorAuthenticatable
 }
 ```
 
+`mfa:install` publishes the config, two Inertia pages to `resources/js/{Pages|pages}/mfa/`, and plain React components to `resources/js/components/vendor/laravel-mfa/`. The files are yours to restyle. Import the components as `@/components/vendor/laravel-mfa/<name>`; they need only React, so they work outside Inertia too.
+
 Link to `route('mfa.settings')` from the account page, then check the setup:
 
 ```bash
@@ -52,7 +54,7 @@ The middleware is added to the `web` group, so every web route is protected. It 
 | `actingAs()` in tests | Not challenged, so existing suites keep passing |
 | JSON requests | `403 {"error": "mfa_required", "redirect": "..."}` |
 
-Users without factors aren't challenged, unless `enforce` requires them to enroll.
+Users without factors aren't challenged, unless `enforcement` requires them to enroll. Enforced users must use an authenticator app by default (`enforcement.required_types`).
 
 ## Documentation
 
@@ -89,7 +91,9 @@ it('sends SMS codes', function () {
 `make` lists every task. The main ones:
 
 ```bash
-make ci                    # Pint, PHPStan, the test suite
+make install               # Composer and npm dependencies
+make ci                    # Pint, PHPStan, the test suite, the React component tests
+make test-js               # tsc and Vitest for the React components only
 make coverage              # with coverage; fails under 85%
 make test-matrix           # Laravel 11, 12 and 13, newest and lowest dependencies
 make typecheck-stubs APPS="../artistly ../clone-voice ../podcast-flow"
@@ -98,6 +102,6 @@ make release               # tag a release; ARGS="--dry-run" to preview
 
 `make release` infers the version from the commit messages, updates `CHANGELOG.md`, and pushes an annotated tag after you confirm. CI then runs the full matrix on the tag and publishes the GitHub Release.
 
-CI runs static analysis and 7 key combinations on every push. The full matrix (22 jobs) runs on release tags, nightly when `main` changed, and on demand.
+CI runs static analysis, the React component tests and 7 key combinations on every push. The full matrix (22 jobs) runs on release tags, nightly when `main` changed, and on demand.
 
 Conventions, testing rules and the design invariants are in [CLAUDE.md](CLAUDE.md).

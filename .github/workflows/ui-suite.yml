@@ -1,0 +1,22 @@
+name: ui suite
+
+# Reusable: type-checks the React components and Inertia pages that
+# mfa:install publishes (stubs/inertia-react), and runs their Vitest tests.
+# Called by tests.yml (every push / PR) and full-matrix.yml (release tags).
+
+on:
+  workflow_call:
+
+jobs:
+  ui:
+    name: React components · tsc · Vitest
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test

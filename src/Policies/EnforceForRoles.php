@@ -7,7 +7,7 @@ use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 
 /**
  * Users holding any of the given roles must enroll. Used when config
- * 'enforce' is a list of roles, e.g. ['admin', 'super_admin', 'support'].
+ * 'enforcement.roles' lists roles, e.g. ['admin', 'super_admin', 'support'].
  *
  * Roles come from getMfaRoles() (HasMultiFactorAuthentication reads the
  * "role" attribute, string or enum); override it for other role systems.

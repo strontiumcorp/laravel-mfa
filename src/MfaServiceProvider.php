@@ -164,12 +164,7 @@ class MfaServiceProvider extends ServiceProvider
             'Delivery' => config('mfa.delivery.queue_connection') || config('mfa.delivery.queue')
                 ? 'queued ('.(config('mfa.delivery.queue_connection') ?: config('queue.default')).(config('mfa.delivery.queue') ? ':'.config('mfa.delivery.queue') : '').')'
                 : 'sync',
-            'Enforcement' => match (true) {
-                $this->app->make(Mfa::class)->enforcesInCode() => 'Mfa::enforceUsing()',
-                is_array(config('mfa.enforce')) && config('mfa.enforce') !== [] => 'roles: '.implode(', ', (array) config('mfa.enforce')),
-                is_string(config('mfa.enforce')) => config('mfa.enforce'),
-                default => 'opt-in',
-            },
+            'Enforcement' => $this->enforcementSummary($this->app->make(Mfa::class)),
             'Audit log' => config('mfa.observability.audit.enabled') ? 'on' : 'off',
         ]);
     }
@@ -185,5 +180,22 @@ class MfaServiceProvider extends ServiceProvider
                     ->name('mfa:prune');
             }
         });
+    }
+
+    private function enforcementSummary(Mfa $mfa): string
+    {
+        [$roles, $policy] = $mfa->enforcementRules();
+
+        $who = $mfa->enforcesInCode()
+            ? 'Mfa::enforceUsing()'
+            : implode(' + ', array_filter([$roles !== [] ? 'roles: '.implode(', ', $roles) : null, $policy]));
+
+        if ($who === '') {
+            return 'opt-in';
+        }
+
+        $required = array_map(fn ($t) => $t->value, $mfa->requiredTypes());
+
+        return $who.' (requires '.($required === [] ? 'any factor' : implode(' or ', $required)).')';
     }
 }

@@ -508,8 +508,25 @@ describe('Mfa core', function () {
         $this->loginWithSession($this->makeUser());
 
         expect($this->getJson('/mfa/settings')->assertOk()->json('availableTypes'))->toBe([
-            ['type' => 'email', 'label' => 'Email'], ['type' => 'sms', 'label' => 'SMS'],
+            ['type' => 'email', 'label' => 'Email', 'recommended' => false], ['type' => 'sms', 'label' => 'SMS', 'recommended' => false],
         ]);
+    });
+
+    it('lists recommended types first, flagged, keeping the order otherwise', function () {
+        $this->loginWithSession($this->makeUser());
+
+        // Default: only TOTP is recommended.
+        expect($this->getJson('/mfa/settings')->assertOk()->json('availableTypes'))->toBe([
+            ['type' => 'totp', 'label' => 'Authenticator app', 'recommended' => true],
+            ['type' => 'email', 'label' => 'Email', 'recommended' => false],
+            ['type' => 'sms', 'label' => 'SMS', 'recommended' => false],
+        ]);
+
+        config(['mfa.factors.totp.recommended' => false, 'mfa.factors.sms.recommended' => true]);
+
+        expect($this->getJson('/mfa/settings')->json('availableTypes.*.type'))->toBe(['sms', 'totp', 'email'])
+            ->and(Mfa::isTypeRecommended(FactorType::Sms))->toBeTrue()
+            ->and(Mfa::isTypeRecommended(FactorType::Totp))->toBeFalse();
     });
 
     it('regenerates the session id when marking a session verified (fixation)', function () {
@@ -603,7 +620,7 @@ describe('Mfa core', function () {
 describe('middleware details', function () {
     it('records the path in ChallengeRequired / EnrollmentRequired, with a flow id', function () {
         Event::fake([Events\ChallengeRequired::class, Events\EnrollmentRequired::class]);
-        config(['mfa.enforce' => EnforceForAdmins::class]);
+        config(['mfa.enforcement.policy' => EnforceForAdmins::class]);
         [$user] = $this->userWithFactor();
         $admin = $this->makeUser(['is_admin' => true]);
 
@@ -872,7 +889,7 @@ describe('final triage round', function () {
 
     it('binds a fresh flow id for EnrollmentRequired', function () {
         Event::fake([Events\EnrollmentRequired::class]);
-        config(['mfa.enforce' => EnforceForAdmins::class]);
+        config(['mfa.enforcement.policy' => EnforceForAdmins::class]);
         Context::flush();
 
         $this->loginWithSession($this->makeUser(['is_admin' => true]))->get('/dashboard');

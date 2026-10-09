@@ -24,7 +24,7 @@ work="${TMPDIR:-/tmp}/laravel-mfa-l${version}-${stability}"
 mkdir -p "$work"
 
 rsync -a --delete --exclude vendor --exclude composer.lock --exclude .git \
-  --exclude build --exclude .phpunit.cache "$root/" "$work/"
+  --exclude build --exclude .phpunit.cache --exclude node_modules "$root/" "$work/"
 
 cd "$work"
 # Every Laravel 11 release has unpatched advisories (EOL); Composer 2.9 blocks

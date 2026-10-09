@@ -2,7 +2,7 @@
 
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 
-// Pins the shape mirrored by stubs/inertia-react/components/mfa-context.ts.
+// Pins the shape mirrored by stubs/inertia-react/pages/mfa-context.ts.
 // Change both together.
 
 it('describes a guest', function () {
@@ -16,7 +16,7 @@ it('describes a guest', function () {
 });
 
 it('describes the session user', function () {
-    config(['mfa.enforce' => ['admin'], 'mfa.routes.confirm_middleware' => ['password.confirm']]);
+    config(['mfa.enforcement.roles' => ['admin'], 'mfa.routes.confirm_middleware' => ['password.confirm']]);
     [$user] = $this->userWithFactor();
     $this->loginWithSession($user);
     $request = request()->setLaravelSession(session()->driver());
@@ -31,7 +31,7 @@ it('describes the session user', function () {
 });
 
 it('flags users who must enroll', function () {
-    config(['mfa.enforce' => ['admin']]);
+    config(['mfa.enforcement.roles' => ['admin']]);
     $user = $this->makeUser();
     $this->loginWithSession($user);
     Mfa::enforceUsing(fn () => true);

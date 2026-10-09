@@ -24,6 +24,7 @@
 - **Naming:** `strontiumcorp/laravel-mfa`, namespace `StrontiumCorp\LaravelMfa`, with `@itsemon245` as maintainer and code owner
 
 **Next steps, in order**
+0. **UI restructure (D11), done 2026-10-09, awaiting review:** pages are thin Inertia wrappers, components are plain React in `components/vendor/laravel-mfa/`, with Vitest tests. Review, commit, release as **v0.2.0** (published paths change), then resume artistly, which hasn't published yet and takes the new layout directly.
 1. **Release (1.5):** push to `github.com/strontiumcorp/laravel-mfa`, first green CI run, `make release` (tags `v0.1.0` and writes `CHANGELOG.md`).
 2. **Integrate artistly (Phase 3),** then clone-voice (Phase 4), then podcast-flow (Phase 5). All decisions are closed (see Phase 0).
 
@@ -56,12 +57,14 @@ One installable package that adds MFA (authenticator app, email OTP, SMS OTP, pl
 | D2 | Where the package is hosted | `[x]` | Private repo **https://github.com/strontiumcorp/laravel-mfa** (created, empty). Apps install it via a `vcs` repository entry; CI and servers need a deploy key or GitHub token (see README *Installation*). |
 | D3 | SMS provider | `[x]` | **Twilio** when SMS is turned on; **SMS stays disabled** at launch (`MFA_SMS_ENABLED=false`, the default). Set `MFA_SMS_DRIVER=twilio` + credentials in each app's env so enabling it later is one switch. Pricing notes (Oct 2026 list): US ~$0.012/SMS everywhere; UK $0.044–0.057; Bangladesh $0.33–0.60 (Infobip cheapest, a `routing` candidate later); India $0.004 on AWS with DLT. |
 | D4 | Which factors to launch with | `[x]` | **TOTP and email.** SMS later (cost, toll-fraud risk). |
-| D5 | Enforcement | `[x]` | Enforce for admins in all three apps via config roles: `'enforce' => ['admin', 'super_admin', 'support']` (matches each app's `isAdmin()`; the trait's `getMfaRoles()` reads the `role` attribute, string in artistly, `UserRole` enum in clone-voice/podcast-flow). Opt-in for everyone else. Code-level rules go through `Mfa::enforceUsing(fn ($user) => …)`. Implemented 2026-10-09. |
+| D5 | Enforcement | `[x]` | Enforce for admins in all three apps via config roles: `'enforcement' => ['roles' => ['admin', 'super_admin', 'support']]` (was `'enforce'` until D12) (matches each app's `isAdmin()`; the trait's `getMfaRoles()` reads the `role` attribute, string in artistly, `UserRole` enum in clone-voice/podcast-flow). Opt-in for everyone else. Code-level rules go through `Mfa::enforceUsing(fn ($user) => …)`. Implemented 2026-10-09. |
 | D6 | Password confirmation before factor changes | `[x]` | Per app: `mfa:doctor` warns when Socialite is installed and `password.confirm` is on. Apps with Google/social login (artistly and clone-voice both have Socialite) set `routes.confirm_middleware` to `[]` unless they ship a set-password flow. Client-side toggles come from one shared, typed `MfaContext` (`'mfa' => Mfa::context($request)` in `HandleInertiaRequests`, `useMfa()` in React). Implemented 2026-10-09. |
 | D7 | Rollout order | `[x]` | **artistly first** (L11, most quirks), then clone-voice (L12), then podcast-flow (L13), so the newer apps get the least friction. Phases 3–5 reordered accordingly. |
 | D8 | Code delivery mode | `[x]` | **Queued from day one.** `delivery.queue` alone queues on the default connection; `delivery.queue_connection` picks one. A `sync` connection falls back to inline sending. Failed queued deliveries discard the unsent code. Implemented 2026-10-09. Note: artistly's `.env.example` has `QUEUE_CONNECTION=sync`; confirm production runs a real queue and worker. |
 | D9 | Impersonating with an admin who has no MFA (security review #7) | `[x]` | **Option A**, implemented 2026-10-09: if the target has MFA, `grantForImpersonation()` requires the impersonator to have actually passed MFA in the session. Free with D5, since admins must enroll. |
 | D10 | Disabling a factor type in config (security review #9) | `[x]` | **Option A: keep fail-open** and document "disable a type only after users migrate" (docs/configuration.md). `mfa:doctor` now counts users who still have factors of a disabled type. |
+| D11 | Published UI layout | `[x]` | User decision, 2026-10-09. **Pages** (`challenge.tsx`, `settings.tsx`) stay in `{Pages\|pages}/mfa/` as thin Inertia wrappers: props in, `useForm`/`router`/`Head` wiring, components out. **Components** go to `resources/js/components/vendor/laravel-mfa/<name>.tsx` (always lowercase), one per file, React-only: no Inertia, no Ziggy, no imports between them, so each works in any React app. Small helpers (`useCountdown`, the clear-after-failure effect, factor types) are **duplicated** per file rather than shared, so a copied or customised file never depends on a sibling (a shared helper would be one more published file whose edits silently change every component). `useMfa()` moved to `{Pages\|pages}/mfa/mfa-context.ts` (Inertia layer; `.ts` so the `**/*.tsx` page globs skip it); `MfaApiKeyNotice` takes `enabled`/`settingsUrl` props, fed by `mfaApiKeyNoticeProps(useMfa())`. Backend props unchanged. |
+| D12 | What enforced users must use | `[x]` | User decision, 2026-10-09. Config regrouped: `enforcement.roles`, `enforcement.policy`, `enforcement.required_types` (default `['totp']`); the v0.1 `enforce` key is still honoured and `mfa:doctor` warns. Enforced users must hold a required type: without one they verify with the factors they have (never enroll unverified: a stolen password can't add a factor) and are then held on settings; with one, the challenge offers and the server accepts only required types (user chose "required types only" over "any factor"). Recovery codes still work. Impersonation grants don't set the hold. |
 
 ---
 
@@ -92,6 +95,7 @@ One installable package that adds MFA (authenticator app, email OTP, SMS OTP, pl
 - [x] `mfa:install` detects `Pages/` vs `pages/`
 - [x] Type-checked against all three apps' real dependencies (React 18/19, Inertia 2.2/2.3/3.0)
 - [x] **Logout URL is configurable** (`routes.logout_route`, default `logout`). The challenge page posts to `urls.logout`, so artistly's `POST /admin/logout` works, and the button is hidden if the route doesn't exist. Tested, and the stubs re-type-check in all three apps.
+- [x] **UI restructure (D11, 2026-10-09).** Nine components in `stubs/inertia-react/components/` (`challenge-form`, `send-code-button`, `recovery-code-form`, `factor-list`, `add-factor-form`, `totp-setup`, `destination-setup`, `recovery-codes-panel`, `api-key-notice`); pages and `mfa-context.ts` in `stubs/inertia-react/pages/`. `mfa:install` publishes to the new paths, keeps skip-if-exists and `--js-path`, prints the new import paths, and warns about v0.1 files left in `{Components|components}/mfa/`. Vitest + Testing Library (jsdom) at the repo root: 71 tests through props and callbacks, plus a guard that components import only `react`. `tsc` over components, pages (against `@inertiajs/react` 3) and tests. CI: `ui-suite.yml`, called from `tests.yml` and gating the Release in `full-matrix.yml`. `make test-js`, part of `make ci`. Re-type-checked in all three apps.
 - [x] **JSON mode docs**: [docs/json-mode.md](../../docs/json-mode.md) covers every endpoint, payload and error shape. A contract test (`tests/Feature/JsonContractTest.php`) pins each response so the docs can't drift.
 
 ### 1.4 Quality — `[x]` done except the GitHub CI run (waits on 1.5)
@@ -225,12 +229,12 @@ Each app gets these steps on its own feature branch. App-specific deviations are
 1. **Install**
    - Add the Composer repository: `path` (`../laravel-mfa`, symlinked) during development, `vcs` after v0.1.0.
    - `composer require strontiumcorp/laravel-mfa`
-   - `php artisan mfa:install` (publishes `config/mfa.php` and the pages into `resources/js/{Pages|pages}/mfa/`)
+   - `php artisan mfa:install` (publishes `config/mfa.php`, the pages and `mfa-context.ts` into `resources/js/{Pages|pages}/mfa/`, and the components into `resources/js/components/vendor/laravel-mfa/`)
    - `php artisan migrate`
 2. **Model:** add `implements MultiFactorAuthenticatable` and `use HasMultiFactorAuthentication` to `App\Models\User`.
 3. **Config / env:**
    - factors: TOTP + email (D4); `MFA_SMS_ENABLED=false`, `MFA_SMS_DRIVER=twilio` + Twilio credentials ready (D3)
-   - `'enforce' => ['admin', 'super_admin', 'support']` (D5)
+   - `'enforcement' => ['roles' => ['admin', 'super_admin', 'support'], 'required_types' => ['totp']]` (D5, D12)
    - `routes.home`; `routes.confirm_middleware` → `[]` if the app has social login and no set-password flow (D6)
    - `MFA_DELIVERY_QUEUE=mfa` (or the app's queue) and a worker that serves it (D8)
    - `MFA_LOG_CHANNEL`
@@ -241,7 +245,7 @@ Each app gets these steps on its own feature branch. App-specific deviations are
    - Add a "Two-factor authentication" entry in account settings that links to `route('mfa.settings')`.
    - Check that flash/status display works with the app's `HandleInertiaRequests`.
    - Share the context: `'mfa' => fn () => Mfa::context($request)` in `HandleInertiaRequests::share()`.
-   - Show `<MfaApiKeyNotice />` (published to `components/mfa/`) next to the API key settings.
+   - Show `<MfaApiKeyNotice {...mfaApiKeyNoticeProps(useMfa())} />` (from `@/components/vendor/laravel-mfa/api-key-notice` and `@/{Pages|pages}/mfa/mfa-context`) next to the API key settings.
 7. **Tests**
    - Run the existing suite. It should pass unchanged, because `actingAs()` doesn't trigger MFA.
    - Add app-level tests with `InteractsWithMfa`: challenge after login, verified access, an admin forced to enroll, impersonation, a webhook still working, and an API key still working.
@@ -270,7 +274,8 @@ Working branch is currently `SDAP-786`; create a dedicated MFA branch.
 
 - [x] **Prerequisite:** package fix 1.3 (configurable logout URL). Note (2026-10-09): on branch `SDAP-786` artistly's logout is the standard named `logout` route (`routes/auth.php:68`); `Admin\SettingsController::logout` exists but has no route. Re-check on the MFA branch.
 - [ ] Laravel 11 is end-of-life and every 11.x has open advisories, so Composer may block installs. Use the separate advisory-triage task, and consider upgrading to Laravel 12 before or after MFA.
-- [ ] Steps 1–3 of the Phase 2 checklist (pages go to `resources/js/Pages/mfa/`, `.tsx` resolves through the existing glob)
+- [ ] **Wait for v0.2.0** (D11): the published file layout changed. artistly hadn't published yet, so it takes the new layout directly.
+- [ ] Steps 1–3 of the Phase 2 checklist (pages go to `resources/js/Pages/mfa/`, `.tsx` resolves through the existing glob; components to `resources/js/components/vendor/laravel-mfa/`, next to the existing lowercase `components/`; imports use the `@/` alias, which artistly's `tsconfig.json` defines)
 - [ ] **Login-swap impersonation:**
   - `Admin/UserController::switch_user` (swap at line 265 on `SDAP-786`): add `Mfa::grantForImpersonation($admin, $target)` after `Auth::loginUsingId()`. On the current branch this is the only login swap; re-grep for `loginUsingId` on the MFA branch in case others come back.
   - `routes/web.php` `exit-impersonate`: no change expected (the admin's verified flag survives); verify only
@@ -319,7 +324,7 @@ Working branch is currently `PODCAST-144`; create a dedicated MFA branch.
 - [ ] SMS: provider credentials, calling-code allowlist, and a monthly spend cap set at the provider
 
 ### Production (per app, after staging QA)
-1. [ ] Deploy with `MFA_ENABLED=true`, opt-in only (`enforce` = `null`). Watch for a week.
+1. [ ] Deploy with `MFA_ENABLED=true`, opt-in only (`enforcement.roles` = `[]`). Watch for a week.
 2. [ ] Turn on `EnforceForAdmins`. Admins enroll on next login.
 3. [ ] Announce opt-in MFA to users (email / in-app).
 4. [ ] Review metrics and audit logs. Decide whether to enforce for more user groups.
@@ -432,3 +437,7 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
     - FK relations, `append_to_web_group = false`
   - Bugs found: a late `Mfa::extend()` was ignored once a factor driver was built; `mfa:doctor` counted failures across runs in one process. README's "custom factor" section promised new factor types (e.g. passkeys) that the closed `FactorType` enum can't store; reworded to "replace a built-in factor". 370 tests; coverage 98.4%.
   - CI speed: the per-push run was ~1m30s because 24 jobs exceed the plan's 20 concurrent jobs (the last 4 queued ~40s) and the quality job re-ran the suite for coverage. Now: coverage in one matrix cell, parallel Pint, Composer and PHPStan caches, Node 24 actions (checkout@v7, cache@v6). Per push: static analysis + 7 combinations (user decision); the full 22-job matrix runs on tags, on demand and nightly when `main` changed.
+  - UI restructure (D11, user request): published pages are now thin Inertia wrappers; the UI lives in nine standalone React components published to `resources/js/components/vendor/laravel-mfa/`. `useMfa()` moved to `{Pages|pages}/mfa/mfa-context.ts`; `MfaApiKeyNotice` takes props. Backend contract unchanged. Vitest + Testing Library added (71 tests, `make test-js`, CI `ui-suite.yml`). `mfa:install`, its tests, `docs/integration.md` (steps 2 and 6, props table, upgrade note), README, CLAUDE.md and `scripts/typecheck-stubs.sh` updated. Pages and components type-check in artistly (Inertia 2, React 18), clone-voice (Inertia 2, React 19) and podcast-flow (Inertia 3, React 19). Not committed yet; release as v0.2.0 after review.
+  - Recommended factor types (user request): `factors.{type}.recommended` in config (default: `totp` only), `Mfa::isTypeRecommended()`. Settings' `availableTypes` gains `recommended` and lists recommended types first (JSON contract, docs/json-mode.md and docs/configuration.md updated); `MfaAddFactorForm` badges them and orders them first too, so it works with any data. The challenge's factor order (most recently used first, which picks `defaultFactorId`) is unchanged.
+  - Enforcement regrouped and required types (D12, user request): `config('mfa.enforcement')` with `roles`, `policy`, `required_types` (default `['totp']`). New `Mfa::isEnforced()`, `enforcesAnyone()`, `enforcementRules()`, `requiredTypes()`, `challengeTypes()`, `confirmedTypes()`, `refreshEnrollmentRequirement()`, `mustEnrollAfterVerification()`; `mustEnroll()` now also covers an enforced user without a required type. Middleware holds verified-but-incomplete sessions on the enrollment routes via a session flag (no per-request query). Challenge page and `ChallengeService` restrict enforced users to their required types. Settings props gain `requiredTypes`; `MfaFactorList` takes `requiredLabels`. `mfa:doctor` validates `required_types`, warns on the old `enforce` key; `about` shows the required types. 10 new Pest tests (`RequiredFactorTypesTest`), 2 Vitest tests; the key tests were checked to fail with the hold or the server-side restriction removed. Docs: configuration.md (table of cases, upgrade note), integration.md, json-mode.md, README, CLAUDE.md.
+  - Review pass over the D11/D12/recommended-types work. Fixed: the challenge page showed "Code sent" and the resend countdown on every factor after a send, not just the one the code went to; `mfa:doctor` said nothing when the old `enforce` key sat next to the new keys (it's ignored then; now a warning); stale `enforce` references in docblocks; the settings page shadowed `window.confirm` with a local name. Added page tests (Vitest, `@inertiajs/react` mocked) for both pages' requests, a zero-query test for a verified enforced user, a doctor test and an `about` test. Checked, no change needed: Inertia `post`/`delete` default to `preserveState: true`, so page state survives the redirects; `ConfigMerge` takes list values (`required_types`, `roles`) from the app whole, so `[]` empties them.

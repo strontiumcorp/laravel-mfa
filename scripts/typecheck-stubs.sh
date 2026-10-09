@@ -12,13 +12,16 @@ for app in "$@"; do
   nm="$(cd "$app" && pwd)/node_modules"
   [ -x "$nm/.bin/tsc" ] || { echo "$app: no node_modules/.bin/tsc (run npm/pnpm install there)"; status=1; continue; }
 
+  # Lay the files out as mfa:install publishes them: pages under pages/mfa/,
+  # components under components/vendor/laravel-mfa/ (imported via "@/").
   work="$(mktemp -d)"
-  cp "$root"/stubs/inertia-react/*.tsx "$work/"
-  mkdir "$work/components" && cp "$root"/stubs/inertia-react/components/* "$work/components/"
+  mkdir -p "$work/pages/mfa" "$work/components/vendor/laravel-mfa"
+  cp "$root"/stubs/inertia-react/pages/* "$work/pages/mfa/"
+  cp "$root"/stubs/inertia-react/components/* "$work/components/vendor/laravel-mfa/"
   cat > "$work/tsconfig.json" <<JSON
 { "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx",
   "strict": true, "noEmit": true, "skipLibCheck": true, "lib": ["DOM", "ES2022"], "baseUrl": ".",
-  "paths": { "*": ["$nm/@types/*", "$nm/*"] }, "typeRoots": ["$nm/@types"] }, "include": ["*.tsx", "components/*.ts", "components/*.tsx"] }
+  "paths": { "@/*": ["./*"], "*": ["$nm/@types/*", "$nm/*"] }, "typeRoots": ["$nm/@types"] }, "include": ["pages/**/*", "components/**/*"] }
 JSON
   if (cd "$work" && "$nm/.bin/tsc" -p .); then echo "$app: OK"; else echo "$app: FAILED"; status=1; fi
   rm -rf "$work"

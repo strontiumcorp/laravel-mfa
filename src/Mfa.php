@@ -44,6 +44,9 @@ class Mfa
 {
     public const SESSION_PREFIX = 'mfa.verified';
 
+    /** Set on a verified session whose user still lacks a required factor type. */
+    public const ENROLL_PREFIX = 'mfa.enroll';
+
     /** Set to false (Mfa::ignoreMigrations()) if you publish and own the migrations. */
     public static bool $runsMigrations = true;
 
@@ -97,6 +100,12 @@ class Mfa
     {
         // Equivalent mutant(s): the bool return type coerces; the deep config merge guarantees the key exists for every built-in type.
         return (bool) $this->config->get("mfa.factors.{$type->value}.enabled", false); // @pest-mutate-ignore: RemoveBooleanCast,FalseToTrue
+    }
+
+    /** Shown first, with a "Recommended" badge, when users add a method (factors.{type}.recommended). */
+    public function isTypeRecommended(FactorType $type): bool
+    {
+        return (bool) $this->config->get("mfa.factors.{$type->value}.recommended");
     }
 
     public function factor(FactorType|string $type): Factor
@@ -161,32 +170,149 @@ class Mfa
             ->exists();
     }
 
+    /**
+     * Whether this user must (still) enroll: an enforcement rule applies and
+     * they have no confirmed factor of a required type (any enabled type
+     * when enforcement.required_types names none that is enabled).
+     */
     public function mustEnroll(MultiFactorAuthenticatable $user): bool
     {
-        $policy = $this->config->get('mfa.enforce');
-
-        if (($policy === null || $policy === []) && $this->enforceUsing === null) {
+        if (! $this->enforcesAnyone()) {
             return false;
         }
 
-        if ($this->hasConfirmedFactors($user)) {
+        if (! $this->hasConfirmedFactors($user)) {
+            return $this->isEnforced($user);
+        }
+
+        $required = $this->requiredTypes();
+
+        if ($required === [] || ! $this->isEnforced($user)) {
             return false;
         }
 
+        return array_intersect($this->typeValues($required), $this->typeValues($this->confirmedTypes($user))) === [];
+    }
+
+    /** Whether an enforcement rule (enforceUsing(), roles or policy) applies to this user. */
+    public function isEnforced(MultiFactorAuthenticatable $user): bool
+    {
         if ($this->enforceUsing !== null) {
             return (bool) ($this->enforceUsing)($user);
         }
 
-        /** @var EnforcementPolicy $instance */
-        $instance = is_array($policy)
-            ? new EnforceForRoles(array_values(array_map('strval', $policy)))
-            : $this->app->make($policy);
+        [$roles, $policy] = $this->enforcementRules();
 
-        return $instance->mustEnroll($user);
+        if ($roles !== [] && (new EnforceForRoles($roles))->mustEnroll($user)) {
+            return true;
+        }
+
+        /** @var EnforcementPolicy|null $instance */
+        $instance = $policy === null ? null : $this->app->make($policy);
+
+        return $instance !== null && $instance->mustEnroll($user);
+    }
+
+    /** Whether any enforcement rule is configured at all (cheap; no user needed). */
+    public function enforcesAnyone(): bool
+    {
+        [$roles, $policy] = $this->enforcementRules();
+
+        return $this->enforceUsing !== null || $roles !== [] || $policy !== null;
     }
 
     /**
-     * Decide in code who must enroll; takes precedence over config('mfa.enforce').
+     * The roles and policy class from config('mfa.enforcement'). The v0.1
+     * key config('mfa.enforce') (a roles list or a class) is still honoured
+     * when neither is set, so an old published config never fails open;
+     * mfa:doctor asks for it to be moved.
+     *
+     * @return array{0: list<string>, 1: string|null}
+     */
+    public function enforcementRules(): array
+    {
+        $roles = (array) $this->config->get('mfa.enforcement.roles');
+        $policy = $this->config->get('mfa.enforcement.policy');
+
+        if ($roles === [] && ($policy === null || $policy === '')) {
+            $legacy = $this->config->get('mfa.enforce');
+            $roles = is_array($legacy) ? $legacy : [];
+            $policy = is_string($legacy) ? $legacy : null;
+        }
+
+        return [
+            array_values(array_map('strval', $roles)),
+            is_string($policy) && $policy !== '' ? $policy : null,
+        ];
+    }
+
+    /**
+     * The enabled types listed in enforcement.required_types. Empty means any
+     * enabled type satisfies enforcement.
+     *
+     * @return list<FactorType>
+     */
+    public function requiredTypes(): array
+    {
+        $required = array_map('strval', (array) $this->config->get('mfa.enforcement.required_types'));
+
+        return array_values(array_filter(
+            $this->enabledTypes(),
+            fn (FactorType $type): bool => in_array($type->value, $required, true),
+        ));
+    }
+
+    /**
+     * The types this user may verify with at the challenge: for an enforced
+     * user who has a required factor, only the required types; otherwise
+     * every enabled type (an enforced user without one verifies with what
+     * they have, then must enroll).
+     *
+     * @return list<FactorType>
+     */
+    public function challengeTypes(MultiFactorAuthenticatable $user): array
+    {
+        $required = $this->requiredTypes();
+
+        if ($required === [] || ! $this->enforcesAnyone() || ! $this->isEnforced($user)) {
+            return $this->enabledTypes();
+        }
+
+        $held = array_intersect($this->typeValues($required), $this->typeValues($this->confirmedTypes($user)));
+
+        return $held === [] ? $this->enabledTypes() : array_map(fn (string $value) => FactorType::from($value), array_values($held));
+    }
+
+    /**
+     * The user's confirmed factor types that are enabled (one query).
+     *
+     * @return list<FactorType>
+     */
+    public function confirmedTypes(MultiFactorAuthenticatable $user): array
+    {
+        $held = MfaFactor::query()
+            ->where('user_id', $user->getAuthIdentifier())
+            ->whereNotNull('confirmed_at')
+            ->distinct()
+            ->pluck('type')
+            ->map(fn (FactorType|string $type) => $type instanceof FactorType ? $type->value : $type)
+            ->all();
+
+        return array_values(array_filter($this->enabledTypes(), fn (FactorType $type): bool => in_array($type->value, $held, true)));
+    }
+
+    /**
+     * @param  list<FactorType>  $types
+     * @return list<string>
+     */
+    private function typeValues(array $types): array
+    {
+        return array_map(fn (FactorType $type) => $type->value, $types);
+    }
+
+    /**
+     * Decide in code who is enforced; replaces config('mfa.enforcement.roles')
+     * and ('mfa.enforcement.policy'). enforcement.required_types still applies.
      * Register in a service provider's boot(), e.g.
      * Mfa::enforceUsing(fn (User $user) => $user->isAdmin()). Pass null to clear.
      *
@@ -248,11 +374,46 @@ class Mfa
         $guard = $this->guardFor($request, $user);
 
         $request->session()->put($this->sessionKey($guard, $user->getAuthIdentifier()), now()->getTimestamp());
+        $this->syncEnrollmentRequirement($request->session(), $guard, $user);
         $request->session()->regenerate();
 
         $this->events->dispatch(new VerificationSucceeded($user, $via, null, $context));
 
         RequestContext::end($request);
+    }
+
+    /**
+     * Re-decide whether this verified session must enroll a required factor
+     * type, after the user's factors changed (settings confirm/remove).
+     */
+    public function refreshEnrollmentRequirement(Request $request, MultiFactorAuthenticatable $user): void
+    {
+        $guard = $this->guardFor($request, $user);
+
+        if ($this->isVerifiedById($request->session(), $guard, $user->getAuthIdentifier())) {
+            $this->syncEnrollmentRequirement($request->session(), $guard, $user);
+        }
+    }
+
+    /**
+     * Whether this verified session is held on the enrollment pages until a
+     * required factor type is added. Decided at verification and whenever
+     * the factors change, so a verified request still costs no query.
+     */
+    public function mustEnrollAfterVerification(Session $session, string $guard, int|string $id): bool
+    {
+        return $session->has(self::ENROLL_PREFIX.'.'.$guard.'.'.$id);
+    }
+
+    private function syncEnrollmentRequirement(Session $session, string $guard, Authenticatable $user): void
+    {
+        $key = self::ENROLL_PREFIX.'.'.$guard.'.'.$user->getAuthIdentifier();
+
+        if ($user instanceof MultiFactorAuthenticatable && $this->mustEnroll($user)) {
+            $session->put($key, true);
+        } else {
+            $session->forget($key);
+        }
     }
 
     /**
@@ -303,10 +464,13 @@ class Mfa
         $model = $identity?->user();
 
         if ($identity !== null && $model instanceof MultiFactorAuthenticatable) {
+            $verified = $this->isVerifiedById($request->session(), $identity->guard, $identity->id);
             $user = [
                 'hasMfa' => $this->hasConfirmedFactors($model),
-                'verified' => $this->isVerifiedById($request->session(), $identity->guard, $identity->id),
-                'mustEnroll' => $this->mustEnroll($model),
+                'verified' => $verified,
+                'mustEnroll' => $verified
+                    ? $this->mustEnrollAfterVerification($request->session(), $identity->guard, $identity->id)
+                    : $this->mustEnroll($model),
             ];
         }
 

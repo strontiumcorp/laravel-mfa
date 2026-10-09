@@ -49,19 +49,31 @@ return [
     | Enforcement
     |--------------------------------------------------------------------------
     |
-    | null  => MFA is opt-in per user.
-    | roles => a list of roles that must enroll, e.g. ['admin', 'support'],
-    |          matched against the user's getMfaRoles() (the "role"
-    |          attribute by default; string or enum).
-    | class => a class implementing Contracts\EnforcementPolicy.
+    | Who must use MFA. With no roles, no policy and no Mfa::enforceUsing(),
+    | MFA is opt-in per user. A user is enforced when either rule says so.
+    |
+    | roles          => roles that must use MFA, e.g. ['admin', 'support'],
+    |                   matched against the user's getMfaRoles() (the "role"
+    |                   attribute by default; string or enum).
+    | policy         => a class implementing Contracts\EnforcementPolicy.
+    | required_types => what enforced users must set up and sign in with.
+    |                   Their other factors don't count: an enforced user
+    |                   with only email is sent to add an authenticator app,
+    |                   and once they have one, the challenge offers only it
+    |                   (recovery codes still work). Types that are disabled
+    |                   are ignored; [] means any enabled type.
     |
     | For logic in code, call Mfa::enforceUsing(fn ($user) => ...) in a
-    | service provider instead; it takes precedence over this value. (A
-    | closure can't go here: `php artisan config:cache` can't store it.)
+    | service provider; it decides instead of roles and policy. (A closure
+    | can't go here: `php artisan config:cache` can't store it.)
     |
     */
 
-    'enforce' => null,
+    'enforcement' => [
+        'roles' => [],
+        'policy' => null,
+        'required_types' => ['totp'],
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -73,6 +85,8 @@ return [
 
         'totp' => [
             'enabled' => env('MFA_TOTP_ENABLED', true),
+            // Listed first and badged "Recommended" when users add a method.
+            'recommended' => true,
             'issuer' => env('MFA_TOTP_ISSUER', env('APP_NAME', 'Laravel')),
             // Number of 30s steps accepted either side of "now" (clock drift).
             'window' => 1,
@@ -80,6 +94,7 @@ return [
 
         'email' => [
             'enabled' => env('MFA_EMAIL_ENABLED', true),
+            'recommended' => false,
             'length' => 6,
             'ttl' => 600,               // seconds a code stays valid
             'max_attempts' => 5,        // wrong guesses before a code is burned
@@ -94,6 +109,7 @@ return [
 
         'sms' => [
             'enabled' => env('MFA_SMS_ENABLED', false),
+            'recommended' => false,
             'length' => 6,
             'ttl' => 600,               // carriers can be slow; matches email
             'max_attempts' => 5,

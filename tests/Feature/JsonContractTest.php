@@ -60,7 +60,7 @@ it('GET /mfa/settings and the enrollment endpoints', function () {
     $this->loginWithSession($user);
 
     $this->getJson('/mfa/settings')->assertOk()->assertExactJsonStructure([
-        'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label']], 'recoveryCodesRemaining', 'mustEnroll',
+        'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label', 'recommended']], 'recoveryCodesRemaining', 'mustEnroll', 'requiredTypes',
         'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes'], 'status', 'recoveryCodes', 'retryAfter',
     ]);
 

@@ -20,7 +20,7 @@ use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
 use StrontiumCorp\LaravelMfa\Support\RateLimits;
 
 it('[#9] lets enforced users through password confirmation while enrolling (no redirect loop)', function () {
-    config(['mfa.enforce' => EnforceForAdmins::class, 'mfa.routes.confirm_middleware' => ['password.confirm']]);
+    config(['mfa.enforcement.policy' => EnforceForAdmins::class, 'mfa.routes.confirm_middleware' => ['password.confirm']]);
     require __DIR__.'/../../routes/mfa.php';
     app('router')->getRoutes()->refreshNameLookups();
     $admin = $this->makeUser(['is_admin' => true]);

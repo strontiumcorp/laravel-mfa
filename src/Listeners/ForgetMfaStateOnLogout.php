@@ -21,6 +21,6 @@ final class ForgetMfaStateOnLogout
     {
         $store = $this->session->driver();
 
-        $store->forget(['mfa.verified', 'mfa.pending', 'mfa.flow_id', 'mfa.recovery_codes']);
+        $store->forget(['mfa.verified', 'mfa.enroll', 'mfa.pending', 'mfa.flow_id', 'mfa.recovery_codes']);
     }
 }

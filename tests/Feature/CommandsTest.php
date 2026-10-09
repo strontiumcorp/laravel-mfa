@@ -41,55 +41,92 @@ it('resets a locked-out user with mfa:reset', function () {
         ->and(Mfa::hasConfirmedFactors($user))->toBeFalse();
 });
 
-it('publishes the UI into whichever pages and components directories the app uses', function (string $dir, string $components) {
+it('publishes the pages into the app\'s pages directory and the components into components/vendor/laravel-mfa', function (string $dir) {
     // Never write into the shared Testbench skeleton: use a private temp dir,
     // and record the config publish instead of performing it.
     $files = new Filesystem;
     $js = sys_get_temp_dir().'/mfa-install-'.uniqid();
     $files->ensureDirectoryExists("{$js}/{$dir}");
-    // artistly has both components/ and Components/; the pages casing wins.
-    $files->ensureDirectoryExists("{$js}/components");
+    // artistly has both components/ and Components/; components always go to lowercase components/.
     $files->ensureDirectoryExists("{$js}/Components");
     $published = [];
     Artisan::command('vendor:publish {--tag=} {--force}', function () use (&$published) {
         $published[] = $this->option('tag');
     });
+    $stubs = __DIR__.'/../../stubs/inertia-react';
+    $names = fn (string $path) => collect($files->files($path))->map->getFilename()->sort()->values()->all();
 
     try {
-        $this->artisan('mfa:install', ['--js-path' => $js])->assertSuccessful();
+        $this->artisan('mfa:install', ['--js-path' => $js])
+            ->assertSuccessful()
+            ->expectsOutputToContain("{$js}/{$dir}/mfa/challenge.tsx")
+            ->expectsOutputToContain("{$js}/components/vendor/laravel-mfa/challenge-form.tsx")
+            ->expectsOutputToContain("from '@/{$dir}/mfa/mfa-context'")
+            ->expectsOutputToContain("from '@/components/vendor/laravel-mfa/api-key-notice'")
+            ->doesntExpectOutputToContain('earlier version');
 
         expect($published)->toBe(['mfa-config'])
-            ->and("{$js}/{$dir}/mfa/challenge.tsx")->toBeFile()
-            ->and("{$js}/{$dir}/mfa/settings.tsx")->toBeFile()
-            ->and(file_get_contents("{$js}/{$dir}/mfa/challenge.tsx"))->toBe(file_get_contents(__DIR__.'/../../stubs/inertia-react/challenge.tsx'))
-            ->and("{$js}/{$components}/mfa/mfa-context.ts")->toBeFile()
-            ->and("{$js}/{$components}/mfa/api-key-notice.tsx")->toBeFile()
+            ->and($names("{$js}/{$dir}/mfa"))->toBe(['challenge.tsx', 'mfa-context.ts', 'settings.tsx'])
+            ->and(file_get_contents("{$js}/{$dir}/mfa/challenge.tsx"))->toBe(file_get_contents("{$stubs}/pages/challenge.tsx"))
+            ->and($names("{$js}/components/vendor/laravel-mfa"))->toBe($names("{$stubs}/components"))
+            ->and($names("{$js}/components/vendor/laravel-mfa"))->toContain('api-key-notice.tsx', 'challenge-form.tsx', 'totp-setup.tsx')
+            ->and(file_get_contents("{$js}/components/vendor/laravel-mfa/totp-setup.tsx"))->toBe(file_get_contents("{$stubs}/components/totp-setup.tsx"))
+            ->and("{$js}/Components/vendor")->not->toBeDirectory()
             ->and("{$js}/{$dir}/mfa/components")->not->toBeDirectory();
     } finally {
         $files->deleteDirectory($js);
     }
 })->with([
-    'Pages + Components (artistly)' => ['Pages', 'Components'],
-    'pages + components' => ['pages', 'components'],
+    'Pages (artistly)' => ['Pages'],
+    'pages' => ['pages'],
 ]);
 
-it('does not overwrite customised pages unless forced, and can skip the UI', function () {
+it('points at the files left by an earlier version', function () {
     $files = new Filesystem;
     $js = sys_get_temp_dir().'/mfa-install-'.uniqid();
-    $files->ensureDirectoryExists("{$js}/pages/mfa");
-    $files->put("{$js}/pages/mfa/challenge.tsx", 'customised');
+    $files->ensureDirectoryExists("{$js}/Components/mfa");
+    $files->put("{$js}/Components/mfa/mfa-context.ts", 'old');
     Artisan::command('vendor:publish {--tag=} {--force}', fn () => null);
 
     try {
-        $this->artisan('mfa:install', ['--js-path' => $js])->assertSuccessful()->expectsOutputToContain('Skipped (exists)');
-        expect(file_get_contents("{$js}/pages/mfa/challenge.tsx"))->toBe('customised');
+        $this->artisan('mfa:install', ['--js-path' => $js])
+            ->assertSuccessful()
+            ->expectsOutputToContain("Found files from an earlier version in {$js}/Components/mfa/");
+
+        // Left for the app to delete once its imports have moved.
+        expect(file_get_contents("{$js}/Components/mfa/mfa-context.ts"))->toBe('old');
+    } finally {
+        $files->deleteDirectory($js);
+    }
+});
+
+it('does not overwrite customised pages or components unless forced, and can skip the UI', function () {
+    $files = new Filesystem;
+    $js = sys_get_temp_dir().'/mfa-install-'.uniqid();
+    $files->ensureDirectoryExists("{$js}/pages/mfa");
+    $files->ensureDirectoryExists("{$js}/components/vendor/laravel-mfa");
+    $files->put("{$js}/pages/mfa/challenge.tsx", 'customised');
+    $files->put("{$js}/components/vendor/laravel-mfa/challenge-form.tsx", 'customised');
+    Artisan::command('vendor:publish {--tag=} {--force}', fn () => null);
+
+    try {
+        $this->artisan('mfa:install', ['--js-path' => $js])
+            ->assertSuccessful()
+            ->expectsOutputToContain("Skipped (exists): {$js}/pages/mfa/challenge.tsx")
+            ->expectsOutputToContain("Skipped (exists): {$js}/components/vendor/laravel-mfa/challenge-form.tsx");
+        expect(file_get_contents("{$js}/pages/mfa/challenge.tsx"))->toBe('customised')
+            ->and(file_get_contents("{$js}/components/vendor/laravel-mfa/challenge-form.tsx"))->toBe('customised')
+            ->and("{$js}/components/vendor/laravel-mfa/totp-setup.tsx")->toBeFile();
 
         $this->artisan('mfa:install', ['--js-path' => $js, '--force' => true])->assertSuccessful();
-        expect(file_get_contents("{$js}/pages/mfa/challenge.tsx"))->not->toBe('customised');
+        expect(file_get_contents("{$js}/pages/mfa/challenge.tsx"))->not->toBe('customised')
+            ->and(file_get_contents("{$js}/components/vendor/laravel-mfa/challenge-form.tsx"))->not->toBe('customised');
 
         $files->deleteDirectory("{$js}/pages/mfa");
+        $files->deleteDirectory("{$js}/components");
         $this->artisan('mfa:install', ['--js-path' => $js, '--no-ui' => true])->assertSuccessful();
-        expect("{$js}/pages/mfa")->not->toBeDirectory();
+        expect("{$js}/pages/mfa")->not->toBeDirectory()
+            ->and("{$js}/components")->not->toBeDirectory();
     } finally {
         $files->deleteDirectory($js);
     }

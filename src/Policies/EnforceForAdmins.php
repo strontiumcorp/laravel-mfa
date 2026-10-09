@@ -7,7 +7,7 @@ use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 
 /**
  * Example policy: users whose model reports isAdmin() must enroll.
- * Set 'enforce' => EnforceForAdmins::class, or write your own.
+ * Set 'enforcement.policy' => EnforceForAdmins::class, or write your own.
  */
 class EnforceForAdmins implements EnforcementPolicy
 {

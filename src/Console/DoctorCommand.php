@@ -113,14 +113,7 @@ class DoctorCommand extends Command
             }
         }
 
-        $policy = config('mfa.enforce');
-        if ($mfa->enforcesInCode()) {
-            $this->components->twoColumnDetail('Enforcement decided by Mfa::enforceUsing()', '<fg=green;options=bold>OK</>');
-        } elseif (is_array($policy) && $policy !== []) {
-            $this->check('Enforced for roles ['.implode(', ', $policy).']', array_filter($policy, fn ($role) => ! is_string($role) || $role === '') === []);
-        } elseif (is_string($policy) && $policy !== '') {
-            $this->check("Enforcement policy [{$policy}] implements EnforcementPolicy", is_subclass_of($policy, EnforcementPolicy::class));
-        }
+        $this->checkEnforcement($mfa);
 
         if (config('mfa.ui.driver') === 'inertia') {
             $this->check('inertiajs/inertia-laravel is installed (ui.driver = inertia)', class_exists(Inertia::class));
@@ -295,6 +288,37 @@ class DoctorCommand extends Command
         return class_exists($appMiddleware)
             ? ((new \ReflectionClass($appMiddleware))->getDefaultProperties()['proxies'] ?? null)
             : null;
+    }
+
+    private function checkEnforcement(Mfa $mfa): void
+    {
+        [$roles, $policy] = $mfa->enforcementRules();
+
+        if (config('mfa.enforce') !== null) {
+            $this->warn_((array) config('mfa.enforcement.roles') === [] && ! config('mfa.enforcement.policy')
+                ? 'Config key "enforce" moved to "enforcement.roles" / "enforcement.policy" (still honoured; move it)'
+                : 'Config key "enforce" is ignored: "enforcement.roles" / "enforcement.policy" are set (remove it)');
+        }
+
+        if ($mfa->enforcesInCode()) {
+            $this->components->twoColumnDetail('Enforcement decided by Mfa::enforceUsing()', '<fg=green;options=bold>OK</>');
+        }
+
+        if (! $mfa->enforcesInCode() && $roles !== []) {
+            $this->check('Enforced for roles ['.implode(', ', $roles).']', ! in_array('', $roles, true));
+        }
+
+        if (! $mfa->enforcesInCode() && $policy !== null) {
+            $this->check("Enforcement policy [{$policy}] implements EnforcementPolicy", is_subclass_of($policy, EnforcementPolicy::class));
+        }
+
+        $required = array_map('strval', (array) config('mfa.enforcement.required_types'));
+        $unknown = array_values(array_filter($required, fn (string $type) => FactorType::tryFrom($type) === null));
+        $this->check('enforcement.required_types lists known factor types', $unknown === [], $unknown === [] ? null : 'unknown: '.implode(', ', $unknown));
+
+        if ($mfa->enforcesAnyone() && $required !== [] && $mfa->requiredTypes() === []) {
+            $this->warn_('none of enforcement.required_types is enabled — any factor satisfies enforcement');
+        }
     }
 
     private function check(string $label, bool $passed, ?string $hint = null): void

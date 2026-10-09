@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "jsx": "react-jsx",
+        "strict": true,
+        "noEmit": true,
+        "skipLibCheck": true,
+        "lib": ["DOM", "DOM.Iterable", "ES2022"],
+        "types": ["node", "vitest/globals", "@testing-library/jest-dom/vitest"],
+        "paths": {
+            "@/components/vendor/laravel-mfa/*": ["./stubs/inertia-react/components/*"]
+        }
+    },
+    "include": ["stubs/inertia-react/**/*.ts", "stubs/inertia-react/**/*.tsx", "tests/js/**/*.ts", "tests/js/**/*.tsx", "vitest.config.ts"]
+}

@@ -133,7 +133,7 @@ describe('observability', function () {
 
     it('keeps enrollment redirects (debug) out of the log at the default level', function () {
         $lines = mfaLogLines();
-        config(['mfa.enforce' => EnforceForAdmins::class]);
+        config(['mfa.enforcement.policy' => EnforceForAdmins::class]);
 
         $this->loginWithSession($this->makeUser(['is_admin' => true]))->get('/dashboard')->assertRedirect(route('mfa.settings'));
         expect($lines->pluck('message'))->not->toContain('mfa.enrollment_required');
@@ -214,16 +214,16 @@ describe('mfa:doctor', function () {
     beforeEach(fn () => config(['session.driver' => 'database']));
 
     it('validates the enforcement setting (D5)', function () {
-        config(['mfa.enforce' => ['admin', 'support']]);
+        config(['mfa.enforcement.roles' => ['admin', 'support']]);
         $this->artisan('mfa:doctor')->assertSuccessful()->expectsOutputToContain('Enforced for roles [admin, support]');
 
-        config(['mfa.enforce' => ['admin', '']]);
+        config(['mfa.enforcement.roles' => ['admin', '']]);
         $this->artisan('mfa:doctor')->assertFailed();
 
-        config(['mfa.enforce' => PlainUser::class]);
+        config(['mfa.enforcement.policy' => PlainUser::class]);
         $this->artisan('mfa:doctor')->assertFailed()->expectsOutputToContain('implements EnforcementPolicy');
 
-        config(['mfa.enforce' => null]);
+        config(['mfa.enforcement.roles' => []]);
         Mfa::enforceUsing(fn () => true);
         try {
             $this->artisan('mfa:doctor')->assertSuccessful()->expectsOutputToContain('Enforcement decided by Mfa::enforceUsing()');

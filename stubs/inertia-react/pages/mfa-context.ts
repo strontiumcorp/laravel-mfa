@@ -5,6 +5,12 @@
 //
 //     'mfa' => fn () => \StrontiumCorp\LaravelMfa\Facades\Mfa::context($request),
 //
+// This is the Inertia side: the components in components/vendor/laravel-mfa/
+// never read it themselves. Pass them what they need, for example:
+//
+//     <MfaApiKeyNotice {...mfaApiKeyNoticeProps(useMfa())} />
+//
+// It's a .ts file, so the app's pages glob (**/*.tsx) doesn't treat it as a page.
 // Mirrors StrontiumCorp\LaravelMfa\Support\MfaContext; keep the two in sync.
 import { usePage } from '@inertiajs/react';
 
@@ -34,4 +40,16 @@ export function useMfa(): MfaContext | null {
     const props = usePage().props as { mfa?: MfaContext };
 
     return props.mfa ?? null;
+}
+
+/**
+ * Props for MfaApiKeyNotice: hidden when MFA is off, and links to the
+ * settings page for a user who has no MFA yet. Without a shared context the
+ * notice still shows, without the link.
+ */
+export function mfaApiKeyNoticeProps(mfa: MfaContext | null): { enabled: boolean; settingsUrl: string | null } {
+    return {
+        enabled: mfa?.enabled ?? true,
+        settingsUrl: mfa?.user && !mfa.user.hasMfa ? mfa.urls.settings : null,
+    };
 }

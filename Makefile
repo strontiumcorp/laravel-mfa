@@ -11,16 +11,21 @@ XDEBUG_COV := -d xdebug.mode=coverage
 MIN_COVERAGE ?= 85
 
 .DEFAULT_GOAL := help
-.PHONY: help install test test-filter coverage lint format analyse ci test-laravel test-matrix typecheck-stubs release clean
+.PHONY: help install test test-js test-filter coverage lint format analyse ci test-laravel test-matrix typecheck-stubs release clean
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-install: ## Install Composer dependencies
+install: ## Install Composer and npm dependencies
 	composer install --no-interaction
+	npm ci --no-audit --no-fund
 
 test: ## Run the test suite in parallel
 	$(PEST) $(PARALLEL)
+
+test-js: ## Type-check the React stubs and run their Vitest tests (needs Node; run make install first)
+	npm run typecheck
+	npm test
 
 test-filter: ## Run tests matching FILTER, e.g. make test-filter FILTER="SendLimits"
 	@test -n "$(FILTER)" || (echo 'Usage: make test-filter FILTER="pattern"' && exit 1)
@@ -38,7 +43,7 @@ format: ## Fix code style (Pint)
 analyse: ## Static analysis (PHPStan / Larastan)
 	vendor/bin/phpstan analyse --memory-limit=1G --no-progress
 
-ci: lint analyse test ## Everything CI runs: lint, analyse, test
+ci: lint analyse test test-js ## Everything CI runs: lint, analyse, test, test-js
 
 test-laravel: ## Run the suite against another Laravel major in a scratch copy, e.g. make test-laravel VERSION=11 [LOWEST=1]
 	@test -n "$(VERSION)" || (echo 'Usage: make test-laravel VERSION=11|12|13 [LOWEST=1]' && exit 1)

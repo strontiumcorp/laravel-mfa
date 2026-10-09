@@ -45,7 +45,7 @@ trait HasMultiFactorAuthentication
     }
 
     /**
-     * Roles matched against config('mfa.enforce') when it is a list of
+     * Roles matched against config('mfa.enforcement.roles'), a list of
      * roles. Reads the "role" attribute (string, backed enum or a list).
      * Override for other role systems, e.g. spatie/laravel-permission:
      * `return $this->getRoleNames()->all();`
