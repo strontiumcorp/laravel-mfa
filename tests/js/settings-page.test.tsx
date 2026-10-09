@@ -24,6 +24,7 @@ const props = {
     ],
     recoveryCodesRemaining: 9,
     recoveryCodesTotal: 10,
+    recoveryCodesFile: { app: 'Acme', slug: 'acme', account: 'jane@example.com' },
     recoveryCodes: null,
     retryAfter: null,
     passwordRetryAfter: null,
@@ -244,6 +245,24 @@ describe('settings page', () => {
 
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
         expect(screen.queryByRole('list', { name: 'Recovery codes' })).not.toBeInTheDocument();
+    });
+
+    it('names the downloaded codes after the app and account from the props', async () => {
+        const pendingTotp = { ...email, id: 8, type: 'totp' as const, type_label: 'Authenticator app', destination: null, secret: 'JBSWY3DP', qr_svg: '<svg/>' };
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(2026, 9, 9, 8, 5));
+        Object.assign(URL, { createObjectURL: () => 'blob:codes', revokeObjectURL: () => {} });
+        let name = '';
+        vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+            name = this.download;
+        });
+        render(<MfaSettings {...props} factors={[]} pending={[pendingTotp]} recoveryCodes={['aaaaa-11111']} />);
+
+        await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+        await userEvent.type(screen.getByRole('textbox', { name: 'Code from your authenticator app' }), '123456{Enter}');
+        await userEvent.click(screen.getByRole('button', { name: 'Download' }));
+
+        expect(name).toBe('acme-recovery-codes-jane@example.com-2026-10-09.txt');
     });
 
     it('starts each setup clean, without the last one\'s error', async () => {

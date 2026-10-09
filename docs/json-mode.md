@@ -146,6 +146,7 @@ If the app sets `routes.confirm_middleware` to `['password.confirm']`, Laravel's
     "availableTypes": [ { "type": "totp", "label": "Authenticator app", "recommended": true }, { "type": "email", "label": "Email", "recommended": false } ],
     "recoveryCodesRemaining": 10,
     "recoveryCodesTotal": 10,
+    "recoveryCodesFile": { "app": "Acme (staging)", "slug": "acme-staging", "account": "jane@example.com" },
     "mustEnroll": false,
     "requiredTypes": [],
     "passwordConfirmationRequired": false,
@@ -159,7 +160,7 @@ If the app sets `routes.confirm_middleware` to `['password.confirm']`, Laravel's
 }
 ```
 
-`passwordConfirmationRequired` says whether adding or removing a method would answer `423` right now (see [Password confirmation](#password-confirmation)), so a client can ask for the password before starting; the routes still enforce it. `recoveryCodesTotal` is how many a fresh set has (`recovery_codes.count`), for an "8 of 10 left" display. `availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have one. It's `[]` for other users.
+`passwordConfirmationRequired` says whether adding or removing a method would answer `423` right now (see [Password confirmation](#password-confirmation)), so a client can ask for the password before starting; the routes still enforce it. `recoveryCodesTotal` is how many a fresh set has (`recovery_codes.count`), for an "8 of 10 left" display. `recoveryCodesFile` is what a downloaded codes file is named after: `app` is the name authenticator apps show (`factors.totp.issuer`, with the environment in brackets outside production unless `factors.totp.issuer_environment` is off), `slug` the same for a file name, and `account` the user's authenticator label (`getMfaLabel()`: the email, else the auth identifier). The bundled dialog names the file `{slug}-recovery-codes-{account}-{YYYY-MM-DD}.txt` with the browser's date. `availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have one. It's `[]` for other users.
 
 `nudge` holds the [nudge](configuration.md#nudge)'s title and body, to show as a notice, for a user with no method who isn't enforced (and while `nudge.enabled` is on); it's `null` otherwise.
 

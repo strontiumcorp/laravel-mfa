@@ -101,7 +101,7 @@ it('GET /mfa/settings and the enrollment endpoints', function () {
     $this->loginWithSession($user);
 
     $this->getJson('/mfa/settings')->assertOk()->assertExactJsonStructure([
-        'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label', 'recommended']], 'recoveryCodesRemaining', 'recoveryCodesTotal', 'mustEnroll', 'requiredTypes',
+        'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label', 'recommended']], 'recoveryCodesRemaining', 'recoveryCodesTotal', 'recoveryCodesFile' => ['app', 'slug', 'account'], 'mustEnroll', 'requiredTypes',
         'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'confirmPassword'], 'passwordConfirmationRequired', 'passwordRetryAfter', 'nudge' => ['title', 'body'], 'status', 'recoveryCodes', 'retryAfter',
     ]);
 

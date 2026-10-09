@@ -124,3 +124,29 @@ it('requires password confirmation for sensitive changes when configured', funct
 
     $this->post(route('mfa.factors.store'), ['type' => 'totp'])->assertRedirect(route('password.confirm'));
 });
+
+describe('the recovery codes file', function () {
+    it('names the app and the account, like the authenticator app does', function () {
+        config(['mfa.factors.totp.issuer' => 'Artistly', 'app.env' => 'production']);
+
+        $this->getJson(route('mfa.settings'))->assertOk()->assertJsonPath('recoveryCodesFile', [
+            'app' => 'Artistly', 'slug' => 'artistly', 'account' => $this->user->email,
+        ]);
+    });
+
+    it('names the environment outside production', function () {
+        config(['mfa.factors.totp.issuer' => 'Podcast Flow', 'app.env' => 'staging']);
+
+        $this->getJson(route('mfa.settings'))->assertOk()->assertJsonPath('recoveryCodesFile', [
+            'app' => 'Podcast Flow (staging)', 'slug' => 'podcast-flow-staging', 'account' => $this->user->email,
+        ]);
+    });
+
+    it('leaves the environment out when issuer_environment is off', function () {
+        config(['mfa.factors.totp.issuer' => 'Artistly', 'mfa.factors.totp.issuer_environment' => false, 'app.env' => 'staging']);
+
+        $this->getJson(route('mfa.settings'))->assertOk()
+            ->assertJsonPath('recoveryCodesFile.app', 'Artistly')
+            ->assertJsonPath('recoveryCodesFile.slug', 'artistly');
+    });
+});

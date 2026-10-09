@@ -252,6 +252,7 @@ export function settingsProps(s: State) {
         availableTypes: [...available].sort((a, b) => Number(b.recommended) - Number(a.recommended)),
         recoveryCodesRemaining: s.recoveryCodesRemaining,
         recoveryCodesTotal: 10,
+        recoveryCodesFile: { app: 'Acme (local)', slug: 'acme-local', account: 'jane@example.com' },
         mustEnroll: s.mustEnroll,
         requiredTypes: s.mustEnroll || s.requiredTypes.length > 0 ? s.requiredTypes.map((type) => ({ type, label: LABELS[type] })) : [],
         passwordRetryAfter: s.passwordRetryAfter,

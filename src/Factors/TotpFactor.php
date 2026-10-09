@@ -34,12 +34,23 @@ final class TotpFactor implements Factor
      */
     public function issuer(): string
     {
+        return self::issuerFor($this->config, $this->environment);
+    }
+
+    /**
+     * The issuer rule on its own, for other places that name the app the
+     * same way (the recovery codes file).
+     *
+     * @param  array{issuer?: string, issuer_environment?: bool, window?: int}  $config  factors.totp
+     */
+    public static function issuerFor(array $config, string $environment): string
+    {
         // Equivalent mutant(s): the issuer is a string in config.
-        $issuer = (string) ($this->config['issuer'] ?? 'Laravel'); // @pest-mutate-ignore: RemoveStringCast
+        $issuer = (string) ($config['issuer'] ?? 'Laravel'); // @pest-mutate-ignore: RemoveStringCast
 
         // The default (on) is in config/mfa.php; the deep merge always provides the key.
-        return ! empty($this->config['issuer_environment']) && $this->environment !== '' && $this->environment !== 'production'
-            ? "{$issuer} ({$this->environment})"
+        return ! empty($config['issuer_environment']) && $environment !== '' && $environment !== 'production'
+            ? "{$issuer} ({$environment})"
             : $issuer;
     }
 

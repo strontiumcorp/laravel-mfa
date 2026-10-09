@@ -69,9 +69,53 @@ export type MfaFactorSetupDialogProps = {
     onClose: () => void;
     /** Complete / Done after the code is confirmed. */
     onComplete: () => void;
-    /** The downloaded recovery codes file's name. */
+    /**
+     * Who and what the downloaded recovery codes are for (the settings prop
+     * recoveryCodesFile): the file is named "{slug}-recovery-codes-{account}-{date}.txt",
+     * with the browser's local date, and its text names the app and account.
+     */
+    recoveryCodesFile?: MfaRecoveryCodesFile | null;
+    /** The downloaded file's name, instead of the one built from recoveryCodesFile. */
     downloadName?: string;
 };
+
+export type MfaRecoveryCodesFile = {
+    /** The app as authenticator apps show it, e.g. "Acme (staging)". */
+    app: string;
+    /** The same for a file name, e.g. "acme-staging". */
+    slug: string;
+    /** The account, e.g. the user's email. */
+    account: string;
+};
+
+const pad = (n: number) => String(n).padStart(2, '0');
+// Characters Windows, macOS or Linux won't take in a file name, and control characters.
+// eslint-disable-next-line no-control-regex
+const unsafeInFileName = (text: string) => text.replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '-');
+
+/** The recovery codes file's name and text, dated in the browser's time zone. */
+function recoveryCodesDownload(codes: string[], file: MfaRecoveryCodesFile | null | undefined, now: Date) {
+    const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    let zone = '';
+    try {
+        zone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
+    } catch {
+        // No Intl time zone support: the time goes without its zone.
+    }
+    const name = [file?.slug, 'recovery-codes', file?.account, date].filter(Boolean).join('-');
+    const text = [
+        file?.app ? `${file.app} two-factor recovery codes` : 'Two-factor recovery codes',
+        ...(file?.account ? [`Account: ${file.account}`] : []),
+        `Downloaded: ${date} ${pad(now.getHours())}:${pad(now.getMinutes())}${zone ? ` (${zone})` : ''}`,
+        '',
+        'Each code works once. Getting new codes cancels these.',
+        '',
+        ...codes,
+        '',
+    ].join('\n');
+
+    return { name: `${unsafeInFileName(name)}.txt`, text };
+}
 
 type Step = 'password' | 'scan' | 'destination' | 'code' | 'saved';
 
@@ -177,7 +221,8 @@ export default function MfaFactorSetupDialog({
     recoveryCodes = null,
     onClose,
     onComplete,
-    downloadName = 'recovery-codes.txt',
+    recoveryCodesFile = null,
+    downloadName,
 }: MfaFactorSetupDialogProps) {
     const totp = type === 'totp';
     const [password, setPassword] = useState('');
@@ -312,11 +357,11 @@ export default function MfaFactorSetupDialog({
     };
 
     const downloadCodes = () => {
-        const text = `Two-factor recovery codes. Each code works once.\n\n${(recoveryCodes ?? []).join('\n')}\n`;
+        const { name, text } = recoveryCodesDownload(recoveryCodes ?? [], recoveryCodesFile, new Date());
         const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
         const a = document.createElement('a');
         a.href = url;
-        a.download = downloadName;
+        a.download = downloadName ?? name;
         // In the document and revoked a moment later: Firefox cancels a download otherwise.
         document.body.appendChild(a);
         a.click();

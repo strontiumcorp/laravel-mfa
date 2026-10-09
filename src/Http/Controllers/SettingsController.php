@@ -3,12 +3,15 @@
 namespace StrontiumCorp\LaravelMfa\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Enums\FailureReason;
 use StrontiumCorp\LaravelMfa\Events\PasswordConfirmationFailed;
 use StrontiumCorp\LaravelMfa\Events\PasswordConfirmed;
 use StrontiumCorp\LaravelMfa\Exceptions\EnrollmentFailed;
+use StrontiumCorp\LaravelMfa\Factors\TotpFactor;
 use StrontiumCorp\LaravelMfa\Http\UiResponse;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
@@ -48,6 +51,11 @@ class SettingsController extends Controller
             'recoveryCodesRemaining' => $recoveryCodes->remaining($user),
             // How many a fresh set has (recovery_codes.count), for the "8 of 10 left" meter.
             'recoveryCodesTotal' => (int) config('mfa.recovery_codes.count'),
+            // What the downloaded recovery codes file is named after: the app as
+            // authenticator apps show it (factors.totp.issuer, with the environment
+            // outside production), and the account (the authenticator app's label).
+            // The page adds the date.
+            'recoveryCodesFile' => $this->recoveryCodesFile($user),
             'mustEnroll' => $this->mfa->mustEnroll($user),
             // What an enforced user must set up (enforcement.required_types); [] = any type.
             'requiredTypes' => $this->mfa->isEnforced($user)
@@ -74,6 +82,14 @@ class SettingsController extends Controller
                 ? array_intersect_key($this->mfa->nudgeCopy(), ['title' => true, 'body' => true])
                 : null,
         ]);
+    }
+
+    /** @return array{app: string, slug: string, account: string} */
+    private function recoveryCodesFile(MultiFactorAuthenticatable $user): array
+    {
+        $app = TotpFactor::issuerFor((array) config('mfa.factors.totp'), (string) config('app.env'));
+
+        return ['app' => $app, 'slug' => Str::slug($app), 'account' => $user->getMfaLabel()];
     }
 
     /**

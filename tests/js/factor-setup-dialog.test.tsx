@@ -261,6 +261,62 @@ describe('MfaFactorSetupDialog', () => {
             expect(screen.getByRole('button', { name: 'Complete' })).toBeEnabled();
         });
 
+        describe('the downloaded file', () => {
+            const file = { app: 'Artistly (staging)', slug: 'artistly-staging', account: 'mojahid@mail.com' };
+
+            // Downloads with the given props at 2026-10-09 08:05 local time in Asia/Dhaka; returns the file's name and text.
+            const download = async (props: Partial<MfaFactorSetupDialogProps>) => {
+                vi.useFakeTimers({ toFake: ['Date'] });
+                vi.setSystemTime(new Date(2026, 9, 9, 8, 5));
+                const resolved = Intl.DateTimeFormat().resolvedOptions();
+                vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ ...resolved, timeZone: 'Asia/Dhaka' });
+                const createObjectURL = vi.fn((_blob: Blob) => 'blob:codes');
+                Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
+                let name = '';
+                vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+                    name = this.download;
+                });
+                render(<MfaFactorSetupDialog {...totp} confirmed recoveryCodes={codes} {...props} />);
+
+                await userEvent.click(screen.getByRole('button', { name: 'Download' }));
+
+                return { name, text: await createObjectURL.mock.calls[0][0].text() };
+            };
+
+            it('is named after the app, the account and the local date', async () => {
+                expect((await download({ recoveryCodesFile: file })).name).toBe('artistly-staging-recovery-codes-mojahid@mail.com-2026-10-09.txt');
+            });
+
+            it('says whose codes they are and when they were downloaded', async () => {
+                expect((await download({ recoveryCodesFile: file })).text).toBe(
+                    'Artistly (staging) two-factor recovery codes\n' +
+                        'Account: mojahid@mail.com\n' +
+                        'Downloaded: 2026-10-09 08:05 (Asia/Dhaka)\n' +
+                        '\n' +
+                        'Each code works once. Getting new codes cancels these.\n' +
+                        '\n' +
+                        'aaaaa-11111\nbbbbb-22222\n',
+                );
+            });
+
+            it('replaces characters file names cannot hold', async () => {
+                const { name } = await download({ recoveryCodesFile: { ...file, account: 'a/b\\c:d*e?f"g<h>i|j\tk@x.com' } });
+
+                expect(name).toBe('artistly-staging-recovery-codes-a-b-c-d-e-f-g-h-i-j-k@x.com-2026-10-09.txt');
+            });
+
+            it('works without the app and account', async () => {
+                const { name, text } = await download({});
+
+                expect(name).toBe('recovery-codes-2026-10-09.txt');
+                expect(text).toBe('Two-factor recovery codes\nDownloaded: 2026-10-09 08:05 (Asia/Dhaka)\n\nEach code works once. Getting new codes cancels these.\n\naaaaa-11111\nbbbbb-22222\n');
+            });
+
+            it('takes an explicit downloadName over the derived one', async () => {
+                expect((await download({ recoveryCodesFile: file, downloadName: 'acme.txt' })).name).toBe('acme.txt');
+            });
+        });
+
         it('ends with a short "added" step when there are no new codes', async () => {
             const onComplete = vi.fn();
             render(<MfaFactorSetupDialog {...sms} type="email" label="Email" sentTo="j***@example.com" confirmed onComplete={onComplete} />);

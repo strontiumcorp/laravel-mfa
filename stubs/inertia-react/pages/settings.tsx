@@ -2,7 +2,7 @@
 // your app's settings layout. It only wires Inertia to the components in
 // components/vendor/laravel-mfa/, which hold the UI.
 import MfaFactorCards, { type MfaCardFactor, type MfaFactorType } from '@/components/vendor/laravel-mfa/factor-cards';
-import MfaFactorSetupDialog from '@/components/vendor/laravel-mfa/factor-setup-dialog';
+import MfaFactorSetupDialog, { type MfaRecoveryCodesFile } from '@/components/vendor/laravel-mfa/factor-setup-dialog';
 import MfaPasswordConfirmForm from '@/components/vendor/laravel-mfa/password-confirm-form';
 import MfaRecoveryCodesPanel from '@/components/vendor/laravel-mfa/recovery-codes-panel';
 import { Head, router, useForm } from '@inertiajs/react';
@@ -17,6 +17,8 @@ type Props = {
     recoveryCodesRemaining: number;
     /** How many a fresh set of recovery codes has. */
     recoveryCodesTotal: number;
+    /** What the downloaded recovery codes file is named after: the app (as authenticator apps show it) and the account. */
+    recoveryCodesFile: MfaRecoveryCodesFile;
     recoveryCodes: string[] | null;
     retryAfter: number | null;
     /** Seconds until the password prompt may be tried again. */
@@ -41,6 +43,7 @@ export default function MfaSettings(props: Props) {
         availableTypes,
         recoveryCodesRemaining,
         recoveryCodesTotal,
+        recoveryCodesFile,
         recoveryCodes,
         mustEnroll,
         requiredTypes,
@@ -276,6 +279,7 @@ export default function MfaSettings(props: Props) {
                     error={(current && confirmingId === current.id ? confirmForm.errors.code : null) ?? (current && resendingId === current.id ? resend.errors.code : null)}
                     confirmed={confirmed}
                     recoveryCodes={confirmed ? recoveryCodes : null}
+                    recoveryCodesFile={recoveryCodesFile}
                     onClose={() => endSetup(false)}
                     onComplete={() => endSetup(true)}
                 />
