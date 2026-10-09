@@ -528,7 +528,7 @@ class Mfa
                 'challenge' => $routes ? route('mfa.challenge') : null,
             ],
             nudge: [
-                'show' => $routes && $user !== null && $model instanceof MultiFactorAuthenticatable && $this->showsNudge($request, $model, $user),
+                'show' => $routes && $user !== null && $model instanceof MultiFactorAuthenticatable && $this->showsNudge($request, $model),
                 ...$this->nudgeCopy(),
                 'dismissUrl' => $routes ? route('mfa.nudge.dismiss') : null,
             ],
@@ -536,18 +536,28 @@ class Mfa
     }
 
     /**
-     * Whether the turn-on-two-factor nudge (config mfa.nudge) is for this
-     * session user: no factor, not enforced (they're sent to enroll anyway),
-     * not on MFA's own pages, and not dismissed. Checked in that order, so a
-     * user with MFA costs nothing more and the others at most one cache read.
-     *
-     * @param  array{hasMfa: bool, verified: bool, mustEnroll: bool}  $state
+     * The one rule for who the turn-on-two-factor nudge (config mfa.nudge) is
+     * for: it is on, and the user has no factor and isn't enforced (enforced
+     * users are sent to enroll anyway). The settings page's notice uses this
+     * alone; the floating card also hides on MFA's own pages and once
+     * dismissed (showsNudge()). A user with MFA costs nothing more.
      */
-    private function showsNudge(Request $request, MultiFactorAuthenticatable $user, array $state): bool
+    public function nudgeEligible(MultiFactorAuthenticatable $user): bool
     {
-        return ! $state['hasMfa']
-            && ! $state['mustEnroll']
-            && $this->config->get('mfa.nudge.enabled')
+        return $this->config->get('mfa.nudge.enabled')
+            && ! $this->hasConfirmedFactors($user)
+            && ! $this->mustEnroll($user);
+    }
+
+    /**
+     * Whether the floating nudge shows for this session user on this page:
+     * nudgeEligible(), not on MFA's own pages, and not dismissed. Checked in
+     * that order, so the dismissal costs at most one cache read, and only
+     * for users it is for.
+     */
+    private function showsNudge(Request $request, MultiFactorAuthenticatable $user): bool
+    {
+        return $this->nudgeEligible($user)
             && ! ($request->route() !== null && $request->routeIs('mfa.*'))
             && ! $this->app->make(Nudge::class)->isDismissed($request->session(), $user);
     }

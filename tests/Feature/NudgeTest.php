@@ -8,6 +8,7 @@ use Illuminate\Session\Store;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Events\NudgeDismissed;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\MfaServiceProvider;
@@ -294,6 +295,19 @@ it('shows the same title and body on the settings page, to the same users', func
 
     config(['mfa.enforcement.policy' => null, 'mfa.nudge.enabled' => false]);
     $this->freshGuards()->loginWithSession($this->makeUser())->getJson(route('mfa.settings'))->assertOk()->assertJsonPath('nudge', null);
+});
+
+it('decides the floating card and the settings notice by the same rule', function () use ($show) {
+    // A factor of a disabled type doesn't count (D10: they aren't challenged
+    // by it any more), so both ask this user to turn two-factor on.
+    $user = $this->makeUser();
+    $this->createMfaFactor($user, FactorType::Sms);
+    config(['mfa.factors.sms.enabled' => false]);
+    Mfa::forgetCachedState($user);
+    $this->loginWithSession($user);
+
+    expect(Mfa::nudgeEligible($user))->toBeTrue()->and($show())->toBeTrue();
+    $this->getJson(route('mfa.settings'))->assertOk()->assertJsonPath('nudge.title', 'Protect your account');
 });
 
 it('gives apps with an older published config the nudge keys', function () {
