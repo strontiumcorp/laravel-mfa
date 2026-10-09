@@ -244,4 +244,30 @@ describe('settings page', () => {
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
         expect(screen.queryByRole('list', { name: 'Recovery codes' })).not.toBeInTheDocument();
     });
+
+    it('starts each setup clean, without the last one\'s error', async () => {
+        inertia.respondWith({ destination: "We can't send verification codes to this destination." });
+        render(<MfaSettings {...props} factors={[]} availableTypes={[...props.availableTypes, { type: 'email', label: 'Email', recommended: false }]} />);
+
+        await userEvent.click(screen.getByRole('button', { name: 'Set up SMS' }));
+        await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+19005550100{Enter}');
+        await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Set up Email' }));
+
+        expect(screen.getByRole('dialog', { name: 'Add an email address' })).toBeInTheDocument();
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('reopens a pending setup once, on load, not one after another', async () => {
+        const pendingSms = { ...email, id: 9, type: 'sms' as const, type_label: 'SMS', destination: '+*******0100' };
+        const pendingTotp = { ...email, id: 8, type: 'totp' as const, type_label: 'Authenticator app', destination: null, secret: 'JBSWY3DP', qr_svg: '<svg/>' };
+        render(<MfaSettings {...props} pending={[pendingSms, pendingTotp]} />);
+
+        expect(screen.getByRole('dialog', { name: 'Enter the code' })).toBeInTheDocument();
+        await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(screen.getAllByRole('button', { name: 'Continue setup' })).toHaveLength(2);
+    });
 });
+

@@ -208,11 +208,20 @@ export default function MfaFactorSetupDialog({
     useEffect(() => {
         if (askPassword) setPasswordStep(true);
     }, [askPassword]);
-    // A new code went out (to a new destination): on to the code, empty.
+    // A new code went out: on to the code, empty. (sentTo alone misses a
+    // re-send to the same number, so a send that finished without an error counts too.)
     useEffect(() => {
         setChanging(false);
         setCode('');
     }, [sentTo]);
+    const wasSending = useRef(destinationProcessing);
+    useEffect(() => {
+        if (wasSending.current && !destinationProcessing && !destinationError) {
+            setChanging(false);
+            setCode('');
+        }
+        wasSending.current = destinationProcessing;
+    }, [destinationProcessing, destinationError]);
 
     // A wrong password clears; a wrong destination or code stays, selected.
     const wasPasswordProcessing = useRef(passwordProcessing);

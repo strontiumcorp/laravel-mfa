@@ -102,7 +102,9 @@ export default function MfaSettings(props: Props) {
     // Codes the dialog already showed, so the panel doesn't show them again.
     const [shownCodes, setShownCodes] = useState<string[] | null>(null);
 
-    const resumable = pending.find((p) => !closedIds.includes(p.id)) ?? null;
+    // Only a setup that was pending when the page loaded reopens by itself, and only once.
+    const [resumeId] = useState(() => pending[0]?.id ?? null);
+    const resumable = pending.find((p) => p.id === resumeId && !closedIds.includes(p.id)) ?? null;
     const dialogType = setupType ?? confirming?.type ?? resumable?.type ?? null;
     const current = confirming ?? (dialogType ? (pending.find((p) => p.type === dialogType) ?? null) : null);
     const needsPassword = (passwordConfirmationRequired && !passwordDone) || passwordAgain;
@@ -119,6 +121,11 @@ export default function MfaSettings(props: Props) {
     };
 
     const startSetup = (type: MfaFactorType) => {
+        // A clean start: no error left over from an earlier attempt.
+        storeForm.clearErrors();
+        confirmForm.clearErrors();
+        resend.clearErrors();
+        passwordForm.clearErrors();
         setSetupType(type);
         setClosedIds((ids) => ids.filter((id) => !pending.some((p) => p.id === id && p.type === type)));
         // An authenticator app has nothing to ask first: get its key right away.
@@ -140,6 +147,8 @@ export default function MfaSettings(props: Props) {
         setConfirming(null);
         setConfirmed(false);
         setPasswordAgain(false);
+        // The next setup asks again if the server says so (passwordConfirmationRequired).
+        setPasswordDone(false);
         setLastDestination(undefined);
     };
 

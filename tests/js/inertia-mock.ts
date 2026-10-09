@@ -4,6 +4,8 @@
 //
 // Every request succeeds, unless a test queues errors for the next ones:
 //     inertia.respondWith({ password_confirmation_required: '...' });
+import { useRef, useState } from 'react';
+
 export type Request = { method: string; url: string; data: unknown };
 
 type Errors = Record<string, string>;
@@ -16,25 +18,28 @@ export const inertia = (() => {
     const pageProps: Record<string, unknown> = {};
 
     // Callbacks run in Inertia's order: start, then success or error, then finish.
-    const send = (request: Request, options: Options = {}) => {
+    const send = (request: Request, options: Options = {}, setErrors?: (errors: Errors) => void) => {
         requests.push(request);
         options.onStart?.();
         const errors = responses.shift() ?? null;
+        // Like Inertia's form helper: failures stay on the form until the next success or clearErrors().
+        setErrors?.(errors ?? {});
         if (errors) options.onError?.(errors);
         else options.onSuccess?.();
         options.onFinish?.();
     };
 
     const useForm = () => {
-        let transform = (data: unknown) => data;
+        const transform = useRef((data: unknown) => data);
+        const [errors, setErrors] = useState<Errors>({});
         const form = {
             processing: false,
-            errors: {} as Errors,
+            errors,
             transform: (callback: (data: unknown) => unknown) => {
-                transform = callback;
+                transform.current = callback;
             },
-            post: (url: string, options?: Options) => send({ method: 'post', url, data: transform({}) }, options),
-            clearErrors: () => {},
+            post: (url: string, options?: Options) => send({ method: 'post', url, data: transform.current({}) }, options, setErrors),
+            clearErrors: () => setErrors({}),
         };
 
         return form;

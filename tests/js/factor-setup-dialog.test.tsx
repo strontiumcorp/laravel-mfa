@@ -145,6 +145,17 @@ describe('MfaFactorSetupDialog', () => {
             expect(screen.getByRole('textbox', { name: 'Verification code' })).toHaveFocus();
         });
 
+        it('goes on to the code after re-sending to the same number', async () => {
+            const { rerender } = render(<MfaFactorSetupDialog {...sms} sentTo="+*******0100" />);
+            await userEvent.click(screen.getByRole('button', { name: 'Use another number' }));
+            await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+15555550100');
+
+            rerender(<MfaFactorSetupDialog {...sms} sentTo="+*******0100" destinationProcessing />);
+            rerender(<MfaFactorSetupDialog {...sms} sentTo="+*******0100" />);
+
+            expect(screen.getByRole('dialog', { name: 'Enter the code' })).toBeInTheDocument();
+        });
+
         it('lets email go out to the account email when left empty', async () => {
             const onSubmitDestination = vi.fn();
             render(<MfaFactorSetupDialog {...sms} type="email" label="Email" onSubmitDestination={onSubmitDestination} />);
