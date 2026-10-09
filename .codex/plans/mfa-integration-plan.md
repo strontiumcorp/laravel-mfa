@@ -213,7 +213,7 @@ Scope: security core, `src/Sms/`, integration ergonomics, docs. `make ci`, `make
 - [x] `CHANGELOG.md` tooling: `make release` generates it from the commits (`scripts/release.sh`, `scripts/update-changelog.py`)
 
 ### 1.6 Package follow-ups (after launch)
-- [ ] Trusted devices ("remember this device for 30 days": hashed token, revocable)
+- [ ] Trusted devices ("remember this device for 30 days": hashed token, revocable). Scheduled in the [Roadmap](#roadmap) as configurable remember-me.
 - [ ] Grace period for enforced users (`enforce_grace_days`)
 - [ ] Passkeys factor (WebAuthn) through `Mfa::extend()`
 - [ ] Laravel Pulse card for MFA metrics
@@ -353,6 +353,12 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
 
 ---
 
+## Roadmap
+
+- [ ] **Configurable remember-me for MFA** ("remember this device for N days"): a verified browser gets a signed, per-user, revocable cookie and skips the challenge until it expires. After the MFA rollout ships to production in all three apps. Open decisions: lifetime, revocation on password change and factor removal, cookie scope per guard, and whether enforced roles may use it.
+
+---
+
 ## Risks & mitigations
 
 | Risk | Mitigation |
@@ -489,3 +495,4 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
   - Direct releases again (the maintainer removed the rulesets on `main`): `make release` is back to the original flow (on an up-to-date `main`: `make ci`, changelog commit, annotated tag, `git push --atomic` of both after confirming). The pull-request flow stays as `make release-pr` plus `make release-tag` for a protected `main`; both refuse while a pull-request release is untagged. Tested end to end against a scratch bare remote (direct, off-main and behind guards, PR then tag).
   - Settings card `className` adds again (user report from artistly: `className="max-w-xl"` left the card with no surface at all, since v0.4.1 made `className` replace it). The maintainer chose extending over replacing: overrides use Tailwind's important modifier. Test first; docs and the component comment updated.
   - The repository is public now: the install docs (README quickstart, integration.md step 1) use the HTTPS VCS URL with no credentials and `^0.4`, and the local symlinked path-repository instructions are gone.
+  - Resend loop closed (maintainer report: with email or SMS, log in → code → verify → log out → log in sent a new code every round, bounded only by `send_per_hour`, about 240 a day; a cost/spam problem, not a bypass, since it needs the password and the inbox/phone). Three guardrails, tests first: (1) the cooldown curve spans logins: it counts every code sent for the factor in the last hour, and after a code used by a successful verification the next send waits one step lower, from that code's send (`Cooldown::after($streak - 1)`): first re-login free, then 2, 4, 8, 15 minutes; expired and burned codes still allow a send at once; a used code is told from a burned or expired one without a migration (`MfaOtpCode::wasVerified()`: fewer than `max_attempts` wrong guesses, consumed by `expires_at`); the challenge state reports `code_sent: false` with `retry_after`, and the page waits, says "You recently used a code sent to …", and sends once the wait ends (`challenge-form` `waiting`, `send-code-button` "You can get a new code in m:ss", `h:mm:ss` from an hour); the suspicious-requests warning still counts only unverified sends. (2)+(3) per-account daily caps per method, `factors.email.send_per_day` 15 and `factors.sms.send_per_day` 5 (`null`/`0` off and uncounted), login and enrollment, counted apart per type, rolled back with the other counters, new reason `daily_limit` (429) "You've had too many codes today. Try again in 5 hours, or use an authenticator app.", `FailureReason::isLimit()`. Docs: configuration.md, json-mode.md, integration.md (props and an upgrade note), CLAUDE.md; preview scenario "code used moments ago". 516 Pest and 328 Vitest tests; green on Laravel 11 lowest and type-checked in all three apps. Roadmap section added (remember-me).
