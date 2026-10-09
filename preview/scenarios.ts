@@ -55,6 +55,16 @@ export const scenarios: Scenario[] = [
             return initialState({ factors: [f, totp()], recoveryCodesRemaining: 8, codeSentAt: { [f.id]: Date.now() - 62_000 } });
         },
     },
+    {
+        id: 'challenge-used',
+        page: 'challenge',
+        title: 'Challenge · email code used moments ago (logged in again)',
+        state: () => {
+            const f = email();
+            // Used 30 seconds ago: the next code waits 1:30, then the page sends it.
+            return initialState({ factors: [f, totp()], recoveryCodesRemaining: 8, codeUsedAt: { [f.id]: Date.now() - 30_000 } });
+        },
+    },
     { id: 'challenge-email', page: 'challenge', title: 'Challenge · email only', state: () => initialState({ factors: [email()], recoveryCodesRemaining: 8 }) },
     { id: 'challenge-totp', page: 'challenge', title: 'Challenge · authenticator app only, no recovery codes', state: () => initialState({ factors: [totp()] }) },
     { id: 'nudge', page: 'app', title: 'App page · nudge to turn two-factor on (no method yet)', state: () => initialState() },

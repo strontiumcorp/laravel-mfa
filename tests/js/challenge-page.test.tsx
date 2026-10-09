@@ -255,6 +255,78 @@ describe('challenge page', () => {
         });
     });
 
+    describe('a code used moments ago (the cooldown spans logins)', () => {
+        beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
+        const wait = (seconds: number) => act(() => vi.advanceTimersByTime(seconds * 1000));
+        /** The server's state after a verified code: none out, the next send waits. */
+        const waiting = (seconds: number) => factors.map((f) => (f.id === 2 ? { ...f, code_sent: false, retry_after: seconds, expires_in: null } : f));
+
+        it('does not send while the wait runs, then sends by itself once', () => {
+            const { rerender } = render(<MfaChallenge {...props} factors={waiting(120)} defaultFactorId={2} />);
+
+            expect(description()).toHaveTextContent('You recently used a code sent to j***@example.com.');
+            expect(screen.getByRole('button', { name: 'You can get a new code in 2:00' })).toBeDisabled();
+            expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+            wait(119);
+            expect(inertia.requests).toEqual([]);
+            wait(1);
+            expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 2 } }]);
+
+            // The redirect back: the code is out.
+            rerender(<MfaChallenge {...props} factors={withSent(2, 240)} defaultFactorId={2} status="code-sent" retryAfter={240} />);
+            expect(description()).toHaveTextContent('Enter the 6-digit code we sent to j***@example.com.');
+            expect(screen.getByRole('button', { name: 'Resend in 4:00' })).toBeDisabled();
+            wait(600);
+            expect(inertia.requests).toHaveLength(1);
+        });
+
+        it('sends at most once when the wait ends, even if that send fails', () => {
+            inertia.respondWith({ code: 'We could not send your code. Please try again.' });
+            const { rerender } = render(<MfaChallenge {...props} factors={waiting(30)} defaultFactorId={2} />);
+            wait(30);
+            rerender(<MfaChallenge {...props} defaultFactorId={2} />);
+
+            wait(600);
+            expect(screen.getByRole('alert')).toHaveTextContent('We could not send your code.');
+            expect(screen.getByRole('button', { name: 'Send code' })).toBeEnabled();
+            expect(inertia.requests).toHaveLength(1);
+        });
+
+        it('waits too when the method is picked from the list', async () => {
+            render(<MfaChallenge {...props} factors={waiting(60)} />);
+
+            await choose('Email');
+            expect(description()).toHaveTextContent('You recently used a code sent to j***@example.com.');
+            expect(inertia.requests).toEqual([]);
+
+            wait(60);
+            expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 2 } }]);
+        });
+
+        it('shows a send refused by that wait as the countdown, not an error (stale props)', () => {
+            inertia.respondWith({ code: 'Please wait before requesting another code.' });
+            const { rerender } = render(<MfaChallenge {...props} defaultFactorId={2} />);
+            rerender(<MfaChallenge {...props} factors={waiting(50)} defaultFactorId={2} retryAfter={50} />);
+
+            expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+            expect(description()).toHaveTextContent('You recently used a code sent to j***@example.com.');
+            expect(screen.getByRole('button', { name: 'You can get a new code in 0:50' })).toBeDisabled();
+        });
+
+        it('still shows the daily cap, with the wait in hours', () => {
+            inertia.respondWith({ code: "You've had too many codes today. Try again in 5 hours, or use an authenticator app." });
+            const { rerender } = render(<MfaChallenge {...props} defaultFactorId={2} />);
+            rerender(<MfaChallenge {...props} defaultFactorId={2} retryAfter={5 * 3600} />);
+
+            expect(screen.getByRole('alert')).toHaveTextContent("You've had too many codes today.");
+            expect(description()).toHaveTextContent("We couldn't send a code to j***@example.com.");
+            expect(screen.getByRole('button', { name: 'You can get a new code in 5:00:00' })).toBeDisabled();
+            wait(5 * 3600);
+            expect(inertia.requests).toHaveLength(1);
+        });
+    });
+
     it('switches to a recovery code and back to the list, and signs out', async () => {
         render(<MfaChallenge {...props} />);
 

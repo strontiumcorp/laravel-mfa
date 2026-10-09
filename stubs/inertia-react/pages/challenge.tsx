@@ -71,14 +71,16 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
     }, [factors, retryAfter, status]);
     const resendIn = (id: number) => Math.max(0, Math.ceil(((deadlines.get(id)?.resend ?? 0) - Date.now()) / 1000));
 
-    // Render again when the code on screen expires.
+    // Render again when the code on screen expires, and when its wait ends.
     const expiresAt = (factor && deadlines.get(factor.id)?.expires) ?? null;
+    const resendAt = (factor && deadlines.get(factor.id)?.resend) ?? null;
     const [, tick] = useReducer((n: number) => n + 1, 0);
     useEffect(() => {
-        if (expiresAt === null) return;
-        const timer = setTimeout(tick, Math.max(0, expiresAt - Date.now()));
-        return () => clearTimeout(timer);
-    }, [expiresAt]);
+        const timers = [expiresAt, resendAt]
+            .filter((at): at is number => at !== null && at > Date.now())
+            .map((at) => setTimeout(tick, at - Date.now()));
+        return () => timers.forEach(clearTimeout);
+    }, [expiresAt, resendAt]);
     const expired = expiresAt !== null && expiresAt <= Date.now();
 
     const signOut = logoutUrl ? () => router.post(logoutUrl) : undefined;
@@ -86,18 +88,22 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
     // A code is out: from the server (it survives a refresh), or the send just
     // answered; until it expires, when the server says when that is.
     const codeOut = !expired && (Boolean(factor?.code_sent) || (sentHere && status === 'code-sent'));
-    // A send refused while the server's own state says a code is out and its
-    // cooldown runs is the cooldown (it is checked before any other limit), e.g.
-    // an auto-send after back/forward restored stale props. Not an error: the
-    // code is out, and the countdown says when another can be sent.
-    const sendError = sentHere && !(factor?.code_sent && factor.retry_after) ? send.errors.code : undefined;
+    // No code is out, but the next one has to wait: one was just used (the
+    // server's cooldown spans logins), or the last send was refused.
+    const waiting = delivered && !codeOut && resendAt !== null && resendAt > Date.now();
+    // A send refused while the server's own state says its cooldown runs is
+    // the cooldown (it is checked before any other limit), e.g. an auto-send
+    // after back/forward restored stale props. Not an error: the countdown
+    // says when another can be sent.
+    const sendError = sentHere && !factor?.retry_after ? send.errors.code : undefined;
 
     // Send a code when an email/SMS method is shown without one (on arrival,
-    // when picked, or when the one out expires), once per method per visit.
-    // Never from the GET itself, so prefetches and back/forward don't send.
+    // when picked, when the one out expires, or when the wait after a used
+    // code ends), once per method per visit. Never from the GET itself, so
+    // prefetches and back/forward don't send.
     useEffect(() => {
-        if (delivered && !codeOut && !requested.current.has(factor.id)) sendCode();
-    }, [factorId, codeOut]);
+        if (delivered && !codeOut && !waiting && !requested.current.has(factor.id)) sendCode();
+    }, [factorId, codeOut, waiting]);
 
     return (
         <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10 dark:bg-gray-950">
@@ -131,6 +137,7 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
                         sent={codeOut}
                         sendFailed={Boolean(sendError)}
                         expired={expired && !send.processing}
+                        waiting={waiting}
                     >
                         {delivered && (
                             <MfaSendCodeButton

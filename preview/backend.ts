@@ -34,6 +34,8 @@ export type State = {
     nudgeDismissed: boolean;
     /** Challenge: when each email/SMS factor's code went out (ms), for its send state. */
     codeSentAt: Record<number, number>;
+    /** Challenge: when a code was last used to verify (ms): the next send waits 120s from then (the cooldown spans logins). */
+    codeUsedAt: Record<number, number>;
     // One-request flashes, as the package's session flashes.
     status: string | null;
     retryAfter: number | null;
@@ -109,6 +111,7 @@ export function initialState(overrides: Partial<State> = {}): State {
         passwordConfirmed: false,
         passwordAttempts: 0,
         codeSentAt: {},
+        codeUsedAt: {},
         nudgeDismissed: false,
         status: null,
         retryAfter: null,
@@ -207,6 +210,11 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
 
     if (method === 'post' && url === urls.challenge.send) {
         const f = s.factors.find((f) => f.id === data.factor_id);
+        const used = f ? usedWait(s, f) : null;
+        if (used) {
+            s.retryAfter = used;
+            return { errors: { code: 'Please wait before requesting another code.' } };
+        }
         s.status = 'code-sent';
         if (f?.type === 'totp') return {};
         if (f) s.codeSentAt[f.id] = Date.now();
@@ -256,13 +264,20 @@ export function settingsProps(s: State) {
     };
 }
 
+/** Seconds until a new code can follow one used to verify (120s here), or null. */
+function usedWait(s: State, f: Factor): number | null {
+    const usedAt = s.codeUsedAt[f.id];
+    const wait = usedAt === undefined ? 0 : 120 - Math.floor((Date.now() - usedAt) / 1000);
+    return wait > 0 ? wait : null;
+}
+
 /** The challenge page's props, as ChallengeController::show() builds them. */
 export function challengeProps(s: State) {
     // Each email/SMS factor's code still out, its cooldown (120s here), how long it stays valid (600s), and its code length.
     const sendState = (f: Factor) => {
         const sentAt = s.codeSentAt[f.id];
         const elapsed = sentAt === undefined ? 0 : Math.floor((Date.now() - sentAt) / 1000);
-        if (sentAt === undefined || elapsed >= 600) return { code_sent: false, retry_after: null, expires_in: null, code_length: 6 };
+        if (sentAt === undefined || elapsed >= 600) return { code_sent: false, retry_after: usedWait(s, f), expires_in: null, code_length: 6 };
         const wait = 120 - elapsed;
         return { code_sent: true, retry_after: wait > 0 ? wait : null, expires_in: 600 - elapsed, code_length: 6 };
     };

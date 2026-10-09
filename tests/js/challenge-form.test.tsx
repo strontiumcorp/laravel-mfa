@@ -53,6 +53,12 @@ describe('MfaChallengeForm', () => {
             expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === 'The code we sent to j***@example.com has expired.')).toBeInTheDocument();
         });
 
+        it('says a code was just used when a new one has to wait', () => {
+            setup({ selectedFactorId: 2, waiting: true });
+
+            expect(screen.getByText((_, el) => el?.tagName === 'P' && el.textContent === 'You recently used a code sent to j***@example.com.')).toBeInTheDocument();
+        });
+
         it('uses the factor\'s code length', () => {
             const { container } = setup({ factors: [{ ...email, code_sent: true, code_length: 8 }], selectedFactorId: 2 });
 

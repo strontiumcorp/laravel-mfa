@@ -50,6 +50,8 @@ export type MfaChallengeFormProps = {
     sendFailed?: boolean;
     /** Email/SMS: the code that was out has expired ("the code we sent to … has expired"). */
     expired?: boolean;
+    /** Email/SMS: no code is out and a new one has to wait, because one was just used ("you recently used a code sent to …"). */
+    waiting?: boolean;
     /** Open on the "Try another way" list, e.g. when coming back from the recovery code form. */
     initialView?: 'code' | 'methods';
 };
@@ -170,6 +172,7 @@ export default function MfaChallengeForm({
     sent,
     sendFailed = false,
     expired = false,
+    waiting = false,
     initialView = 'code',
 }: MfaChallengeFormProps) {
     const [code, setCode] = useState('');
@@ -284,6 +287,8 @@ export default function MfaChallengeForm({
             </>
         ) : sendFailed ? (
             <>We couldn't send a code to {strong}.</>
+        ) : waiting ? (
+            <>You recently used a code sent to {strong}.</>
         ) : expired ? (
             <>The code we sent to {strong} has expired.</>
         ) : (

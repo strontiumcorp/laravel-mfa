@@ -59,7 +59,24 @@ describe('MfaSendCodeButton', () => {
 
         rerender(<MfaSendCodeButton onSend={() => {}} retryAfter={120} />);
 
-        expect(screen.getByRole('button')).toHaveTextContent('Resend in 2:00');
+        expect(screen.getByRole('button')).toHaveTextContent('You can get a new code in 2:00');
         expect(screen.getByRole('button')).toBeDisabled();
+    });
+
+    it('says when a new code can be sent while none is out', () => {
+        vi.useFakeTimers();
+        const { container } = render(<MfaSendCodeButton onSend={() => {}} retryAfter={90} />);
+
+        expect(container).toHaveTextContent(/^You can get a new code in 1:30$/);
+        expect(screen.getByRole('button', { name: 'You can get a new code in 1:30' })).toBeDisabled();
+
+        tick(90);
+        expect(screen.getByRole('button', { name: 'Send code' })).toBeEnabled();
+    });
+
+    it('shows waits of an hour or more in hours', () => {
+        render(<MfaSendCodeButton onSend={() => {}} retryAfter={5 * 3600} />);
+
+        expect(screen.getByRole('button', { name: 'You can get a new code in 5:00:00' })).toBeDisabled();
     });
 });
