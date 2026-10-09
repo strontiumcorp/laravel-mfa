@@ -22,6 +22,8 @@ use Illuminate\Support\Facades\Facade;
  * @method static void markPasswordConfirmed(\Illuminate\Contracts\Session\Session $session)
  * @method static bool validatePassword(\Illuminate\Http\Request $request, \StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable $user, string $password)
  * @method static \StrontiumCorp\LaravelMfa\Support\MfaContext context(?\Illuminate\Http\Request $request = null)
+ * @method static array{title: string, body: string, button: string, dismissLabel: string} nudgeCopy()
+ * @method static bool nudgeEligible(\StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable $user)
  * @method static bool isVerified(\Illuminate\Contracts\Session\Session $session, \Illuminate\Contracts\Auth\Authenticatable $user, ?string $guard = null)
  * @method static bool isVerifiedFor(\Illuminate\Http\Request $request, \Illuminate\Contracts\Auth\Authenticatable $user)
  * @method static void markVerified(\Illuminate\Http\Request $request, \Illuminate\Contracts\Auth\Authenticatable $user, ?\StrontiumCorp\LaravelMfa\Enums\FactorType $via = null, array<string, mixed> $context = [])

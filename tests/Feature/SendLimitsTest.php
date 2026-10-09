@@ -28,6 +28,16 @@ function enrollSms(string $phone, string $ip = '203.0.113.7')
         ->postJson('/mfa/factors', ['type' => 'sms', 'destination' => $phone]);
 }
 
+/** A new user with a confirmed SMS factor asks for a login code. */
+function loginSendSms(string $ip = '203.0.113.60'): array
+{
+    [$user, $factor] = test()->userWithFactor(FactorType::Sms);
+
+    return [$user, $factor, test()->freshGuards()->loginWithSession($user)
+        ->withServerVariables(['REMOTE_ADDR' => $ip])
+        ->postJson('/mfa/challenge/send', ['factor_id' => $factor->id])];
+}
+
 describe('unconfirmed destinations (enrollment)', function () {
     it('sends at most 2 messages per destination per day, across all accounts', function () {
         $sms = Mfa::fakeSms();
@@ -114,10 +124,29 @@ describe('unconfirmed destinations (enrollment)', function () {
         enrollSms('+15555550101', '203.0.113.1')->assertOk();
         enrollSms('+15555550102', '203.0.113.2')->assertOk();
         enrollSms('+15555550103', '203.0.113.3')->assertStatus(503)
-            ->assertJsonPath('errors.destination.0', "We can't send codes right now. Please use an authenticator app or try again later.");
+            ->assertJsonPath('errors.destination.0', 'Too many codes are being sent right now. Try again in 60 minutes, or use an authenticator app.');
         enrollSms('+15555550104', '203.0.113.4')->assertStatus(503);
 
         Event::assertDispatchedTimes(SendingCircuitTripped::class, 1);
+    });
+
+    it('raises the breaker event once per window, so a new window that trips alerts again', function () {
+        Event::fake([SendingCircuitTripped::class]);
+        // 2, not 1: Laravel 11.22's RateLimiter re-puts a counter rolled back
+        // to 1 with a fresh decay, which would stretch the first window.
+        config(['mfa.rate_limit.unconfirmed_global_per_hour' => 2]);
+        Mfa::fakeSms();
+
+        enrollSms('+15555550101', '203.0.113.1')->assertOk();
+        enrollSms('+15555550102', '203.0.113.2')->assertOk();
+        $this->travel(50)->minutes();
+        enrollSms('+15555550103', '203.0.113.3')->assertStatus(503);   // trips, 10 minutes left
+        $this->travel(11)->minutes();                                   // a new window
+        enrollSms('+15555550104', '203.0.113.4')->assertOk();
+        enrollSms('+15555550105', '203.0.113.5')->assertOk();
+        enrollSms('+15555550106', '203.0.113.6')->assertStatus(503);   // trips again
+
+        Event::assertDispatchedTimes(SendingCircuitTripped::class, 2);
     });
 
     it('does not create a pending factor when the send is refused', function () {
@@ -185,6 +214,106 @@ describe('confirmed destinations (login)', function () {
         $this->postJson('/mfa/challenge/send', ['factor_id' => $factor->id])->assertStatus(429);
 
         Event::assertDispatched(SuspiciousCodeRequests::class, fn ($e) => $e->context['reason'] === 'send_cap_reached');
+    });
+});
+
+describe('app-wide cap on confirmed sends (SMS pumping)', function () {
+    it('pauses login codes app-wide after N sends in an hour, with the wait until the window frees up', function () {
+        $this->freezeSecond(); // exact waits
+        config(['mfa.rate_limit.confirmed_global_per_hour' => 2]);
+        $sms = Mfa::fakeSms();
+
+        loginSendSms()[2]->assertOk();
+        $this->travel(10)->minutes();
+        loginSendSms()[2]->assertOk();
+        $this->travel(5)->minutes();
+
+        // The window opened with the first send: 45 minutes are left.
+        loginSendSms()[2]->assertStatus(503)
+            ->assertJsonPath('retry_after', 2700);
+        expect($sms->sent)->toHaveCount(2);
+
+        $this->travel(2701)->seconds();
+        loginSendSms()[2]->assertOk();
+    });
+
+    it('tells the user when to try again, in minutes', function () {
+        $this->freezeSecond();
+        config(['mfa.rate_limit.confirmed_global_per_hour' => 1]);
+        Mfa::fakeSms();
+        loginSendSms()[2]->assertOk();
+        $this->travel(2570)->seconds();
+
+        loginSendSms()[2]->assertStatus(503) // 1030 seconds left: rounded up
+            ->assertJsonPath('message', 'Too many codes are being sent right now. Try again in 18 minutes, or use an authenticator app.')
+            ->assertJsonPath('retry_after', 1030);
+
+        $this->travel(1000)->seconds();
+        loginSendSms()[2]->assertStatus(503)->assertJsonPath('errors.code.0', 'Too many codes are being sent right now. Try again in a minute, or use an authenticator app.');
+    });
+
+    it('gives the challenge page the message and the countdown', function () {
+        $this->freezeSecond();
+        config(['mfa.rate_limit.confirmed_global_per_hour' => 1, 'mfa.ui.driver' => 'inertia']);
+        Mfa::fakeSms();
+        [$first, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($first)->post('/mfa/challenge/send', ['factor_id' => $factor->id])->assertRedirect();
+        $this->travel(3570)->seconds();
+
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->freshGuards()->loginWithSession($user)
+            ->from('/mfa/challenge')->post('/mfa/challenge/send', ['factor_id' => $factor->id])
+            ->assertRedirect('/mfa/challenge')
+            ->assertSessionHasErrors(['code' => 'Too many codes are being sent right now. Try again in a minute, or use an authenticator app.']);
+        // The resend countdown runs to the same moment.
+        $this->get('/mfa/challenge', ['X-Inertia' => 'true'])->assertJsonPath('props.retryAfter', 30);
+    });
+
+    it('rolls back the account counter when the cap refuses', function () {
+        config(['mfa.rate_limit.confirmed_global_per_hour' => 1, 'mfa.rate_limit.send_per_hour' => 1]);
+        Mfa::fakeSms();
+
+        loginSendSms()[2]->assertOk();                  // 1 of 1 app-wide
+        [$user, $factor, $refused] = loginSendSms();
+        $refused->assertStatus(503);                       // this user's 1 per hour was not used up
+
+        config(['mfa.rate_limit.confirmed_global_per_hour' => 10]);
+        $this->postJson('/mfa/challenge/send', ['factor_id' => $factor->id])->assertOk();
+    });
+
+    it('is not used by enrollment sends, which have their own breaker', function () {
+        config(['mfa.rate_limit.confirmed_global_per_hour' => 1]);
+        Mfa::fakeSms();
+
+        enrollSms('+15555550101')->assertOk();
+        enrollSms('+15555550102')->assertOk();
+        loginSendSms()[2]->assertOk();
+    });
+
+    it('raises SendingCircuitTripped once when the cap trips', function () {
+        Event::fake([SendingCircuitTripped::class]);
+        config(['mfa.rate_limit.confirmed_global_per_hour' => 1]);
+        Mfa::fakeSms();
+
+        loginSendSms()[2]->assertOk();
+        loginSendSms()[2]->assertStatus(503);
+        loginSendSms()[2]->assertStatus(503);
+
+        Event::assertDispatchedTimes(SendingCircuitTripped::class, 1);
+        Event::assertDispatched(SendingCircuitTripped::class, fn ($e) => $e->context === ['limit' => 1, 'scope' => 'confirmed']);
+    });
+
+    it('can be turned off with null or 0', function ($limit) {
+        config(['mfa.rate_limit.confirmed_global_per_hour' => $limit]);
+        Mfa::fakeSms();
+
+        foreach (range(1, 3) as $_) {
+            loginSendSms()[2]->assertOk();
+        }
+    })->with([null, 0]);
+
+    it('defaults to 1000 an hour', function () {
+        expect(config('mfa.rate_limit.confirmed_global_per_hour'))->toBe(1000);
     });
 });
 

@@ -18,17 +18,17 @@ describe('MfaSendCodeButton', () => {
         expect(screen.queryByRole('status')).not.toBeInTheDocument();
     });
 
-    it('confirms a sent code and offers a new one', () => {
-        render(<MfaSendCodeButton onSend={() => {}} sent />);
+    it('offers a new code once one is out', () => {
+        const { container } = render(<MfaSendCodeButton onSend={() => {}} sent />);
 
-        expect(screen.getByRole('status')).toHaveTextContent('Code sent.');
+        expect(container).toHaveTextContent("Didn't get it? Send a new code");
         expect(screen.getByRole('button', { name: 'Send a new code' })).toBeEnabled();
     });
 
     it('is disabled while sending', () => {
-        render(<MfaSendCodeButton onSend={() => {}} processing />);
+        render(<MfaSendCodeButton onSend={() => {}} processing sent />);
 
-        expect(screen.getByRole('button')).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Sending…' })).toBeDisabled();
     });
 
     it('shows the error', () => {
@@ -39,9 +39,9 @@ describe('MfaSendCodeButton', () => {
 
     it('counts down the cooldown, then enables the button', () => {
         vi.useFakeTimers();
-        render(<MfaSendCodeButton onSend={() => {}} retryAfter={62} sent />);
+        const { container } = render(<MfaSendCodeButton onSend={() => {}} retryAfter={62} sent />);
 
-        expect(screen.getByRole('button')).toHaveTextContent('Resend in 1:02');
+        expect(container).toHaveTextContent("Didn't get it? Resend in 1:02");
         expect(screen.getByRole('button')).toBeDisabled();
 
         tick(3);

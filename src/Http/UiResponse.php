@@ -61,6 +61,22 @@ final class UiResponse
     }
 
     /**
+     * Success for an action taken from one of the app's own pages (e.g. the
+     * nudge): JSON as success() returns it, or back to that page (303) with
+     * nothing flashed, so the app's page shows no MFA status message.
+     *
+     * @param  array<string, mixed>  $data  returned as JSON
+     */
+    public function backQuietly(string $status, array $data = []): Response
+    {
+        if ($this->wantsJson()) {
+            return response()->json(['status' => $status, ...$data]);
+        }
+
+        return redirect()->back(303, [], (string) config('mfa.routes.home'));
+    }
+
+    /**
      * Success that leaves the MFA screens for the app (after a challenge).
      * Inertia gets a full page visit (409 + X-Inertia-Location): the target
      * may not be an Inertia page, and a fresh load also picks up the
@@ -100,8 +116,8 @@ final class UiResponse
         if ($this->wantsJson()) {
             // Same shape as a validation error, plus retry_after when known.
             throw new HttpResponseException(response()->json(array_filter([
-                'message' => $reason->message(),
-                'errors' => [$field => [$reason->message()]],
+                'message' => $reason->message($retryAfter),
+                'errors' => [$field => [$reason->message($retryAfter)]],
                 'retry_after' => $retryAfter,
             ], fn ($value) => $value !== null), $status));
         }
@@ -110,7 +126,7 @@ final class UiResponse
             $this->request->session()->flash($field === 'password' ? self::PASSWORD_RETRY_AFTER : 'mfa.retry_after', $retryAfter);
         }
 
-        throw ValidationException::withMessages([$field => $reason->message()])->status($status);
+        throw ValidationException::withMessages([$field => $reason->message($retryAfter)])->status($status);
     }
 
     /**

@@ -9,6 +9,7 @@ use Illuminate\Contracts\Foundation\CachesConfiguration;
 use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Foundation\Console\AboutCommand;
 use Illuminate\Foundation\Http\Kernel as FoundationHttpKernel;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
@@ -113,6 +114,18 @@ class MfaServiceProvider extends ServiceProvider
         $router = $this->app->make(Router::class);
         $router->aliasMiddleware('mfa', EnsureMfaVerified::class);
 
+        // Before route model binding, wherever the gate is attached (web
+        // group or the "mfa" alias): otherwise an unverified user gets a 404
+        // for a missing record and the challenge for an existing one, and the
+        // app's binding code runs for them. The priority list already orders
+        // StartSession and auth (AuthenticatesRequests) before
+        // SubstituteBindings, so they still run first.
+        $this->callAfterResolving(HttpKernel::class, function ($kernel) {
+            if ($kernel instanceof FoundationHttpKernel) {
+                $kernel->setMiddlewarePriority(self::priorityWithGate($kernel->getMiddlewarePriority()));
+            }
+        });
+
         if (! config('mfa.middleware.append_to_web_group')) {
             return;
         }
@@ -127,6 +140,26 @@ class MfaServiceProvider extends ServiceProvider
                 $kernel->appendMiddlewareToGroup('web', EnsureMfaVerified::class);
             }
         });
+    }
+
+    /**
+     * The priority list with EnsureMfaVerified right before SubstituteBindings
+     * (at the end when the app's own list has no SubstituteBindings). By hand,
+     * not addToMiddlewarePriorityBefore(): Laravel 11.22 doesn't have it.
+     *
+     * @param  array<int, string>  $priority
+     * @return array<int, string>
+     */
+    public static function priorityWithGate(array $priority): array
+    {
+        if (in_array(EnsureMfaVerified::class, $priority, true)) {
+            return $priority;
+        }
+
+        $at = array_search(SubstituteBindings::class, $priority, true);
+        array_splice($priority, $at === false ? count($priority) : $at, 0, [EnsureMfaVerified::class]);
+
+        return $priority;
     }
 
     private function registerRoutes(): void

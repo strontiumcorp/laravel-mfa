@@ -30,6 +30,7 @@ use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForRoles;
 use StrontiumCorp\LaravelMfa\Sms\SmsManager;
 use StrontiumCorp\LaravelMfa\Support\MfaContext;
+use StrontiumCorp\LaravelMfa\Support\Nudge;
 use StrontiumCorp\LaravelMfa\Support\RequestContext;
 use StrontiumCorp\LaravelMfa\Support\SessionIdentity;
 use StrontiumCorp\LaravelMfa\Testing\FakeSmsSender;
@@ -52,6 +53,9 @@ class Mfa
 
     /** When the password was last confirmed: Laravel's own key, shared with password.confirm. */
     public const PASSWORD_CONFIRMED_AT = 'auth.password_confirmed_at';
+
+    /** Request attribute holding a user's cached confirmed types for the rest of the request. */
+    private const MEMO_PREFIX = 'mfa.factor-types.';
 
     /** Set to false (Mfa::ignoreMigrations()) if you publish and own the migrations. */
     public static bool $runsMigrations = true;
@@ -122,25 +126,48 @@ class Mfa
     |--------------------------------------------------------------------------
     */
 
+    /**
+     * Whether this user has a confirmed factor of an enabled type. The cache
+     * holds the user's confirmed types (all of them), and the enabled types
+     * are applied on every read, so turning a type off or on in config takes
+     * effect at once, with no stale "has MFA" in either direction.
+     */
     public function hasConfirmedFactors(MultiFactorAuthenticatable $user): bool
     {
-        $key = $this->cacheKey($user->getAuthIdentifier());
-        $cached = $this->cacheStore()->get($key);
+        return $this->anyEnabled($this->cachedConfirmedTypes($user->getAuthIdentifier()));
+    }
 
-        if ($cached !== null) {
-            // Equivalent mutant(s): the bool return type coerces.
-            return (bool) $cached; // @pest-mutate-ignore: RemoveBooleanCast
+    /**
+     * The user's confirmed types from the cache (filled on a miss), kept on
+     * the live request for the rest of it: the gate, the shared context and
+     * the nudge all ask, and the cache is read once. Only for a request with
+     * a session (a long-lived queue worker's request must never keep one).
+     */
+    private function cachedConfirmedTypes(int|string $userId): string
+    {
+        $request = $this->liveRequest();
+        $memo = self::MEMO_PREFIX.$userId;
+
+        if ($request?->attributes->has($memo)) {
+            return (string) $request->attributes->get($memo);
         }
 
-        $has = $this->queryHasConfirmedFactors($user->getAuthIdentifier());
+        $key = $this->cacheKey($userId);
+        $types = $this->cacheStore()->get($key);
 
-        // add(), not put(): if a factor changed while we were querying, its
-        // model event has already written the fresh answer — never let this
-        // possibly-stale read overwrite it.
-        // Equivalent mutant(s): ints (not bools) keep stores that return false for a miss unambiguous, which the array store can't show; ttl is an int.
-        $this->cacheStore()->add($key, (int) $has, (int) $this->config->get('mfa.cache.ttl')); // @pest-mutate-ignore: RemoveIntegerCast
+        if (! is_string($types)) {
+            $types = $this->queryConfirmedTypes($userId);
 
-        return $has;
+            // add(), not put(): if a factor changed while we were querying, its
+            // model event has already written the fresh answer — never let this
+            // possibly-stale read overwrite it.
+            // Equivalent mutant(s): ttl is an int.
+            $this->cacheStore()->add($key, $types, (int) $this->config->get('mfa.cache.ttl')); // @pest-mutate-ignore: RemoveIntegerCast
+        }
+
+        $request?->attributes->set($memo, $types);
+
+        return $types;
     }
 
     public function forgetCachedState(MultiFactorAuthenticatable $user): void
@@ -155,22 +182,41 @@ class Mfa
      */
     public function refreshCachedStateFor(int|string $userId): void
     {
-        $this->cacheStore()->put(
-            $this->cacheKey($userId),
-            // Equivalent mutant(s): see add() above.
-            (int) $this->queryHasConfirmedFactors($userId), // @pest-mutate-ignore: RemoveIntegerCast
-            (int) $this->config->get('mfa.cache.ttl'),
-        );
+        $types = $this->queryConfirmedTypes($userId);
+
+        $this->cacheStore()->put($this->cacheKey($userId), $types, (int) $this->config->get('mfa.cache.ttl'));
+        $this->liveRequest()?->attributes->set(self::MEMO_PREFIX.$userId, $types);
     }
 
-    private function queryHasConfirmedFactors(int|string $userId): bool
+    /**
+     * The user's confirmed factor types, enabled or not, as "|email|totp|"
+     * ("|" for none): a non-empty string, so it is never confused with a
+     * store's false or null for a miss.
+     */
+    private function queryConfirmedTypes(int|string $userId): string
     {
-        return MfaFactor::query()
+        $types = MfaFactor::query()
             ->where('user_id', $userId)
             ->whereNotNull('confirmed_at')
-            // Equivalent mutant(s): Eloquent binds backed enums by value.
-            ->whereIn('type', array_map(fn (FactorType $t) => $t->value, $this->enabledTypes())) // @pest-mutate-ignore: UnwrapArrayMap
-            ->exists();
+            ->distinct()
+            ->pluck('type')
+            ->map(fn (FactorType|string $type) => $type instanceof FactorType ? $type->value : $type)
+            ->sort()
+            ->implode('|');
+
+        return '|'.$types.($types === '' ? '' : '|');
+    }
+
+    /** Whether any enabled type is in a queryConfirmedTypes() string. */
+    private function anyEnabled(string $types): bool
+    {
+        foreach ($this->enabledTypes() as $type) {
+            if (str_contains($types, '|'.$type->value.'|')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -207,7 +253,7 @@ class Mfa
         }
 
         /** @var EnforcementPolicy|null $instance */
-        $instance = $policy === null ? null : $this->app->make($policy);
+        $instance = $policy === null ? null : $this->live()->make($policy);
 
         return $instance !== null && $instance->mustEnroll($user);
     }
@@ -331,7 +377,7 @@ class Mfa
         $policy = $this->config->get('mfa.routes.password_confirmation_policy');
 
         /** @var PasswordConfirmationPolicy|null $instance */
-        $instance = is_string($policy) && $policy !== '' ? $this->app->make($policy) : null;
+        $instance = is_string($policy) && $policy !== '' ? $this->live()->make($policy) : null;
 
         return $instance === null || $instance->mustConfirmPassword($user);
     }
@@ -358,7 +404,7 @@ class Mfa
      */
     public function validatePassword(Request $request, MultiFactorAuthenticatable $user, string $password): bool
     {
-        $guard = LiveContainer::getInstance()->make(AuthFactory::class)->guard($this->guardFor($request, $user));
+        $guard = $this->live()->make(AuthFactory::class)->guard($this->guardFor($request, $user));
 
         return $guard instanceof SessionGuard && $guard->getProvider()->validateCredentials($user, ['password' => $password]);
     }
@@ -461,7 +507,7 @@ class Mfa
     {
         // Resolve from the live container, not the one captured when this
         // singleton was built: under Octane each request runs in a clone.
-        $request ??= LiveContainer::getInstance()->make('request');
+        $request ??= $this->live()->make('request');
 
         $allowed = $target instanceof MultiFactorAuthenticatable && $this->hasConfirmedFactors($target)
             ? $this->isVerifiedFor($request, $impersonator)
@@ -492,7 +538,7 @@ class Mfa
      */
     public function context(?Request $request = null): MfaContext
     {
-        $request ??= LiveContainer::getInstance()->make('request');
+        $request ??= $this->live()->make('request');
         $enabled = $this->enabled();
         $routes = $enabled && (bool) $this->config->get('mfa.routes.enabled') && Route::has('mfa.settings');
 
@@ -526,7 +572,58 @@ class Mfa
                 'settings' => $routes ? route('mfa.settings') : null,
                 'challenge' => $routes ? route('mfa.challenge') : null,
             ],
+            nudge: [
+                'show' => $routes && $user !== null && $model instanceof MultiFactorAuthenticatable && $this->showsNudge($request, $model),
+                ...$this->nudgeCopy(),
+                'dismissUrl' => $routes ? route('mfa.nudge.dismiss') : null,
+            ],
         );
+    }
+
+    /**
+     * The one rule for who the turn-on-two-factor nudge (config mfa.nudge) is
+     * for: it is on, and the user has no factor and isn't enforced (enforced
+     * users are sent to enroll anyway). The settings page's notice uses this
+     * alone; the floating card also hides on MFA's own pages and once
+     * dismissed (showsNudge()). A user with MFA costs nothing more.
+     */
+    public function nudgeEligible(MultiFactorAuthenticatable $user): bool
+    {
+        return $this->config->get('mfa.nudge.enabled')
+            && ! $this->hasConfirmedFactors($user)
+            && ! $this->mustEnroll($user);
+    }
+
+    /**
+     * Whether the floating nudge shows for this session user on this page:
+     * nudgeEligible(), not on MFA's own pages, and not dismissed. Checked in
+     * that order, so the dismissal costs at most one cache read, and only
+     * for users it is for.
+     */
+    private function showsNudge(Request $request, MultiFactorAuthenticatable $user): bool
+    {
+        return $this->nudgeEligible($user)
+            && ! ($request->route() !== null && $request->routeIs('mfa.*'))
+            && ! $this->live()->make(Nudge::class)->isDismissed($request->session(), $user);
+    }
+
+    /**
+     * The nudge's copy from config('mfa.nudge'), through the translator, so
+     * a lang/{locale}.json entry can translate it. The settings page shows
+     * the title and body as a notice.
+     *
+     * @return array{title: string, body: string, button: string, dismissLabel: string}
+     */
+    public function nudgeCopy(): array
+    {
+        $text = fn (string $key): string => (string) __((string) $this->config->get("mfa.nudge.{$key}"));
+
+        return [
+            'title' => $text('title'),
+            'body' => $text('body'),
+            'button' => $text('button'),
+            'dismissLabel' => $text('dismiss_label'),
+        ];
     }
 
     /*
@@ -592,7 +689,7 @@ class Mfa
     /** @return list<SessionIdentity> */
     public function sessionIdentities(Request $request): array
     {
-        return SessionIdentity::resolveAll($request, LiveContainer::getInstance()->make(AuthFactory::class), $this->guards());
+        return SessionIdentity::resolveAll($request, $this->live()->make(AuthFactory::class), $this->guards());
     }
 
     /**
@@ -645,9 +742,31 @@ class Mfa
         return $this->guards()[0] ?? 'web';
     }
 
+    /**
+     * The container of the request being handled. Under Octane each request
+     * runs in a clone of the app, set as the global instance, while
+     * \$this->app is the one this singleton was built with at boot: anything
+     * per request (the request, auth, a policy that needs either) comes from
+     * here. Without Octane both are the same container.
+     */
+    private function live(): Container
+    {
+        return LiveContainer::getInstance();
+    }
+
+    /** The request being handled, if it has a session (see cachedConfirmedTypes()). */
+    private function liveRequest(): ?Request
+    {
+        $container = $this->live();
+        $request = $container->bound('request') ? $container->make('request') : null;
+
+        return $request instanceof Request && $request->hasSession() ? $request : null;
+    }
+
     private function cacheKey(int|string $userId): string
     {
-        return $this->config->get('mfa.cache.prefix').':has-factors:'.$userId;
+        // "factor-types", not v0.x's "has-factors" (0/1): old entries are never read.
+        return $this->config->get('mfa.cache.prefix').':factor-types:'.$userId;
     }
 
     private function cacheStore(): Cache

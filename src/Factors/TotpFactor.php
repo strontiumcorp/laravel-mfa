@@ -18,6 +18,9 @@ final class TotpFactor implements Factor
 {
     private const STEP_SECONDS = 30;
 
+    /** Digits in an authenticator code (RFC 6238 as authenticator apps implement it). */
+    public const CODE_LENGTH = 6;
+
     /** @param array{issuer?: string, issuer_environment?: bool, window?: int} $config */
     public function __construct(
         private readonly Google2FA $google2fa,
@@ -96,7 +99,7 @@ final class TotpFactor implements Factor
         // Equivalent mutant(s): preg_replace only returns null on a regex error.
         $code = preg_replace('/\s+/', '', $code) ?? ''; // @pest-mutate-ignore: EmptyStringToNotEmpty
 
-        if (preg_match('/^\d{6}$/', $code) !== 1 || ! $factor->secret) {
+        if (preg_match('/^\d{'.self::CODE_LENGTH.'}$/', $code) !== 1 || ! $factor->secret) {
             return VerificationResult::failure(FailureReason::InvalidCode);
         }
 

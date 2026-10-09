@@ -31,9 +31,15 @@ trait CallsProviderApi
             ->retry(2, 200, fn (Throwable $e) => self::neverSent($e), throw: false);
     }
 
+    /**
+     * A connection error: certain only when the request never reached the
+     * provider; otherwise (e.g. a read timeout) the message may have gone out.
+     */
     protected static function connectionFailed(string $provider, ConnectionException $e): DeliveryFailed
     {
-        return DeliveryFailed::provider($provider, 'connection: '.Redact::text($e->getMessage()));
+        $detail = 'connection: '.Redact::text($e->getMessage());
+
+        return self::neverSent($e) ? DeliveryFailed::provider($provider, $detail) : DeliveryFailed::uncertain($provider, $detail);
     }
 
     /** True only when the request certainly didn't reach the provider. */

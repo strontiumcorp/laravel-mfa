@@ -43,10 +43,10 @@ def git(*args: str) -> str:
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
 
 
-def latest_release() -> tuple[str, tuple[int, int, int]] | None:
-    """The highest strict vX.Y.Z tag reachable from HEAD."""
+def latest_release(rev: str = "HEAD") -> tuple[str, tuple[int, int, int]] | None:
+    """The highest strict vX.Y.Z tag reachable from rev."""
     tags = []
-    for tag in git("tag", "--list", "v*", "--merged", "HEAD").split():
+    for tag in git("tag", "--list", "v*", "--merged", rev).split():
         match = SEMVER_TAG.match(tag)
         if match:
             tags.append((tuple(int(part) for part in match.groups()), tag))
@@ -56,11 +56,12 @@ def latest_release() -> tuple[str, tuple[int, int, int]] | None:
     return tag, version
 
 
-def commits_since(tag: str | None) -> list[dict]:
-    revision_range = f"{tag}..HEAD" if tag else "HEAD"
+def commits_since(tag: str | None, rev: str = "HEAD") -> list[dict]:
+    revision_range = f"{tag}..{rev}" if tag else rev
     output = git("log", "--no-merges", f"--format=%h{FIELD}%s{FIELD}%b{RECORD}", revision_range)
     commits = []
-    release_commit = re.compile(r"^chore: release v\d+\.\d+\.\d+$")
+    # A squash merge appends the pull request number: "chore: release v1.2.3 (#45)".
+    release_commit = re.compile(r"^chore: release v\d+\.\d+\.\d+( \(#\d+\))?$")
     for record in output.split(RECORD):
         record = record.strip("\n")
         if not record:
@@ -91,12 +92,12 @@ def infer_bump(commits: list[dict]) -> str:
     return "patch"
 
 
-def next_tag(bump: str) -> str:
-    release = latest_release()
+def next_tag(bump: str, rev: str = "HEAD") -> str:
+    release = latest_release(rev)
     major, minor, patch = release[1] if release else (0, 0, 0)
 
     if bump == "auto":
-        bump = infer_bump(commits_since(release[0] if release else None))
+        bump = infer_bump(commits_since(release[0] if release else None, rev))
     if bump == "major" and major == 0:
         bump = "minor"  # 0.x: breaking changes bump the minor version
 
@@ -174,17 +175,19 @@ def main() -> None:
 
     nxt = commands.add_parser("next", help="Print the next release tag")
     nxt.add_argument("--bump", choices=["auto", "major", "minor", "patch"], default="auto")
+    nxt.add_argument("--rev", default="HEAD", help="Release the commits up to this revision")
 
     notes = commands.add_parser("notes", help="Write release notes and update the changelog")
     notes.add_argument("tag")
     notes.add_argument("--notes", default="release-notes.md")
     notes.add_argument("--changelog", default="CHANGELOG.md")
     notes.add_argument("--extract-existing", action="store_true")
+    notes.add_argument("--rev", default="HEAD", help="Release the commits up to this revision")
 
     args = parser.parse_args()
 
     if args.command == "next":
-        print(next_tag(args.bump))
+        print(next_tag(args.bump, args.rev))
         return
 
     if not SEMVER_TAG.match(args.tag):
@@ -197,9 +200,9 @@ def main() -> None:
         pathlib.Path(args.notes).write_text(section, encoding="utf-8")
         return
 
-    release = latest_release()
+    release = latest_release(args.rev)
     prior = release[0] if release else None
-    rendered = render_notes(args.tag, prior, commits_since(prior))
+    rendered = render_notes(args.tag, prior, commits_since(prior, args.rev))
     pathlib.Path(args.notes).write_text(rendered, encoding="utf-8")
     update_changelog(pathlib.Path(args.changelog), args.tag, rendered)
 

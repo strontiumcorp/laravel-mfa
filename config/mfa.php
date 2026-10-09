@@ -268,6 +268,13 @@ return [
         'new_destinations_per_ip_per_hour' => 10,     // distinct destinations; IPv6 per /64
         'unconfirmed_global_per_hour' => 500,         // app-wide circuit breaker
 
+        // App-wide cap on login codes (confirmed destinations), against SMS
+        // pumping through many accounts that each stay under send_per_hour.
+        // When hit, codes pause for everyone until the hour's window frees
+        // up (SendingCircuitTripped, critical). Set it well above your peak:
+        // 1000 an hour is about 17 a minute, sustained; null or 0 = no cap.
+        'confirmed_global_per_hour' => 1000,
+
         // Fire SuspiciousCodeRequests after this many login-code sends with
         // no successful verification (0 = never). Someone may have the
         // password: listen to the event and warn the owner.
@@ -360,6 +367,33 @@ return [
         // whose logout lives elsewhere (e.g. POST /admin/logout) still work
         // as long as the route is named. null hides the button.
         'logout_route' => 'logout',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Nudge
+    |--------------------------------------------------------------------------
+    |
+    | A dismissible card (the MfaEnableNudge component, mounted in the app's
+    | layout) asking users who have no factor to turn two-factor on. Shown
+    | only while MFA and its routes are on, to logged-in users with no factor
+    | who aren't enforced (enforced users are sent to enroll anyway), and
+    | never on MFA's own pages. The MFA settings page shows the same title
+    | and body as a notice to those users.
+    |
+    | "Not today" hides it until the user's next local midnight (the browser
+    | sends its timezone; app.timezone if it doesn't), at most 26 hours,
+    | for that user on every device. Plain strings (config:cache safe); each
+    | goes through __(), so a lang/{locale}.json entry translates it.
+    |
+    */
+
+    'nudge' => [
+        'enabled' => env('MFA_NUDGE_ENABLED', true),
+        'title' => 'Protect your account',
+        'body' => 'Turn on two-factor sign-in now. It takes a minute and will soon be required.',
+        'button' => 'Turn on',
+        'dismiss_label' => 'Not today',
     ],
 
     /*

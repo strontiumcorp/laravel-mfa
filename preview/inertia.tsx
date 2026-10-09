@@ -9,7 +9,8 @@ type Errors = Record<string, string>;
 type Options = { onStart?: () => void; onSuccess?: (page?: unknown) => void; onError?: (errors: Errors) => void; onFinish?: () => void; preserveScroll?: boolean; preserveState?: boolean };
 
 let state: State;
-let shared: Record<string, unknown> = {};
+// Shared props are worked out from the state, like a server would on every visit.
+let shared: (s: State) => Record<string, unknown> = () => ({});
 const listeners = new Set<() => void>();
 let version = 0;
 const notify = () => {
@@ -20,7 +21,7 @@ const notify = () => {
 /** Toasts the backend asks for (e.g. "Sent code 123456"). */
 export const toasts = { listeners: new Set<(text: string) => void>() };
 
-export function boot(initial: State, sharedProps: Record<string, unknown> = {}) {
+export function boot(initial: State, sharedProps: (s: State) => Record<string, unknown> = () => ({})) {
     state = initial;
     shared = sharedProps;
     notify();
@@ -82,7 +83,7 @@ export const router = {
 };
 
 export function usePage() {
-    return { props: shared };
+    return { props: shared(state) };
 }
 
 export function Head({ title }: { title?: string; children?: ReactNode }) {

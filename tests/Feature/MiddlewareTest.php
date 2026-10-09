@@ -1,14 +1,24 @@
 <?php
 
+use Illuminate\Auth\Middleware\Authenticate;
+use Illuminate\Cache\Events\CacheHit;
+use Illuminate\Cache\Events\CacheMissed;
+use Illuminate\Contracts\Http\Kernel;
+use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Routing\SortedMiddleware;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Route;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Events\ChallengeRequired;
 use StrontiumCorp\LaravelMfa\Events\EnrollmentRequired;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
+use StrontiumCorp\LaravelMfa\Http\Middleware\EnsureMfaVerified;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\EnforceForEveryone;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\Role;
+use StrontiumCorp\LaravelMfa\Tests\Fixtures\User;
 
 it('lets guests through', function () {
     $this->get('/public')->assertOk();
@@ -89,6 +99,36 @@ it('challenges logins restored from a remember-me cookie on the first request', 
         ->assertRedirect(route('mfa.challenge'));
 });
 
+it('challenges before route model binding, so an unverified user learns nothing about records', function () {
+    // /profiles/{profile} binds a model; a missing id would be a 404.
+    Route::middleware(['web', 'auth'])->get('/profiles/{profile}', fn (User $profile) => $profile->id);
+    [$user] = $this->userWithFactor();
+    $this->loginWithSession($user);
+
+    $this->get("/profiles/{$user->id}")->assertRedirect(route('mfa.challenge'));
+    $this->get('/profiles/999999')->assertRedirect(route('mfa.challenge'));
+
+    $this->actingAsMfaVerified($user);
+    $this->get("/profiles/{$user->id}")->assertOk();
+    $this->get('/profiles/999999')->assertNotFound();
+});
+
+it('runs after the session and auth middleware, and before route model binding', function () {
+    Route::middleware(['web', 'auth'])->get('/profiles/{profile}', fn (User $profile) => $profile->id)->name('profiles.show');
+    Route::getRoutes()->refreshNameLookups();
+    app(Kernel::class); // syncs its groups and priority onto the router
+    $order = array_values(array_map(
+        fn ($m) => is_string($m) ? explode(':', $m)[0] : $m,
+        // Sorted by the router's priority list, as it runs them.
+        (new SortedMiddleware(app('router')->middlewarePriority, app('router')->gatherRouteMiddleware(Route::getRoutes()->getByName('profiles.show'))))->all(),
+    ));
+    $at = fn (string $class) => array_search($class, $order, true);
+
+    expect($at(EnsureMfaVerified::class))->toBeGreaterThan($at(StartSession::class))
+        ->toBeGreaterThan($at(Authenticate::class))
+        ->toBeLessThan($at(SubstituteBindings::class));
+});
+
 it('blocks MFA settings for users who have factors but have not verified', function () {
     [$user] = $this->userWithFactor();
 
@@ -140,6 +180,33 @@ describe('performance', function () {
         $this->get('/dashboard');
 
         expect(mfaQueries(fn () => $this->get('/dashboard')->assertOk()))->toBeEmpty();
+    });
+
+    it('reads the "has MFA" cache once per request, however often it is asked', function () {
+        // The gate, the shared context (as HandleInertiaRequests would) and
+        // the nudge all ask; the answer is kept on the request.
+        Route::middleware(['web', 'auth'])->get('/shared', fn () => Mfa::context()->toArray());
+        $reads = [];
+        Event::listen([CacheHit::class, CacheMissed::class], function ($e) use (&$reads) {
+            if (str_contains($e->key, 'factor-types')) {
+                $reads[] = $e->key;
+            }
+        });
+        $user = $this->makeUser();
+        $this->loginWithSession($user)->get('/shared')->assertOk(); // fills the cache
+        $reads = [];
+        $this->get('/shared')->assertOk()->assertJsonPath('nudge.show', true);
+        expect($reads)->toHaveCount(1);
+
+        // A factor added mid-request is seen at once (the write-through updates it).
+        $reads = [];
+        Route::middleware(['web', 'auth'])->get('/add', function () use ($user) {
+            $before = Mfa::hasConfirmedFactors($user);
+            test()->createMfaFactor($user);
+
+            return [$before, Mfa::hasConfirmedFactors($user)];
+        });
+        $this->get('/add')->assertOk()->assertExactJson([false, true]);
     });
 
     it('busts the cache when a factor is added', function () {

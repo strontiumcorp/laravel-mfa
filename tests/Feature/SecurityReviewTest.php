@@ -18,6 +18,7 @@ use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use StrontiumCorp\LaravelMfa\Notifications\OtpCodeNotification;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
 use StrontiumCorp\LaravelMfa\Support\RateLimits;
+use StrontiumCorp\LaravelMfa\Tests\Fixtures\RequestAwarePolicy;
 
 it('[#9] lets enforced users through password confirmation while enrolling (no redirect loop)', function () {
     config(['mfa.enforcement.policy' => EnforceForAdmins::class, 'mfa.routes.confirm_middleware' => ['password.confirm']]);
@@ -74,6 +75,21 @@ it('[#6] forgets MFA verification on logout even when the session is not invalid
     $this->freshGuards()->loginWithSession($user)->get('/dashboard')->assertRedirect(route('mfa.challenge'));
 });
 
+it('forgets a confirmed password on logout even when the session is not invalidated', function () {
+    config(['mfa.routes.password_confirmation' => true]);
+    [$user] = $this->userWithFactor();
+    $this->actingAsMfaVerified($user)->withConfirmedPassword();
+    $this->getJson('/mfa/settings')->assertOk()->assertJsonPath('passwordConfirmationRequired', false);
+
+    Auth::guard('web')->logout(); // artistly-style: no session()->invalidate()
+
+    // The next login in this browser (another user, or the same one) must
+    // confirm their own password before changing factors.
+    expect(session()->has(StrontiumCorp\LaravelMfa\Mfa::PASSWORD_CONFIRMED_AT))->toBeFalse();
+    $this->freshGuards()->actingAsMfaVerified($user)->getJson('/mfa/settings')->assertOk()->assertJsonPath('passwordConfirmationRequired', true);
+    $this->postJson('/mfa/factors', ['type' => 'email'])->assertStatus(423);
+});
+
 it('[#8] rejects non-scalar factor ids with a 422 instead of a 500', function () {
     [$user] = $this->userWithFactor();
 
@@ -124,7 +140,7 @@ it('[#1] caps verification attempts per day, not just per minute', function () {
 
 it('[#5] a stale "no MFA" read cannot overwrite the answer written when a factor is confirmed', function () {
     $user = $this->makeUser();
-    $key = 'mfa:has-factors:'.$user->id;
+    $key = 'mfa:factor-types:'.$user->id;
 
     // Request A starts its fill and reads "no factors"...
     $staleRead = Mfa::hasConfirmedFactors($user); // fills the cache with 0
@@ -133,12 +149,37 @@ it('[#5] a stale "no MFA" read cannot overwrite the answer written when a factor
 
     // ...meanwhile the user confirms a factor (model event writes through)...
     $this->createMfaFactor($user);
-    expect(cache()->get($key))->toBe(1);
+    expect(cache()->get($key))->toBe('|totp|');
 
     // ...then A's late write arrives. add() must not clobber the fresh value.
-    cache()->add($key, 0, 3600);
+    cache()->add($key, '|', 3600);
 
     expect(Mfa::hasConfirmedFactors($user))->toBeTrue();
+});
+
+it('applies a factor type being turned off or on at once, without forgetting the cache', function () {
+    $this->freshGuards();
+    [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+    expect(Mfa::hasConfirmedFactors($user))->toBeTrue(); // cached
+
+    // Off: an SMS-only user isn't challenged by it any more (D10), so they
+    // must not be held at a challenge with nothing to choose from.
+    config(['mfa.factors.sms.enabled' => false]);
+    expect(Mfa::hasConfirmedFactors($user))->toBeFalse();
+    $this->loginWithSession($user)->get('/dashboard')->assertOk();
+
+    // On again: challenged at once, not after cache.ttl.
+    config(['mfa.factors.sms.enabled' => true]);
+    expect(Mfa::hasConfirmedFactors($user))->toBeTrue();
+    $this->freshGuards()->loginWithSession($user)->get('/dashboard')->assertRedirect(route('mfa.challenge'));
+
+    // And a factor added while the type was off is seen when it comes back.
+    config(['mfa.factors.sms.enabled' => false]);
+    $other = $this->makeUser();
+    expect(Mfa::hasConfirmedFactors($other))->toBeFalse();
+    $this->createMfaFactor($other, FactorType::Sms);
+    config(['mfa.factors.sms.enabled' => true]);
+    expect(Mfa::hasConfirmedFactors($other))->toBeTrue();
 });
 
 it('[#9] keeps raw transport errors (which can contain the address) out of the MFA log and audit table', function () {
@@ -183,6 +224,35 @@ it('[#9] resolves the current request from the live container, not the one captu
     }
 
     expect($session->has($mfa->sessionKey('web', $target->id)))->toBeTrue();
+});
+
+it('resolves the enforcement and password confirmation policies from the live container (Octane)', function () {
+    config([
+        'mfa.enforcement.policy' => RequestAwarePolicy::class,
+        'mfa.routes.password_confirmation' => true,
+        'mfa.routes.password_confirmation_policy' => RequestAwarePolicy::class,
+    ]);
+    $mfa = app(StrontiumCorp\LaravelMfa\Mfa::class);   // resolved at boot, holds the base app
+    $user = $this->makeUser();
+
+    // Without Octane (artistly): the one container, the one request.
+    expect($mfa->isEnforced($user))->toBeFalse()->and($mfa->requiresPasswordConfirmation($user))->toBeFalse();
+
+    // Octane: this request runs in a clone of the base app with its own request.
+    $base = app();
+    $sandbox = clone $base;
+    Container::setInstance($sandbox);
+    $sandbox->instance('request', Request::create('/x', server: ['HTTP_X_STRICT' => '1']));
+
+    try {
+        $seen = [$mfa->isEnforced($user), $mfa->requiresPasswordConfirmation($user), $mfa->mustEnroll($user)];
+    } finally {
+        Container::setInstance($base);
+    }
+
+    expect($seen)->toBe([true, true, true])
+        // And back on the base app's request, the policy sees that one again.
+        ->and($mfa->isEnforced($user))->toBeFalse();
 });
 
 // Regression guard: on MySQL, whereKey('12abc') matches id 12. SQLite can't

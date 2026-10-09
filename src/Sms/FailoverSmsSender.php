@@ -16,6 +16,9 @@ use Throwable;
  * attempt emits SmsProviderFailed (logged, audited and counted like every
  * MFA event, tagged with the provider). If all fail, DeliveryFailed is
  * thrown and the usual ChallengeDeliveryFailed flow takes over.
+ *
+ * A provider that may have delivered it (DeliveryFailed::$maybeDelivered,
+ * e.g. a read timeout) ends the chain: the next one would send a duplicate.
  */
 final class FailoverSmsSender implements SmsSender
 {
@@ -49,12 +52,18 @@ final class FailoverSmsSender implements SmsSender
 
                 $error = $e instanceof DeliveryFailed ? $e->getMessage() : $e::class;
                 $failures[] = "{$name}: {$error}";
+                $maybeDelivered = $e instanceof DeliveryFailed && $e->maybeDelivered;
 
                 $this->events->dispatch(new SmsProviderFailed(null, FactorType::Sms, FailureReason::DeliveryFailed, [
                     'provider' => $name,
-                    'next' => $names[$i + 1] ?? null,
+                    'next' => $maybeDelivered ? null : $names[$i + 1] ?? null,
                     'error' => $error,
+                    ...($maybeDelivered ? ['maybe_delivered' => true] : []),
                 ]));
+
+                if ($maybeDelivered) {
+                    throw DeliveryFailed::uncertain('failover', "{$name} may have delivered it — ".implode('; ', $failures));
+                }
             }
         }
 

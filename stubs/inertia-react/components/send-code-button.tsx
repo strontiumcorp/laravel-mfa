@@ -1,7 +1,8 @@
 // Published by strontiumcorp/laravel-mfa. This file is yours — restyle freely.
 //
-// Sends (or resends) an email or SMS code, and counts down while the server's
-// cooldown runs. Standalone: needs only React, imports no other MFA file, and
+// The "Didn't get it? Resend in 0:58" line under an email or SMS code input:
+// a link-style button that sends (or resends) a code, and counts down while
+// the server's cooldown runs. Standalone: needs only React, imports no other MFA file, and
 // knows nothing about Inertia or routes.
 //
 //     <MfaSendCodeButton onSend={send} processing={sending} retryAfter={retryAfter} sent={status === 'code-sent'} />
@@ -12,7 +13,7 @@ export type MfaSendCodeButtonProps = {
     processing?: boolean;
     /** Seconds until the server allows another send; a new value restarts the countdown. */
     retryAfter?: number | null;
-    /** A code was just sent: shows a notice and offers "Send a new code". */
+    /** A code is out: offers "Didn't get it? Send a new code" (else "Send code"). */
     sent?: boolean;
     error?: string | null;
 };
@@ -39,22 +40,20 @@ export default function MfaSendCodeButton({ onSend, processing = false, retryAft
     const wait = useCountdown(retryAfter);
 
     return (
-        <div className="space-y-2">
-            {sent && (
-                <p role="status" className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-700 dark:bg-green-950 dark:text-green-300">
-                    Code sent. It may take a moment to arrive.
-                </p>
-            )}
-            <button
-                type="button"
-                disabled={processing || wait > 0}
-                onClick={onSend}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300"
-            >
-                {wait > 0 ? `Resend in ${formatWait(wait)}` : sent ? 'Send a new code' : 'Send code'}
-            </button>
+        <div className="space-y-1 text-center">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+                {(sent || wait > 0) && !processing && "Didn't get it? "}
+                <button
+                    type="button"
+                    disabled={processing || wait > 0}
+                    onClick={onSend}
+                    className="inline-flex min-h-11 items-center font-medium text-gray-900 underline decoration-gray-300 underline-offset-4 hover:decoration-gray-900 disabled:text-gray-500 disabled:no-underline dark:text-gray-100 dark:decoration-gray-600 dark:hover:decoration-gray-100 dark:disabled:text-gray-400"
+                >
+                    {processing ? 'Sending…' : wait > 0 ? `Resend in ${formatWait(wait)}` : sent ? 'Send a new code' : 'Send code'}
+                </button>
+            </p>
             {error && (
-                <p role="alert" className="text-sm text-red-600">
+                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
                     {error}
                 </p>
             )}

@@ -47,7 +47,7 @@ axios.interceptors.response.use(null, (error) => {
 |---|---|---|
 | `422` | Wrong, expired or reused code; invalid destination; unknown factor | `{ "message": "...", "errors": { "code": ["..."] } }`. Enrollment errors use the `destination` or `type` key instead of `code`. |
 | `429` | Rate limited; resend during the cooldown; too many codes to one destination today (`destination_limit`) | Same shape, plus `"retry_after": <seconds>` when known |
-| `503` | The app-wide send breaker is open (likely an attack). Logins with confirmed factors are unaffected. | Same shape |
+| `503` | An app-wide send cap was hit (likely an attack): new destinations (`unconfirmed_global_per_hour`), or login codes (`confirmed_global_per_hour`; authenticator apps and recovery codes still work) | Same shape, plus `"retry_after": <seconds>` until sending resumes |
 | `403` | Not verified yet (see above), or settings opened while a challenge is pending | `{ "error": "mfa_required", ... }` |
 | `423` | A factor change needs the password first (see [Password confirmation](#password-confirmation)) | `{ "message": "...", "error": "password_confirmation_required", "confirm_url": "…/mfa/confirm-password" }` |
 
@@ -61,7 +61,8 @@ The messages are written for end users and are safe to display as-is. For the ma
 {
     "factors": [
         { "id": 7, "type": "sms", "type_label": "SMS", "label": "SMS", "destination": "+*******0100",
-          "confirmed": true, "confirmed_at": "2026-10-08T10:00:00+00:00", "last_used_at": null }
+          "confirmed": true, "confirmed_at": "2026-10-08T10:00:00+00:00", "last_used_at": null,
+          "code_sent": true, "retry_after": 90, "expires_in": 510, "code_length": 6 }
     ],
     "defaultFactorId": 7,
     "hasRecoveryCodes": true,
@@ -73,6 +74,8 @@ The messages are written for end users and are safe to display as-is. For the ma
 ```
 
 - `factors` is ordered by most recently used. Destinations are always masked.
+- `code_sent` is `true` while an email/SMS factor has a usable code out (sent, not expired, not used or burned). `retry_after` is the whole seconds until a resend is allowed, or `null` when it is allowed now. Both survive a refresh, so use them to restore the countdown, and to skip sending a new code when one is already out. `expires_in` is the whole seconds until that code expires, or `null` when none is out: once it runs out, treat the code as gone (a resend is allowed then). TOTP factors always have `false`, `null` and `null`. Opening the page never sends a code: call `POST /mfa/challenge/send` yourself.
+- `code_length` is how many digits the factor's codes have: always `6` for TOTP, `factors.{type}.length` for email and SMS.
 - `urls.logout` is `null` when `config('mfa.routes.logout_route')` doesn't name an existing route.
 - If the session is already verified, or the user has no factors, the endpoint redirects to the intended page instead.
 
@@ -84,7 +87,7 @@ The messages are written for end users and are safe to display as-is. For the ma
 → `{ "status": "code-sent", "retry_after": 120 }`.
 
 - `retry_after` is the number of seconds until the next resend unlocks. The cooldown grows 2 → 4 → 8 → 15 minutes, but is never longer than the code's lifetime, so use it to drive a countdown.
-- A resend during the cooldown gets `429` with the remaining `retry_after`.
+- A resend during the cooldown gets `429` with the remaining `retry_after`, which also never runs past the current code's expiry (a resend is allowed once it has expired), so it always matches the challenge page's `retry_after`.
 - TOTP factors return `{ "status": "code-sent" }`, and nothing is sent.
 
 ### `POST /mfa/challenge`
@@ -147,6 +150,7 @@ If the app sets `routes.confirm_middleware` to `['password.confirm']`, Laravel's
     "requiredTypes": [],
     "passwordConfirmationRequired": false,
     "passwordRetryAfter": null,
+    "nudge": { "title": "Protect your account", "body": "Turn on two-factor sign-in now. It takes a minute and will soon be required." },
     "urls": { "store": "…/mfa/factors", "confirm": "…/mfa/factors/__ID__/confirm", "resend": "…/mfa/factors/__ID__/resend",
               "destroy": "…/mfa/factors/__ID__", "recoveryCodes": "…/mfa/recovery-codes", "confirmPassword": "…/mfa/confirm-password" },
     "status": null,
@@ -156,6 +160,8 @@ If the app sets `routes.confirm_middleware` to `['password.confirm']`, Laravel's
 ```
 
 `passwordConfirmationRequired` says whether adding or removing a method would answer `423` right now (see [Password confirmation](#password-confirmation)), so a client can ask for the password before starting; the routes still enforce it. `recoveryCodesTotal` is how many a fresh set has (`recovery_codes.count`), for an "8 of 10 left" display. `availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have one. It's `[]` for other users.
+
+`nudge` holds the [nudge](configuration.md#nudge)'s title and body, to show as a notice, for a user with no method who isn't enforced (and while `nudge.enabled` is on); it's `null` otherwise.
 
 Replace `__ID__` in the URLs with a factor ID.
 
@@ -209,3 +215,20 @@ Unconfirmed destinations have tight limits, because anyone can trigger them:
 → `{ "status": "recovery-codes-generated", "recovery_codes": [ … ] }`. This invalidates every previous code.
 
 If the user has no confirmed factor yet, the response is `422 { "message": "Enable a verification method first." }`, without an `errors` key.
+
+## Nudge
+
+### `POST /mfa/nudge/dismiss`
+
+"Not today" on the [nudge](configuration.md#nudge) to turn two-factor on. The only input is the browser's timezone (optional; `Intl.DateTimeFormat().resolvedOptions().timeZone`):
+
+```json
+{ "timezone": "Asia/Dhaka" }
+```
+→ `{ "status": "nudge-dismissed", "until": "2026-10-10T18:00:00+00:00" }`
+
+- `until` is the user's next local midnight, in the app timezone, at most 26 hours away. A missing or unknown timezone counts as `app.timezone`; nothing else in the request is read.
+- It applies to the user on every device, until `until`. Whether to show the nudge is in the shared context (`Mfa::context()`, `nudge.show`).
+- Sent again while it is already hidden (a double click, another tab or device), it changes nothing and fires no event: the answer is the same `200` with the existing `until`.
+- Inertia and plain form posts get a `303` back to the page they came from, with no status flash.
+- Like the other MFA routes, it needs a logged-in session that has passed the challenge (a user without methods isn't challenged).

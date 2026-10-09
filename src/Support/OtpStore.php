@@ -41,35 +41,15 @@ final class OtpStore
     public function issue(MfaFactor $factor, array $options, ?Closure $gate = null): array
     {
         return DB::transaction(function () use ($factor, $options, $gate): array {
-            $lastVerified = $this->lock($factor);
+            $cooldown = $this->cooldown($factor, $this->lock($factor), $options['resend_cooldown']);
 
-            // Streak: sends since the later of "an hour ago" and the last
-            // successful verification. Both reset the curve.
-            $since = now()->subSeconds(self::STREAK_WINDOW_SECONDS);
-            if ($lastVerified !== null && $lastVerified->gt($since)) {
-                $since = $lastVerified;
-            }
-
-            $streak = $factor->otpCodes()->where('created_at', '>', $since)->count();
-
-            /** @var MfaOtpCode|null $latest */
-            $latest = $factor->otpCodes()->latest('id')->first();
-
-            // A resend is always allowed once the current code is unusable
-            // (expired or burned), otherwise the curve applies.
-            $latestUsable = $latest !== null && $latest->consumed_at === null && $latest->expires_at->isFuture();
-
-            if ($latestUsable && $latest->created_at !== null) {
-                $readyAt = $latest->created_at->copy()->addSeconds(Cooldown::after($streak, $options['resend_cooldown']));
-
-                if ($readyAt->isFuture()) {
-                    return ['code' => null, 'result' => VerificationResult::failure(FailureReason::Cooldown, [
-                        // Whole seconds, rounded up: $readyAt is whole seconds (from the
-                        // DB), so this is ceil() of the exact wait. Not diffInSeconds():
-                        // Carbon 2 truncates it (89 instead of 90).
-                        'retry_after' => $readyAt->getTimestamp() - now()->getTimestamp(),
-                    ])];
-                }
+            if ($cooldown['ready_at'] !== null && $cooldown['ready_at']->isFuture()) {
+                return ['code' => null, 'result' => VerificationResult::failure(FailureReason::Cooldown, [
+                    // Whole seconds, rounded up: ready_at is whole seconds (from the
+                    // DB), so this is ceil() of the exact wait. Not diffInSeconds():
+                    // Carbon 2 truncates it (89 instead of 90).
+                    'retry_after' => $cooldown['ready_at']->getTimestamp() - now()->getTimestamp(),
+                ])];
             }
 
             if ($gate !== null && ($refused = $gate()) !== null) {
@@ -87,12 +67,77 @@ final class OtpStore
 
             return ['code' => $code, 'result' => VerificationResult::success([
                 'otp_id' => $otp->id,
-                'streak' => $streak + 1,
+                'streak' => $cooldown['streak'] + 1,
                 // When the next resend unlocks: the curve, or code expiry if sooner.
                 // Equivalent mutant: ttl is an int in config.
-                'retry_after' => min(Cooldown::after($streak + 1, $options['resend_cooldown']), (int) $options['ttl']), // @pest-mutate-ignore: RemoveIntegerCast
+                'retry_after' => min(Cooldown::after($cooldown['streak'] + 1, $options['resend_cooldown']), (int) $options['ttl']), // @pest-mutate-ignore: RemoveIntegerCast
             ])];
         });
+    }
+
+    /**
+     * Read-only view of the resend cooldown, for the challenge page: whether
+     * a usable code is out, the whole seconds until a resend is allowed, and
+     * until that code expires.
+     * Same maths as issue(), but no lock and no writes.
+     *
+     * @param  array{length: int, resend_cooldown: int|array<string, int|float>}  $options
+     */
+    public function status(MfaFactor $factor, array $options): ChallengeState
+    {
+        $lastVerified = $factor->last_used_at === null ? null : Carbon::instance($factor->last_used_at);
+        $cooldown = $this->cooldown($factor, $lastVerified, $options['resend_cooldown']);
+
+        if ($cooldown['usable'] === null) {
+            return ChallengeState::none($options['length']);
+        }
+
+        // Whole seconds from timestamps, not diffInSeconds() (Carbon 2 truncates).
+        $now = now()->getTimestamp();
+
+        return ChallengeState::sent(
+            $cooldown['ready_at'] === null ? null : $cooldown['ready_at']->getTimestamp() - $now,
+            $cooldown['usable']->expires_at->getTimestamp() - $now,
+            $options['length'],
+        );
+    }
+
+    /**
+     * The resend cooldown as issue() applies it.
+     *
+     * Streak: sends since the later of "an hour ago" and the last successful
+     * verification (both reset the curve). A resend is always allowed once
+     * the latest code is unusable (expired or burned), so ready_at is null
+     * then; otherwise it is when the curve allows the next send, or when the
+     * code expires if that is sooner (it is unusable from then on). issue()'s
+     * refusal and status() both read it, so they always agree.
+     *
+     * @param  int|array<string, int|float>  $config
+     * @return array{streak: int, usable: MfaOtpCode|null, ready_at: Carbon|null}
+     */
+    private function cooldown(MfaFactor $factor, ?Carbon $lastVerified, int|array $config): array
+    {
+        $since = now()->subSeconds(self::STREAK_WINDOW_SECONDS);
+        if ($lastVerified !== null && $lastVerified->gt($since)) {
+            $since = $lastVerified;
+        }
+
+        $streak = $factor->otpCodes()->where('created_at', '>', $since)->count();
+
+        /** @var MfaOtpCode|null $latest */
+        $latest = $factor->otpCodes()->latest('id')->first();
+
+        if ($latest === null || $latest->consumed_at !== null || ! $latest->expires_at->isFuture()) {
+            return ['streak' => $streak, 'usable' => null, 'ready_at' => null];
+        }
+
+        $readyAt = $latest->created_at?->copy()->addSeconds(Cooldown::after($streak, $config));
+
+        return [
+            'streak' => $streak,
+            'usable' => $latest,
+            'ready_at' => $readyAt !== null && $readyAt->gt($latest->expires_at) ? Carbon::instance($latest->expires_at) : $readyAt,
+        ];
     }
 
     /** @param array{max_attempts: int} $options */

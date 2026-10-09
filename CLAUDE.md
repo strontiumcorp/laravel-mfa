@@ -33,6 +33,7 @@ It must be secure, cheap per request, Octane-safe, fully tested, and observable.
 | `make typecheck-stubs APPS="../artistly ../clone-voice ../podcast-flow"` | Type-checks `stubs/inertia-react` (pages and components) against each app's real React/Inertia. Run after any stub change. |
 | `make format` | Pint fix. |
 | `make release ARGS="--dry-run"` | Preview the next release (see Releasing). |
+| `make release-tag` | Tag the merged release pull request and push the tag. |
 
 **Never run mutation tests** (`pest --mutate`): about 36 minutes in this setup, and `--parallel` reports false kills. The `@pest-mutate-ignore: <Mutator>` markers in `src/` document proven-equivalent mutants. Keep them, and keep the reason comment on the line above when you touch those lines.
 
@@ -46,7 +47,8 @@ It must be secure, cheap per request, Octane-safe, fully tested, and observable.
 
 - Commits: focused, Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `ci:`, scopes like `fix(sms):`, `!` for breaking). Short scannable subject; detail goes in extra `-m` paragraphs. **No `Co-Authored-By` or any other trailer.**
 - Don't push unless asked. Pushing and tagging are the maintainer's call.
-- Releasing: `make release` (`scripts/release.sh` + `scripts/update-changelog.py`). It runs only on a clean `main` that is up to date with `origin`, runs `make ci`, infers the version from the commits (breaking → major, or minor below 1.0; `feat` → minor; else patch), prepends grouped notes to `CHANGELOG.md`, commits `chore: release vX.Y.Z`, creates an annotated tag with the notes, and pushes both atomically after you confirm. Composer reads the version from the tag; no file holds a version. The tag push runs `full-matrix.yml`, whose last job publishes the GitHub Release from the tag's notes once all combinations pass (no Release for a red tag). Release only after CI on GitHub is green.
+- `main` is protected (ruleset "Block for review": pull request required, no force push, no deletion). Nothing is pushed to `main` directly; work goes through a pull request.
+- Releasing takes two steps (`scripts/release.sh` + `scripts/update-changelog.py`). `make release` needs a clean tree, works from `origin/main` whatever is checked out, refuses while the previous release is untagged or a release pull request is open, infers the version from the commits (breaking → major, or minor below 1.0; `feat` → minor; else patch), creates `release/vX.Y.Z`, runs `make ci`, prepends grouped notes to `CHANGELOG.md`, commits `chore: release vX.Y.Z`, and after you confirm pushes the branch and opens the pull request (`gh`). Once it's merged (merge, squash or rebase; a squash must keep the title), `make release-tag` finds that commit on `origin/main`, creates an annotated tag on it with its changelog section, and pushes only the tag (tags aren't protected). Composer reads the version from the tag; no file holds a version. The tag push runs `full-matrix.yml`, whose last job publishes the GitHub Release from the tag's notes once all combinations pass (no Release for a red tag). Release only after CI on GitHub is green.
 - CI layout: `.github/workflows/test-suite.yml` holds the test job once (reusable, takes a JSON matrix). `tests.yml` (every push/PR) runs static analysis plus 7 combinations, under the plan's 20-concurrent-job limit so nothing queues. `full-matrix.yml` runs all 22 on `v*` tags, on demand, and nightly if `main` changed. Private repo: each job bills a whole minute, so keep per-push jobs few. Runners are pinned to `ubuntu-24.04` (not `ubuntu-latest`, which moves to Ubuntu 26 from 2026-10-19); bump it deliberately, after a green run on the new image.
 
 ## Testing rules (each one learned the hard way)
@@ -69,6 +71,7 @@ Don't break these. Each one is covered by tests; read them before changing the a
 
 **Who is checked**
 - `EnsureMfaVerified` is appended to the `web` group (deny by default). It checks the **identity stored in the session** (`Support\SessionIdentity`), never `Auth::user()`. That's why `Auth::setUser()` in webhooks, jobs and per-request impersonation is never challenged, while password, Socialite and remember-me logins always are.
+- The gate is in the middleware priority right before `SubstituteBindings` (after `StartSession` and auth), so route model binding never runs for, or leaks record existence to, an unverified user.
 - Verification is **per guard** (`mfa.verified.{guard}.{id}` in the session). Every logged-in MFA guard must pass on its own.
 - Users with no factors pass, unless enforcement (`mfa.enforcement.roles` / `.policy`; the v0.1 `mfa.enforce` key is still honoured) says they must enroll.
 - Enforced users must hold a factor of `enforcement.required_types` (default totp). Without one they verify with what they have, then a session flag (`mfa.enroll.{guard}.{id}`, set in `markVerified()`, refreshed on factor confirm/remove) holds them on the enrollment routes, so verified requests still cost no query. With one, the challenge lists and accepts only required types (`Mfa::challengeTypes()`, checked server-side in `ChallengeService`); recovery codes still work.
@@ -86,12 +89,12 @@ Don't break these. Each one is covered by tests; read them before changing the a
 **Concurrency and cost**
 - OTP issue/verify run under a row lock on the factor (`OtpStore`); only the latest code is valid, burned after `max_attempts`. TOTP replay protection is a compare-and-set on `last_totp_timestep`. Recovery codes are consumed with an atomic conditional update.
 - Rate limits count **before** checking (atomic increment), so parallel bursts can't slip through.
-- Sends (`SendGuard`) have two budgets: confirmed destinations (cooldown curve + per-account hourly cap, no per-IP cap) and unconfirmed ones (per-destination daily cap across all accounts, distinct new destinations per account and per IP with IPv6 grouped per /64, global circuit breaker). The cooldown is checked first; every counter is rolled back if any limit refuses.
+- Sends (`SendGuard`) have two budgets: confirmed destinations (cooldown curve + per-account hourly cap + app-wide hourly cap, no per-IP cap) and unconfirmed ones (per-destination daily cap across all accounts, distinct new destinations per account and per IP with IPv6 grouped per /64, global circuit breaker). The cooldown is checked first; every counter is rolled back if any limit refuses.
 - A verified session costs zero MFA queries. "Has MFA" is cached; factor model events write through, and fills use `add()` so a stale read can't win.
 - Octane: singletons hold no per-request state. Resolve the request and auth from the live container (`Container::getInstance()`), never from the container captured at boot.
 
 **Delivery and SMS**
-- Delivery is a job (`DeliverOtp`, encrypted payload). It's queued when `delivery.queue` or `delivery.queue_connection` is set (a `sync` connection sends inline), otherwise it runs inline with immediate errors. A failed delivery discards its code, so no cooldown applies.
+- Delivery is a job (`DeliverOtp`, encrypted payload). It's queued when `delivery.queue` or `delivery.queue_connection` is set (a `sync` connection sends inline), otherwise it runs inline with immediate errors. A failed delivery discards its code, so no cooldown applies; one that may have been delivered (`DeliveryFailed::$maybeDelivered`, e.g. a read timeout) keeps it, isn't retried and ends a failover chain (no duplicate SMS).
 - SMS drivers (`twilio`, `vonage`, `infobip`, `sns` with in-package SigV4, `log`, plus the `failover` and `routing` composites) use Laravel's HTTP client through `Sms\Concerns\CallsProviderApi`: 3s connect / 5s total, and a retry **only** when the request never reached the provider (so no duplicate SMS). `SmsManager` builds drivers fresh per send (so `Http::fake()` and config changes apply) and rejects circular configs.
 - `DeliveryFailed` messages must never contain the code, the recipient, or credentials (contract; `DeliveryFailed::provider()` also redacts).
 

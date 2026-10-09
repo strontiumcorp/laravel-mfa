@@ -1,11 +1,13 @@
 <?php
 
+use Illuminate\Contracts\Queue\Job;
 use Illuminate\Contracts\Queue\ShouldBeEncrypted;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
+use StrontiumCorp\LaravelMfa\Contracts\MetricsRecorder;
 use StrontiumCorp\LaravelMfa\Contracts\SmsSender;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Events\ChallengeDeliveryFailed;
@@ -79,6 +81,41 @@ it('emits a delivery-failed event when queued retries are exhausted', function (
     (new DeliverOtp($factor->id, '123456', 300))->failed(new DeliveryFailed('[twilio] HTTP 500'));
 
     Event::assertDispatched(ChallengeDeliveryFailed::class, fn ($e) => $e->context['queued'] && $e->context['error'] === '[twilio] HTTP 500');
+});
+
+describe('a queued send that may have been delivered', function () {
+    it('fails the job at once instead of retrying (no duplicate SMS)', function () {
+        $sender = new class implements SmsSender
+        {
+            public function send(string $to, string $message): void
+            {
+                throw DeliveryFailed::uncertain('twilio', 'connection: cURL error 28');
+            }
+        };
+        app()->instance(SmsSender::class, $sender);
+        [, $factor] = $this->userWithFactor(FactorType::Sms);
+        $queueJob = Mockery::spy(Job::class);
+
+        $job = new DeliverOtp($factor->id, '123456', 300);
+        $job->setJob($queueJob);
+        $job->handle(app(MetricsRecorder::class)); // doesn't throw: no retry
+
+        $queueJob->shouldHaveReceived('fail')->once()->withArgs(fn ($e) => $e instanceof DeliveryFailed && $e->maybeDelivered);
+    });
+
+    it('keeps the code (the user may have it) and flags the event', function () {
+        Event::fake([ChallengeDeliveryFailed::class]);
+        config(['mfa.delivery.queue_connection' => 'redis']);
+        app(FactorManager::class)->forgetDrivers();
+        Queue::fake();
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user)->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
+
+        Queue::pushed(DeliverOtp::class)->first()->failed(DeliveryFailed::uncertain('twilio', 'connection: cURL error 28'));
+
+        expect($factor->otpCodes()->whereNull('consumed_at')->count())->toBe(1);
+        Event::assertDispatched(ChallengeDeliveryFailed::class, fn ($e) => $e->context['maybe_delivered'] === true && $e->context['queued']);
+    });
 });
 
 it('sends via Twilio with a messaging service or from-number', function () {

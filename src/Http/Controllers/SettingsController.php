@@ -68,6 +68,11 @@ class SettingsController extends Controller
                 && ! $this->mfa->passwordRecentlyConfirmed($request->session()),
             // Seconds until the password prompt may be tried again (its own countdown).
             'passwordRetryAfter' => $request->session()->get(UiResponse::PASSWORD_RETRY_AFTER),
+            // The nudge's title and body, shown as a notice to the users the
+            // nudge is for (Mfa::nudgeEligible(); a dismissal doesn't hide it).
+            'nudge' => $this->mfa->nudgeEligible($user)
+                ? array_intersect_key($this->mfa->nudgeCopy(), ['title' => true, 'body' => true])
+                : null,
         ]);
     }
 
@@ -191,8 +196,9 @@ class SettingsController extends Controller
         $user = $this->sessionUser($request, $this->mfa);
 
         if (! $limits->attemptPassword($user)) {
-            event(new PasswordConfirmationFailed($user, null, FailureReason::RateLimited));
-            $this->ui->failure(VerificationResult::failure(FailureReason::RateLimited, ['retry_after' => $limits->passwordAvailableIn($user)]), 'password');
+            $retryAfter = $limits->passwordAvailableIn($user);
+            event(new PasswordConfirmationFailed($user, null, FailureReason::RateLimited, ['retry_after' => $retryAfter]));
+            $this->ui->failure(VerificationResult::failure(FailureReason::RateLimited, ['retry_after' => $retryAfter]), 'password');
         }
 
         if (! $this->mfa->validatePassword($request, $user, $validated['password'])) {

@@ -4,7 +4,7 @@
 //
 // Every request succeeds, unless a test queues errors for the next ones:
 //     inertia.respondWith({ password_confirmation_required: '...' });
-import { useRef, useState } from 'react';
+import { createElement, useRef, useState, type ReactNode } from 'react';
 
 export type Request = { method: string; url: string; data: unknown };
 
@@ -57,6 +57,8 @@ export const inertia = (() => {
         },
         module: {
             Head: () => null,
+            // Marked, so tests can tell it from a plain <a>.
+            Link: ({ children, ...props }: { href: string; className?: string; children?: ReactNode }) => createElement('a', { ...props, 'data-inertia-link': '' }, children),
             usePage: () => ({ props: pageProps }),
             useForm,
             router: {

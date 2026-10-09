@@ -30,6 +30,7 @@ const props = {
     passwordConfirmationRequired: false,
     mustEnroll: false,
     requiredTypes: [],
+    nudge: null,
     status: null,
     urls,
 };
@@ -256,6 +257,16 @@ describe('settings page', () => {
 
         expect(screen.getByRole('dialog', { name: 'Add an email address' })).toBeInTheDocument();
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('shows the nudge copy as a notice when the server sends it', () => {
+        const { rerender } = render(<MfaSettings {...props} factors={[]} nudge={{ title: 'Protect your account', body: 'Turn on two-factor sign-in now.' }} />);
+
+        expect(screen.getByRole('note')).toHaveTextContent('Protect your account');
+        expect(screen.getByRole('note')).toHaveTextContent('Turn on two-factor sign-in now.');
+
+        rerender(<MfaSettings {...props} />);
+        expect(screen.queryByRole('note')).not.toBeInTheDocument();
     });
 
     it('reopens a pending setup once, on load, not one after another', async () => {

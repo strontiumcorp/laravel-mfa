@@ -4,10 +4,13 @@ namespace StrontiumCorp\LaravelMfa\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use StrontiumCorp\LaravelMfa\Factors\OtpFactor;
+use StrontiumCorp\LaravelMfa\Factors\TotpFactor;
 use StrontiumCorp\LaravelMfa\Http\UiResponse;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Support\ChallengeService;
+use StrontiumCorp\LaravelMfa\Support\ChallengeState;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -37,7 +40,7 @@ class ChallengeController extends Controller
             ->get();
 
         return $this->ui->page('challenge', [
-            'factors' => $factors->map(fn (MfaFactor $f) => $f->toPublicArray())->values(),
+            'factors' => $factors->map(fn (MfaFactor $f) => [...$f->toPublicArray(), ...$this->challengeState($f)->toArray()])->values(),
             // Equivalent mutant(s): the page is only shown when the user has at least one enabled factor.
             'defaultFactorId' => $factors->first()?->id, // @pest-mutate-ignore: RemoveNullSafeOperator
             'hasRecoveryCodes' => $recoveryCodes->remaining($user) > 0,
@@ -103,6 +106,20 @@ class ChallengeController extends Controller
             'redirect' => $intended,
             'remaining' => $result->context['remaining'],
         ]);
+    }
+
+    /**
+     * The code already out for an email/SMS factor and its resend cooldown,
+     * so a refresh keeps the countdown and the page doesn't send again, and
+     * how many digits its codes have.
+     */
+    private function challengeState(MfaFactor $factor): ChallengeState
+    {
+        $driver = $factor->type->isDelivered() ? $this->mfa->factor($factor->type) : null;
+
+        return $driver instanceof OtpFactor
+            ? $driver->challengeState($factor)
+            : ChallengeState::none(TotpFactor::CODE_LENGTH);
     }
 
     private function logoutUrl(): ?string

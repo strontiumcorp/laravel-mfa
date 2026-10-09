@@ -1,5 +1,6 @@
 <?php
 
+use Carbon\CarbonImmutable;
 use PragmaRX\Google2FA\Google2FA;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
@@ -15,7 +16,7 @@ it('GET /mfa/challenge', function () {
     app(RecoveryCodes::class)->generate($user);
 
     $this->loginWithSession($user)->getJson('/mfa/challenge')->assertOk()->assertExactJsonStructure([
-        'factors' => ['*' => ['id', 'type', 'type_label', 'label', 'destination', 'confirmed', 'confirmed_at', 'last_used_at']],
+        'factors' => ['*' => ['id', 'type', 'type_label', 'label', 'destination', 'confirmed', 'confirmed_at', 'last_used_at', 'code_sent', 'retry_after', 'expires_in', 'code_length']],
         'defaultFactorId', 'hasRecoveryCodes',
         'urls' => ['send', 'verify', 'recover', 'logout'],
         'status', 'recoveryCodes', 'retryAfter',
@@ -55,6 +56,17 @@ it('error shapes: 422 invalid, 429 throttled, 403 from the middleware', function
         ->assertStatus(429)->assertExactJsonStructure(['message', 'errors' => ['code'], 'retry_after']);
 });
 
+it('error shape: 503 when an app-wide send cap is hit', function () {
+    config(['mfa.rate_limit.confirmed_global_per_hour' => 1]);
+    Mfa::fakeSms();
+    [$first, $factor] = $this->userWithFactor(FactorType::Sms);
+    $this->loginWithSession($first)->postJson('/mfa/challenge/send', ['factor_id' => $factor->id])->assertOk();
+
+    [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+    $this->freshGuards()->loginWithSession($user)->postJson('/mfa/challenge/send', ['factor_id' => $factor->id])
+        ->assertStatus(503)->assertExactJsonStructure(['message', 'errors' => ['code'], 'retry_after']);
+});
+
 it('GET /mfa/settings says how many recovery codes a fresh set has', function () {
     config(['mfa.recovery_codes.count' => 8]);
     $this->loginWithSession($this->makeUser());
@@ -68,7 +80,7 @@ it('GET /mfa/settings and the enrollment endpoints', function () {
 
     $this->getJson('/mfa/settings')->assertOk()->assertExactJsonStructure([
         'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label', 'recommended']], 'recoveryCodesRemaining', 'recoveryCodesTotal', 'mustEnroll', 'requiredTypes',
-        'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'confirmPassword'], 'passwordConfirmationRequired', 'passwordRetryAfter', 'status', 'recoveryCodes', 'retryAfter',
+        'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'confirmPassword'], 'passwordConfirmationRequired', 'passwordRetryAfter', 'nudge' => ['title', 'body'], 'status', 'recoveryCodes', 'retryAfter',
     ]);
 
     $created = $this->postJson('/mfa/factors', ['type' => 'totp'])->assertOk()->assertExactJsonStructure([
@@ -116,6 +128,15 @@ it('POST /mfa/confirm-password', function () {
         'errors' => ['password' => ['The provided password is incorrect.']],
     ]);
     $this->postJson('/mfa/confirm-password', ['password' => 'password'])->assertExactJson(['status' => 'password-confirmed']);
+});
+
+it('POST /mfa/nudge/dismiss', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-10-09T20:00:00Z'));
+    $this->loginWithSession($this->makeUser());
+
+    $this->postJson('/mfa/nudge/dismiss', ['timezone' => 'Asia/Dhaka'])
+        ->assertOk()
+        ->assertExactJson(['status' => 'nudge-dismissed', 'until' => '2026-10-10T18:00:00+00:00']);
 });
 
 it('POST /mfa/confirm-password over the attempt limit', function () {

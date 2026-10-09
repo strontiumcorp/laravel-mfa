@@ -40,6 +40,12 @@ Add the two-factor card to the account settings page (it links to the MFA settin
 <MfaSettingsCard {...mfaSettingsCardProps(useMfa())} renderLink={(link) => <Link {...link} />} />
 ```
 
+and, in the global layout, the nudge that asks users without two-factor to turn it on:
+
+```tsx
+<MfaEnableNudge {...useMfaNudge()} />
+```
+
 The MFA settings page asks for the password itself before factor changes, so the app needs no confirm-password page. Then check the setup:
 
 ```bash
@@ -104,10 +110,11 @@ make preview               # live preview of the pages and components, fake back
 make coverage              # with coverage; fails under 85%
 make test-matrix           # Laravel 11, 12 and 13, newest and lowest dependencies
 make typecheck-stubs APPS="../artistly ../clone-voice ../podcast-flow"
-make release               # tag a release; ARGS="--dry-run" to preview
+make release               # open the release pull request; ARGS="--dry-run" to preview
+make release-tag           # after it's merged: tag it and push the tag
 ```
 
-`make release` infers the version from the commit messages, updates `CHANGELOG.md`, and pushes an annotated tag after you confirm. CI then runs the full matrix on the tag and publishes the GitHub Release.
+`main` only takes reviewed pull requests, so a release takes two steps. `make release` infers the version from the commit messages and opens a `chore: release vX.Y.Z` pull request that updates `CHANGELOG.md`. Once it's merged (any merge method; keep the title if you squash), `make release-tag` tags the merged release commit and pushes the tag. CI then runs the full matrix on the tag and publishes the GitHub Release.
 
 CI runs static analysis, the React component tests and 7 key combinations on every push. The full matrix (22 jobs) runs on release tags, nightly when `main` changed, and on demand.
 

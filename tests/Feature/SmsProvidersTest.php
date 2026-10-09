@@ -408,6 +408,60 @@ describe('provider HTTP calls', function () {
         expect($attempts)->toBe(1);
     });
 
+    it('says whether a failed request may have delivered the message', function (bool $sent) {
+        Http::fake(fn () => throw transportError(sent: $sent));
+
+        try {
+            sms('twilio')->send('+15555550100', 'hi');
+        } catch (DeliveryFailed $e) {
+        }
+
+        expect($e->maybeDelivered)->toBe($sent);
+    })->with(['read timeout after sending' => [true], 'never connected' => [false]]);
+
+    it('stops the failover chain when a provider may have delivered the message (no duplicate SMS)', function () {
+        Event::fake([SmsProviderFailed::class]);
+        Http::fake(fn () => throw transportError(sent: true));
+        $log = new ArrayObject;
+        recordingDriver('backup', $log);
+        config(['mfa.sms.drivers.failover' => ['drivers' => ['twilio', 'backup']]]);
+
+        expect(fn () => sms('failover')->send('+15555550100', 'hi'))
+            ->toThrow(fn (DeliveryFailed $e) => expect($e->maybeDelivered)->toBeTrue()
+                ->and($e->getMessage())->toStartWith('[failover] twilio may have delivered it'));
+
+        expect($log->getArrayCopy())->toBe([]);
+        Event::assertDispatched(SmsProviderFailed::class, fn ($e) => $e->context['provider'] === 'twilio'
+            && $e->context['next'] === null && $e->context['maybe_delivered'] === true);
+    });
+
+    it('still fails over when the provider was never reached', function () {
+        Http::fake(fn () => throw transportError(sent: false));
+        $log = new ArrayObject;
+        recordingDriver('backup', $log);
+        config(['mfa.sms.drivers.failover' => ['drivers' => ['twilio', 'backup']]]);
+
+        sms('failover')->send('+15555550100', 'hi');
+
+        expect($log->getArrayCopy())->toBe(['backup:+15555550100']);
+    });
+
+    it('keeps the code when an inline send may have been delivered, and says so in the event', function () {
+        Event::fake([ChallengeDeliveryFailed::class]);
+        Http::fake(fn () => throw transportError(sent: true));
+        config(['mfa.sms.driver' => 'twilio']);
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+
+        // The user may well have it: the page says it was sent, with the
+        // usual cooldown, and the code stays valid.
+        $this->loginWithSession($user)->postJson('/mfa/challenge/send', ['factor_id' => $factor->id])
+            ->assertOk()->assertJsonPath('status', 'code-sent');
+        expect($factor->otpCodes()->whereNull('consumed_at')->count())->toBe(1);
+        $this->postJson('/mfa/challenge/send', ['factor_id' => $factor->id])->assertStatus(429);
+
+        Event::assertDispatched(ChallengeDeliveryFailed::class, fn ($e) => $e->context['maybe_delivered'] === true);
+    });
+
     it('keeps URLs (account ids) out of connection errors', function () {
         Http::fake(fn () => throw transportError(sent: true));
 

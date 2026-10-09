@@ -55,7 +55,7 @@ jobs:
     if: needs.changed.outputs.run == 'true'
     uses: ./.github/workflows/ui-suite.yml
 
-  # Tags come from `make release`, whose annotated tag carries the release
+  # Tags come from `make release-tag`, whose annotated tag carries the release
   # notes. The Release is only published once every combination passed.
   release:
     name: Publish GitHub Release

@@ -30,6 +30,10 @@ export type State = {
     requirePassword: boolean;
     passwordConfirmed: boolean;
     passwordAttempts: number;
+    /** "Not today" on the nudge was clicked (until the frame reloads). */
+    nudgeDismissed: boolean;
+    /** Challenge: when each email/SMS factor's code went out (ms), for its send state. */
+    codeSentAt: Record<number, number>;
     // One-request flashes, as the package's session flashes.
     status: string | null;
     retryAfter: number | null;
@@ -55,6 +59,14 @@ export const urls = {
         confirmPassword: '/mfa/confirm-password',
     },
     challenge: { send: '/mfa/challenge/send', verify: '/mfa/challenge', recover: '/mfa/challenge/recover', logout: '/logout' },
+    nudgeDismiss: '/mfa/nudge/dismiss',
+};
+
+export const NUDGE = {
+    title: 'Protect your account',
+    body: 'Turn on two-factor sign-in now. It takes a minute and will soon be required.',
+    button: 'Turn on',
+    dismissLabel: 'Not today',
 };
 
 let nextId = 100;
@@ -96,6 +108,8 @@ export function initialState(overrides: Partial<State> = {}): State {
         requirePassword: false,
         passwordConfirmed: false,
         passwordAttempts: 0,
+        codeSentAt: {},
+        nudgeDismissed: false,
         status: null,
         retryAfter: null,
         passwordRetryAfter: null,
@@ -195,6 +209,7 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
         const f = s.factors.find((f) => f.id === data.factor_id);
         s.status = 'code-sent';
         if (f?.type === 'totp') return {};
+        if (f) s.codeSentAt[f.id] = Date.now();
         s.retryAfter = 120;
         return { toast: `Sent code ${CODE} (preview)` };
     }
@@ -210,6 +225,11 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
     }
 
     if (method === 'post' && url === urls.challenge.logout) return { toast: 'Signed out (preview).' };
+
+    if (method === 'post' && url === urls.nudgeDismiss) {
+        s.nudgeDismissed = true;
+        return { toast: `Hidden until midnight in ${String(data.timezone ?? 'the app timezone')} (preview).` };
+    }
 
     return { toast: `No preview handler for ${method.toUpperCase()} ${url}` };
 }
@@ -228,6 +248,7 @@ export function settingsProps(s: State) {
         requiredTypes: s.mustEnroll || s.requiredTypes.length > 0 ? s.requiredTypes.map((type) => ({ type, label: LABELS[type] })) : [],
         passwordRetryAfter: s.passwordRetryAfter,
         passwordConfirmationRequired: s.requirePassword && !s.passwordConfirmed,
+        nudge: s.factors.length === 0 && !s.mustEnroll ? { title: NUDGE.title, body: NUDGE.body } : null,
         status: s.status,
         recoveryCodes: s.recoveryCodes,
         retryAfter: s.retryAfter,
@@ -237,8 +258,17 @@ export function settingsProps(s: State) {
 
 /** The challenge page's props, as ChallengeController::show() builds them. */
 export function challengeProps(s: State) {
+    // Each email/SMS factor's code still out, its cooldown (120s here), how long it stays valid (600s), and its code length.
+    const sendState = (f: Factor) => {
+        const sentAt = s.codeSentAt[f.id];
+        const elapsed = sentAt === undefined ? 0 : Math.floor((Date.now() - sentAt) / 1000);
+        if (sentAt === undefined || elapsed >= 600) return { code_sent: false, retry_after: null, expires_in: null, code_length: 6 };
+        const wait = 120 - elapsed;
+        return { code_sent: true, retry_after: wait > 0 ? wait : null, expires_in: 600 - elapsed, code_length: 6 };
+    };
+
     return {
-        factors: s.factors,
+        factors: s.factors.map((f) => ({ ...f, ...sendState(f) })),
         defaultFactorId: s.factors[0]?.id ?? null,
         hasRecoveryCodes: s.recoveryCodesRemaining > 0,
         status: s.status,

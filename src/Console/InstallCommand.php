@@ -50,6 +50,10 @@ class InstallCommand extends Command
         $this->line('       <fg=gray>import</> MfaApiKeyNotice <fg=gray>from</> \'@/'.self::COMPONENTS_DIR.'/api-key-notice\';');
         $this->line("       <fg=gray>import</> { mfaApiKeyNoticeProps, useMfa } <fg=gray>from</> '@/{$pagesDir}/mfa/mfa-context';");
         $this->line('       <MfaApiKeyNotice {...mfaApiKeyNoticeProps(useMfa())} />');
+        $this->line('     and mount the "turn on two-factor" nudge in your global layout:');
+        $this->line('       <fg=gray>import</> MfaEnableNudge <fg=gray>from</> \'@/'.self::COMPONENTS_DIR.'/enable-nudge\';');
+        $this->line("       <fg=gray>import</> { useMfaNudge } <fg=gray>from</> '@/{$pagesDir}/mfa/mfa-context';");
+        $this->line('       <MfaEnableNudge {...useMfaNudge()} />');
         $this->line('  5. php artisan mfa:doctor   <fg=gray># verifies the integration</>');
 
         return self::SUCCESS;

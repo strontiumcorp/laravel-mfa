@@ -2,15 +2,23 @@
 
 namespace StrontiumCorp\LaravelMfa\Listeners;
 
+use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Support\Arr;
 use StrontiumCorp\LaravelMfa\Contracts\MfaActivity;
+use StrontiumCorp\LaravelMfa\Enums\FailureReason;
 use StrontiumCorp\LaravelMfa\Events\MfaEvent;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
+use StrontiumCorp\LaravelMfa\Support\CacheKey;
 use Throwable;
 
 final class WriteMfaAuditLog
 {
+    /** Refusals by a limit: one row per user, kind and window (see repeatsRefusal()). */
+    private const LIMIT_REASONS = [FailureReason::RateLimited, FailureReason::DestinationLimit, FailureReason::SendingPaused];
+
+    public function __construct(private readonly CacheFactory $cache) {}
+
     public function handle(MfaActivity $event): void
     {
         if (! $event instanceof MfaEvent
@@ -20,6 +28,10 @@ final class WriteMfaAuditLog
         }
 
         try {
+            if ($this->repeatsRefusal($event)) {
+                return;
+            }
+
             // user_id is a foreign key to the MFA user model only.
             $user = is_a($event->user, Mfa::userModel()) ? $event->user : null;
 
@@ -37,5 +49,28 @@ final class WriteMfaAuditLog
         } catch (Throwable $e) {
             report($e); // Observability must never break authentication.
         }
+    }
+
+    /**
+     * Whether this is a refusal by a limit that this user already has a row
+     * for in the current window: same event, reason, stage and scope, until
+     * the refusal's retry_after (when the window frees up; 60s when
+     * unknown). The marker is an HMAC key set with add(), so concurrent
+     * refusals write one row. The log and metrics still see every refusal.
+     */
+    private function repeatsRefusal(MfaEvent $event): bool
+    {
+        if ($event->user === null || ! in_array($event->reason, self::LIMIT_REASONS, true)) {
+            return false;
+        }
+
+        $kind = implode('|', [
+            CacheKey::user($event->user), $event->name(), $event->reason->value,
+            $event->context['stage'] ?? '', $event->context['scope'] ?? '',
+        ]);
+        $window = (int) ($event->context['retry_after'] ?? 60);
+
+        return ! $this->cache->store(config('mfa.cache.store'))
+            ->add(CacheKey::for('audit-refusal', $kind), true, max(1, $window));
     }
 }
