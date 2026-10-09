@@ -77,7 +77,8 @@ final class OtpStore
 
     /**
      * Read-only view of the resend cooldown, for the challenge page: whether
-     * a usable code is out, and the whole seconds until a resend is allowed.
+     * a usable code is out, the whole seconds until a resend is allowed, and
+     * until that code expires.
      * Same maths as issue(), but no lock and no writes.
      *
      * @param  array{length: int, resend_cooldown: int|array<string, int|float>}  $options
@@ -91,8 +92,12 @@ final class OtpStore
             return ChallengeState::none($options['length']);
         }
 
+        // Whole seconds from timestamps, not diffInSeconds() (Carbon 2 truncates).
+        $now = now()->getTimestamp();
+
         return ChallengeState::sent(
-            $cooldown['ready_at'] === null ? null : $cooldown['ready_at']->getTimestamp() - now()->getTimestamp(),
+            $cooldown['ready_at'] === null ? null : $cooldown['ready_at']->getTimestamp() - $now,
+            $cooldown['usable']->expires_at->getTimestamp() - $now,
             $options['length'],
         );
     }

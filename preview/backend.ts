@@ -258,12 +258,13 @@ export function settingsProps(s: State) {
 
 /** The challenge page's props, as ChallengeController::show() builds them. */
 export function challengeProps(s: State) {
-    // Each email/SMS factor's code still out, its cooldown (120s here; codes don't expire), and its code length.
+    // Each email/SMS factor's code still out, its cooldown (120s here), how long it stays valid (600s), and its code length.
     const sendState = (f: Factor) => {
         const sentAt = s.codeSentAt[f.id];
-        if (sentAt === undefined) return { code_sent: false, retry_after: null, code_length: 6 };
-        const wait = 120 - Math.floor((Date.now() - sentAt) / 1000);
-        return { code_sent: true, retry_after: wait > 0 ? wait : null, code_length: 6 };
+        const elapsed = sentAt === undefined ? 0 : Math.floor((Date.now() - sentAt) / 1000);
+        if (sentAt === undefined || elapsed >= 600) return { code_sent: false, retry_after: null, expires_in: null, code_length: 6 };
+        const wait = 120 - elapsed;
+        return { code_sent: true, retry_after: wait > 0 ? wait : null, expires_in: 600 - elapsed, code_length: 6 };
     };
 
     return {

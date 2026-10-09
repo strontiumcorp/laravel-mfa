@@ -339,6 +339,26 @@ describe('send state on the challenge page', function () {
         $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
     });
 
+    it('says how long the code out stays valid, in whole seconds', function () {
+        $this->freezeSecond();
+        config(['mfa.factors.sms.ttl' => 300]);
+        Mfa::fakeSms();
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+        $expiresIn = fn () => $this->getJson(route('mfa.challenge'))->assertOk()->json('factors.0.expires_in');
+
+        expect($expiresIn())->toBeNull(); // nothing sent yet
+
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
+        expect($expiresIn())->toBe(300);
+
+        $this->travel(299)->seconds();
+        expect($expiresIn())->toBe(1);
+
+        $this->travel(1)->seconds(); // expired: no usable code
+        expect($expiresIn())->toBeNull();
+    });
+
     it('gives TOTP factors no send state', function () {
         Mfa::fakeSms();
         [$user, $totp] = $this->userWithFactor(FactorType::Totp);
@@ -348,7 +368,7 @@ describe('send state on the challenge page', function () {
 
         $factors = collect($this->getJson(route('mfa.challenge'))->assertOk()->json('factors'))->keyBy('id');
 
-        expect($factors[$totp->id])->toMatchArray(['code_sent' => false, 'retry_after' => null])
+        expect($factors[$totp->id])->toMatchArray(['code_sent' => false, 'retry_after' => null, 'expires_in' => null])
             ->and($factors[$sms->id])->toMatchArray(['code_sent' => true, 'retry_after' => 120]);
     });
 
