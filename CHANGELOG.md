@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.4.2 - 2026-10-09
+
+_Changes since `v0.4.1`._
+
+### Fixes
+
+- **ui:** let the settings card's className add to its own classes again (db4cdff)
+
+### Documentation
+
+- install from the public repository (604d01b)
+
 ## v0.4.1 - 2026-10-09
 
 _Changes since `v0.4.0`._
