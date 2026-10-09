@@ -16,6 +16,10 @@ export type MfaChallengeFactor = {
     label: string | null;
     /** Masked, e.g. "j***@example.com". */
     destination: string | null;
+    /** Email/SMS: a usable code is already out (it survives a refresh). */
+    code_sent?: boolean;
+    /** Email/SMS: seconds until a resend is allowed, null when allowed now. */
+    retry_after?: number | null;
 };
 
 export type MfaChallengeFormProps = {
@@ -73,7 +77,9 @@ export default function MfaChallengeForm({
             <p className="text-sm text-gray-500 dark:text-gray-400">
                 {factor?.type === 'totp'
                     ? 'Enter the 6-digit code from your authenticator app.'
-                    : `We'll send a code to ${factor?.destination ?? 'you'}.`}
+                    : factor?.code_sent
+                      ? `We sent a code to ${factor.destination ?? 'you'}.`
+                      : `We'll send a code to ${factor?.destination ?? 'you'}.`}
             </p>
 
             {factors.length > 1 && (

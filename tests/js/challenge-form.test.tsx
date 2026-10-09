@@ -25,6 +25,12 @@ describe('MfaChallengeForm', () => {
         expect(screen.getByText("We'll send a code to j***@example.com.")).toBeInTheDocument();
     });
 
+    it('says when a code is already on its way', () => {
+        setup({ factors: [totp, { ...email, code_sent: true }], selectedFactorId: 2 });
+
+        expect(screen.getByText('We sent a code to j***@example.com.')).toBeInTheDocument();
+    });
+
     it('lets the user pick another factor', async () => {
         const { onSelectFactor } = setup();
 

@@ -4,6 +4,7 @@ namespace StrontiumCorp\LaravelMfa\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use StrontiumCorp\LaravelMfa\Factors\OtpFactor;
 use StrontiumCorp\LaravelMfa\Http\UiResponse;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
@@ -37,7 +38,7 @@ class ChallengeController extends Controller
             ->get();
 
         return $this->ui->page('challenge', [
-            'factors' => $factors->map(fn (MfaFactor $f) => $f->toPublicArray())->values(),
+            'factors' => $factors->map(fn (MfaFactor $f) => [...$f->toPublicArray(), ...$this->sendState($f)])->values(),
             // Equivalent mutant(s): the page is only shown when the user has at least one enabled factor.
             'defaultFactorId' => $factors->first()?->id, // @pest-mutate-ignore: RemoveNullSafeOperator
             'hasRecoveryCodes' => $recoveryCodes->remaining($user) > 0,
@@ -103,6 +104,19 @@ class ChallengeController extends Controller
             'redirect' => $intended,
             'remaining' => $result->context['remaining'],
         ]);
+    }
+
+    /**
+     * The code already out for an email/SMS factor and its resend cooldown,
+     * so a refresh keeps the countdown and the page doesn't send again.
+     *
+     * @return array{code_sent: bool, retry_after: int|null}
+     */
+    private function sendState(MfaFactor $factor): array
+    {
+        $driver = $factor->type->isDelivered() ? $this->mfa->factor($factor->type) : null;
+
+        return $driver instanceof OtpFactor ? $driver->sendState($factor) : ['code_sent' => false, 'retry_after' => null];
     }
 
     private function logoutUrl(): ?string

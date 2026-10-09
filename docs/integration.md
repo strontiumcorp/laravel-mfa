@@ -164,7 +164,7 @@ The published files are the app's own: restyle and rearrange them freely. `mfa:i
 
 | Component | Props |
 |---|---|
-| `challenge-form` | `factors`, `selectedFactorId`, `onSelectFactor(id)`, `onSubmit(code)`, `processing`, `error`, `children` (shown above the code input), `onUseRecoveryCode?`, `onSignOut?` |
+| `challenge-form` | `factors` (each email/SMS factor's `code_sent` switches the copy to "We sent a code to …"), `selectedFactorId`, `onSelectFactor(id)`, `onSubmit(code)`, `processing`, `error`, `children` (shown above the code input), `onUseRecoveryCode?`, `onSignOut?` |
 | `send-code-button` | `onSend()`, `processing`, `retryAfter`, `sent`, `error` |
 | `recovery-code-form` | `onSubmit(code)`, `processing`, `error`, `onUseVerificationCode?`, `onSignOut?` |
 | `factor-cards` | The settings page's method list: one card per method. `types` (`{ type, label, recommended? }`), `factors` (confirmed; `confirmed_at` shows as "Added"), `onAdd(type, destination?)`, `onStart(type)` (when given, Set up hands the setup to the page for every type, e.g. to `factor-setup-dialog`, instead of asking for an email/SMS destination inline), `onRemove(factor)`, `setups` (per type, the setup in progress to show inside that card, e.g. `{ sms: <MfaDestinationSetup framed={false} … /> }`), `passwordPrompt` (`{ at: { factor: id } | { type }, node }`: the password prompt, shown inside the card where the change started), `adding`, `error`, `removingId`, `required`, `requiredTypes`, `confirmRemove?` |

@@ -53,6 +53,15 @@ describe('challenge page', () => {
         expect(screen.getByRole('button', { name: 'Send code' })).toBeEnabled();
     });
 
+    it('keeps the countdown after a refresh, from the server\'s send state', () => {
+        const sent = factors.map((f) => (f.id === 2 ? { ...f, code_sent: true, retry_after: 58 } : f));
+        render(<MfaChallenge {...props} factors={sent} defaultFactorId={2} />);
+
+        expect(screen.getByText('We sent a code to j***@example.com.')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Resend in 0:58' })).toBeDisabled();
+        expect(inertia.requests).toEqual([]);
+    });
+
     it('switches to recovery codes and back, and signs out', async () => {
         render(<MfaChallenge {...props} />);
 

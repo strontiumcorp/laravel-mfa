@@ -84,7 +84,8 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
                             <MfaSendCodeButton
                                 onSend={sendCode}
                                 processing={send.processing}
-                                retryAfter={sentToId === factorId ? retryAfter : null}
+                                // After a send, the flash; after a refresh, the server's cooldown for this factor.
+                                retryAfter={(sentToId === factorId ? retryAfter : null) ?? factor.retry_after ?? null}
                                 sent={sentToId === factorId && status === 'code-sent'}
                                 error={send.errors.code}
                             />

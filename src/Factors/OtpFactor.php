@@ -150,6 +150,17 @@ abstract class OtpFactor implements Factor
     }
 
     /**
+     * Whether a usable code is out and the seconds until a resend is allowed
+     * (null = now). Read-only, for the challenge page.
+     *
+     * @return array{code_sent: bool, retry_after: int|null}
+     */
+    public function sendState(MfaFactor $factor): array
+    {
+        return $this->store->status($factor, $this->config);
+    }
+
+    /**
      * Queued when a connection or a queue name is set (a queue name alone
      * uses the default connection), unless that connection is "sync": then
      * the code is sent inline, with immediate error feedback.

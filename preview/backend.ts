@@ -30,6 +30,8 @@ export type State = {
     requirePassword: boolean;
     passwordConfirmed: boolean;
     passwordAttempts: number;
+    /** Challenge: when each email/SMS factor's code went out (ms), for its send state. */
+    codeSentAt: Record<number, number>;
     // One-request flashes, as the package's session flashes.
     status: string | null;
     retryAfter: number | null;
@@ -96,6 +98,7 @@ export function initialState(overrides: Partial<State> = {}): State {
         requirePassword: false,
         passwordConfirmed: false,
         passwordAttempts: 0,
+        codeSentAt: {},
         status: null,
         retryAfter: null,
         passwordRetryAfter: null,
@@ -195,6 +198,7 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
         const f = s.factors.find((f) => f.id === data.factor_id);
         s.status = 'code-sent';
         if (f?.type === 'totp') return {};
+        if (f) s.codeSentAt[f.id] = Date.now();
         s.retryAfter = 120;
         return { toast: `Sent code ${CODE} (preview)` };
     }
@@ -237,8 +241,16 @@ export function settingsProps(s: State) {
 
 /** The challenge page's props, as ChallengeController::show() builds them. */
 export function challengeProps(s: State) {
+    // Each email/SMS factor's code still out, and its cooldown (120s here; codes don't expire).
+    const sendState = (f: Factor) => {
+        const sentAt = s.codeSentAt[f.id];
+        if (sentAt === undefined) return { code_sent: false, retry_after: null };
+        const wait = 120 - Math.floor((Date.now() - sentAt) / 1000);
+        return { code_sent: true, retry_after: wait > 0 ? wait : null };
+    };
+
     return {
-        factors: s.factors,
+        factors: s.factors.map((f) => ({ ...f, ...sendState(f) })),
         defaultFactorId: s.factors[0]?.id ?? null,
         hasRecoveryCodes: s.recoveryCodesRemaining > 0,
         status: s.status,

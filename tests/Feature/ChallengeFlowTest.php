@@ -222,3 +222,130 @@ it('ignores factors whose type has been disabled in config', function () {
     // With its only factor type disabled the user is no longer challenged.
     $this->loginWithSession($user)->get('/dashboard')->assertOk();
 });
+
+describe('send state on the challenge page', function () {
+    // The page shows each email/SMS factor's outstanding code and cooldown, so
+    // a refresh keeps the countdown (and the page doesn't send a second code).
+    $sendState = function ($test): array {
+        $page = $test->getJson(route('mfa.challenge'))->assertOk();
+
+        return [$page->json('factors.0.code_sent'), $page->json('factors.0.retry_after')];
+    };
+
+    it('keeps the remaining resend cooldown after a refresh', function () {
+        config(['mfa.ui.driver' => 'inertia']);
+        $this->freezeSecond(); // exact waits
+        Mfa::fakeSms();
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        $this->post(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertRedirect();
+        $this->get(route('mfa.challenge'), ['X-Inertia' => 'true'])->assertJsonPath('props.retryAfter', 120); // the redirect, with the flash
+        $this->travel(30)->seconds();
+
+        // A refresh: no flash any more, but the page still knows the wait.
+        $this->get(route('mfa.challenge'), ['X-Inertia' => 'true'])->assertOk()
+            ->assertJsonPath('props.retryAfter', null)
+            ->assertJsonPath('props.factors.0.code_sent', true)
+            ->assertJsonPath('props.factors.0.retry_after', 90);
+    });
+
+    it('reports no code and no wait before anything was sent', function () use ($sendState) {
+        [$user] = $this->userWithFactor(FactorType::Email);
+        $this->loginWithSession($user);
+
+        expect($sendState($this))->toBe([false, null]);
+    });
+
+    it('reports a code still out, with no wait, once the cooldown has passed', function () use ($sendState) {
+        Notification::fake();
+        [$user, $factor] = $this->userWithFactor(FactorType::Email);
+        $this->loginWithSession($user);
+
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
+        $this->travel(121)->seconds();
+
+        expect($sendState($this))->toBe([true, null]);
+    });
+
+    it('reports nothing outstanding once the code has expired', function () use ($sendState) {
+        Mfa::fakeSms();
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
+        $this->travel(601)->seconds();
+
+        expect($sendState($this))->toBe([false, null]);
+    });
+
+    it('reports nothing outstanding once the code was burned', function () use ($sendState) {
+        config(['mfa.factors.sms.max_attempts' => 1]);
+        Mfa::fakeSms();
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
+        $this->postJson(route('mfa.challenge.verify'), ['factor_id' => $factor->id, 'code' => '000000'])->assertUnprocessable();
+
+        expect($sendState($this))->toBe([false, null]);
+    });
+
+    it('follows the cooldown curve: a second send shows the longer wait', function () use ($sendState) {
+        $this->freezeSecond();
+        Mfa::fakeSms();
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertJsonPath('retry_after', 120);
+        $this->travel(121)->seconds();
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertJsonPath('retry_after', 240);
+        $this->travel(40)->seconds();
+
+        expect($sendState($this))->toBe([true, 200]);
+        // And the server agrees with what the page shows.
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertStatus(429)->assertJsonPath('retry_after', 200);
+    });
+
+    it('never shows a wait longer than the code\'s lifetime', function () use ($sendState) {
+        $this->freezeSecond();
+        config(['mfa.factors.sms.ttl' => 300, 'mfa.factors.sms.resend_cooldown' => 900]);
+        Mfa::fakeSms();
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertJsonPath('retry_after', 300);
+        $this->travel(100)->seconds();
+
+        expect($sendState($this))->toBe([true, 200]);
+    });
+
+    it('gives TOTP factors no send state', function () {
+        Mfa::fakeSms();
+        [$user, $totp] = $this->userWithFactor(FactorType::Totp);
+        $sms = $this->createMfaFactor($user, FactorType::Sms);
+        $this->loginWithSession($user);
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $sms->id])->assertOk();
+
+        $factors = collect($this->getJson(route('mfa.challenge'))->assertOk()->json('factors'))->keyBy('id');
+
+        expect($factors[$totp->id])->toMatchArray(['code_sent' => false, 'retry_after' => null])
+            ->and($factors[$sms->id])->toMatchArray(['code_sent' => true, 'retry_after' => 120]);
+    });
+
+    it('only reads: opening the page creates no code and spends no send budget', function () {
+        config(['mfa.rate_limit.send_per_hour' => 1]);
+        $sms = Mfa::fakeSms();
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        foreach (range(1, 3) as $_) {
+            $this->getJson(route('mfa.challenge'))->assertOk()->assertJsonPath('factors.0.code_sent', false);
+        }
+
+        expect($factor->otpCodes()->count())->toBe(0);
+        $sms->assertNothingSent();
+        // The one send this hour is still available.
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
+    });
+});
