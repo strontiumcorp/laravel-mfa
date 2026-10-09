@@ -62,7 +62,7 @@ The messages are written for end users and are safe to display as-is. For the ma
     "factors": [
         { "id": 7, "type": "sms", "type_label": "SMS", "label": "SMS", "destination": "+*******0100",
           "confirmed": true, "confirmed_at": "2026-10-08T10:00:00+00:00", "last_used_at": null,
-          "code_sent": true, "retry_after": 90 }
+          "code_sent": true, "retry_after": 90, "code_length": 6 }
     ],
     "defaultFactorId": 7,
     "hasRecoveryCodes": true,
@@ -75,6 +75,7 @@ The messages are written for end users and are safe to display as-is. For the ma
 
 - `factors` is ordered by most recently used. Destinations are always masked.
 - `code_sent` is `true` while an email/SMS factor has a usable code out (sent, not expired, not used or burned). `retry_after` is the whole seconds until a resend is allowed, or `null` when it is allowed now. Both survive a refresh, so use them to restore the countdown, and to skip sending a new code when one is already out. TOTP factors always have `false` and `null`. Opening the page never sends a code: call `POST /mfa/challenge/send` yourself.
+- `code_length` is how many digits the factor's codes have: always `6` for TOTP, `factors.{type}.length` for email and SMS.
 - `urls.logout` is `null` when `config('mfa.routes.logout_route')` doesn't name an existing route.
 - If the session is already verified, or the user has no factors, the endpoint redirects to the intended page instead.
 

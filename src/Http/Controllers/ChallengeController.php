@@ -38,7 +38,7 @@ class ChallengeController extends Controller
             ->get();
 
         return $this->ui->page('challenge', [
-            'factors' => $factors->map(fn (MfaFactor $f) => [...$f->toPublicArray(), ...$this->sendState($f)])->values(),
+            'factors' => $factors->map(fn (MfaFactor $f) => [...$f->toPublicArray(), ...$this->challengeState($f)])->values(),
             // Equivalent mutant(s): the page is only shown when the user has at least one enabled factor.
             'defaultFactorId' => $factors->first()?->id, // @pest-mutate-ignore: RemoveNullSafeOperator
             'hasRecoveryCodes' => $recoveryCodes->remaining($user) > 0,
@@ -108,15 +108,20 @@ class ChallengeController extends Controller
 
     /**
      * The code already out for an email/SMS factor and its resend cooldown,
-     * so a refresh keeps the countdown and the page doesn't send again.
+     * so a refresh keeps the countdown and the page doesn't send again, and
+     * how many digits its codes have (authenticator codes are always 6).
      *
-     * @return array{code_sent: bool, retry_after: int|null}
+     * @return array{code_sent: bool, retry_after: int|null, code_length: int}
      */
-    private function sendState(MfaFactor $factor): array
+    private function challengeState(MfaFactor $factor): array
     {
         $driver = $factor->type->isDelivered() ? $this->mfa->factor($factor->type) : null;
 
-        return $driver instanceof OtpFactor ? $driver->sendState($factor) : ['code_sent' => false, 'retry_after' => null];
+        if (! $driver instanceof OtpFactor) {
+            return ['code_sent' => false, 'retry_after' => null, 'code_length' => 6];
+        }
+
+        return [...$driver->sendState($factor), 'code_length' => $driver->codeLength()];
     }
 
     private function logoutUrl(): ?string

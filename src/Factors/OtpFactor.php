@@ -161,6 +161,14 @@ abstract class OtpFactor implements Factor
     }
 
     /**
+     * Digits in this factor's codes (factors.{type}.length), for the code input.
+     */
+    public function codeLength(): int
+    {
+        return $this->config['length'];
+    }
+
+    /**
      * Queued when a connection or a queue name is set (a queue name alone
      * uses the default connection), unless that connection is "sync": then
      * the code is sent inline, with immediate error feedback.

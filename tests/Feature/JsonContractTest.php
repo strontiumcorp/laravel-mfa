@@ -15,7 +15,7 @@ it('GET /mfa/challenge', function () {
     app(RecoveryCodes::class)->generate($user);
 
     $this->loginWithSession($user)->getJson('/mfa/challenge')->assertOk()->assertExactJsonStructure([
-        'factors' => ['*' => ['id', 'type', 'type_label', 'label', 'destination', 'confirmed', 'confirmed_at', 'last_used_at', 'code_sent', 'retry_after']],
+        'factors' => ['*' => ['id', 'type', 'type_label', 'label', 'destination', 'confirmed', 'confirmed_at', 'last_used_at', 'code_sent', 'retry_after', 'code_length']],
         'defaultFactorId', 'hasRecoveryCodes',
         'urls' => ['send', 'verify', 'recover', 'logout'],
         'status', 'recoveryCodes', 'retryAfter',

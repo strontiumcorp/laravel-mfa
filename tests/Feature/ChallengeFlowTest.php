@@ -223,6 +223,20 @@ it('ignores factors whose type has been disabled in config', function () {
     $this->loginWithSession($user)->get('/dashboard')->assertOk();
 });
 
+it('tells the page how many digits each factor\'s codes have', function () {
+    config(['mfa.factors.email.length' => 8, 'mfa.factors.sms.length' => 7]);
+    [$user, $totp] = $this->userWithFactor(FactorType::Totp);
+    $email = $this->createMfaFactor($user, FactorType::Email);
+    $sms = $this->createMfaFactor($user, FactorType::Sms);
+
+    $factors = collect($this->loginWithSession($user)->getJson(route('mfa.challenge'))->assertOk()->json('factors'))->keyBy('id');
+
+    // Authenticator codes are always 6 digits; email/SMS follow factors.{type}.length.
+    expect($factors[$totp->id]['code_length'])->toBe(6)
+        ->and($factors[$email->id]['code_length'])->toBe(8)
+        ->and($factors[$sms->id]['code_length'])->toBe(7);
+});
+
 describe('send state on the challenge page', function () {
     // The page shows each email/SMS factor's outstanding code and cooldown, so
     // a refresh keeps the countdown (and the page doesn't send a second code).
