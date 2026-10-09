@@ -108,6 +108,8 @@ A request with no password, or one over 1000 characters, gets a validation error
 
 `Mfa::grantForImpersonation()` drops any password confirmation in the session, because it was the impersonator's: an admin impersonating a user can't add or remove that user's factors without the user's password.
 
+Logging out drops it too, even when the app's logout keeps the session (no `session()->invalidate()`, like artistly's admin logout), so the next login in that browser confirms its own password. It is Laravel's own `auth.password_confirmed_at` key, so this also resets the app's `password.confirm` for that session.
+
 In host-app tests, `$this->actingAsMfaVerified($user)->withConfirmedPassword()` (from `InteractsWithMfa`) skips the prompt.
 
 **Upgrading from v0.2:** `confirm_middleware` now defaults to `[]`, and the new `password_confirmation` (default `true`) asks on the MFA settings page instead.

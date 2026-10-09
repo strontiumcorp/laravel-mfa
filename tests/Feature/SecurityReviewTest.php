@@ -75,6 +75,21 @@ it('[#6] forgets MFA verification on logout even when the session is not invalid
     $this->freshGuards()->loginWithSession($user)->get('/dashboard')->assertRedirect(route('mfa.challenge'));
 });
 
+it('forgets a confirmed password on logout even when the session is not invalidated', function () {
+    config(['mfa.routes.password_confirmation' => true]);
+    [$user] = $this->userWithFactor();
+    $this->actingAsMfaVerified($user)->withConfirmedPassword();
+    $this->getJson('/mfa/settings')->assertOk()->assertJsonPath('passwordConfirmationRequired', false);
+
+    Auth::guard('web')->logout(); // artistly-style: no session()->invalidate()
+
+    // The next login in this browser (another user, or the same one) must
+    // confirm their own password before changing factors.
+    expect(session()->has(StrontiumCorp\LaravelMfa\Mfa::PASSWORD_CONFIRMED_AT))->toBeFalse();
+    $this->freshGuards()->actingAsMfaVerified($user)->getJson('/mfa/settings')->assertOk()->assertJsonPath('passwordConfirmationRequired', true);
+    $this->postJson('/mfa/factors', ['type' => 'email'])->assertStatus(423);
+});
+
 it('[#8] rejects non-scalar factor ids with a 422 instead of a 500', function () {
     [$user] = $this->userWithFactor();
 
