@@ -196,8 +196,9 @@ class SettingsController extends Controller
         $user = $this->sessionUser($request, $this->mfa);
 
         if (! $limits->attemptPassword($user)) {
-            event(new PasswordConfirmationFailed($user, null, FailureReason::RateLimited));
-            $this->ui->failure(VerificationResult::failure(FailureReason::RateLimited, ['retry_after' => $limits->passwordAvailableIn($user)]), 'password');
+            $retryAfter = $limits->passwordAvailableIn($user);
+            event(new PasswordConfirmationFailed($user, null, FailureReason::RateLimited, ['retry_after' => $retryAfter]));
+            $this->ui->failure(VerificationResult::failure(FailureReason::RateLimited, ['retry_after' => $retryAfter]), 'password');
         }
 
         if (! $this->mfa->validatePassword($request, $user, $validated['password'])) {

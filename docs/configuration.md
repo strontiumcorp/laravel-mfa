@@ -200,7 +200,7 @@ Mfa::extendSms('acme', fn ($app, array $config) => new AcmeSmsSender($config['to
 Every action fires an event (`StrontiumCorp\LaravelMfa\Events\*`), which goes to three places. A failure in any of them never blocks a login.
 
 - **Log:** one line per event, with `user_id`, `factor`, `reason`, `flow_id` and `ip`. Codes, secrets, URLs, emails and phone numbers are never logged.
-- **Audit table** `mfa_audit_logs`: kept for `observability.audit.retention_days` (90).
+- **Audit table** `mfa_audit_logs`: kept for `observability.audit.retention_days` (90). A refusal by a limit (`rate_limited`, `destination_limit`, `sending_paused`) is written once per user, event, stage and scope per limit window (until its `retry_after`), so hammering a limit can't flood the table. The log and metrics still record every refusal, so alert on those for volume.
 - **Metrics:** through `Contracts\MetricsRecorder`. Bind your own (Prometheus, StatsD, Pulse); `log` and `null` are built in.
 
 All events of one login attempt share a `flow_id`, which also appears in the app's own log lines for that request.

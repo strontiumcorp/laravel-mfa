@@ -135,3 +135,88 @@ it('exposes the flow id to the app\'s own log lines via Context', function () {
 
     expect(Context::get('mfa_flow_id'))->toBe(session('mfa.flow_id'));
 });
+
+describe('refusals by a limit', function () {
+    // An attacker (or a stuck client) hammering a limit must not flood the
+    // audit table: one row per user, per kind of refusal, per limit window.
+    // The log and metrics still see every refusal.
+    $rows = fn (string $reason = 'rate_limited') => MfaAuditLog::where('reason', $reason)->get(['event', 'context'])
+        ->map(fn ($row) => $row->event.':'.($row->context['stage'] ?? '-'))->all();
+
+    it('writes one audit row per user and stage per verification window', function () use ($rows) {
+        $this->freezeSecond();
+        config(['mfa.rate_limit.verify_per_minute' => 1]);
+        $logs = captureMfaLogs();
+        [$user, $factor] = $this->userWithFactor();
+        $this->loginWithSession($user);
+        $wrong = fn () => $this->postJson(route('mfa.challenge.verify'), ['factor_id' => $factor->id, 'code' => '000000']);
+
+        $wrong()->assertUnprocessable();
+        foreach (range(1, 4) as $_) {
+            $wrong()->assertStatus(429);
+        }
+        $this->postJson(route('mfa.challenge.recover'), ['code' => 'AAAAA-BBBBB'])->assertStatus(429);
+
+        expect($rows())->toBe(['verification_failed:challenge', 'verification_failed:recovery'])
+            ->and($logs->filter(fn ($l) => ($l->context['reason'] ?? null) === 'rate_limited'))->toHaveCount(5);
+
+        // The window frees up: the next refusal is recorded again.
+        $this->travel(61)->seconds();
+        $wrong()->assertUnprocessable();
+        $wrong()->assertStatus(429);
+        $wrong()->assertStatus(429);
+
+        expect($rows())->toBe(['verification_failed:challenge', 'verification_failed:recovery', 'verification_failed:challenge']);
+    });
+
+    it('keeps users apart', function () use ($rows) {
+        config(['mfa.rate_limit.verify_per_minute' => 0]);
+        foreach (range(1, 2) as $_) {
+            [$user, $factor] = $this->userWithFactor();
+            $this->freshGuards()->loginWithSession($user);
+            $this->postJson(route('mfa.challenge.verify'), ['factor_id' => $factor->id, 'code' => '000000'])->assertStatus(429);
+            $this->postJson(route('mfa.challenge.verify'), ['factor_id' => $factor->id, 'code' => '000000'])->assertStatus(429);
+        }
+
+        expect(MfaAuditLog::where('reason', 'rate_limited')->distinct()->count('user_id'))->toBe(2)
+            ->and($rows())->toHaveCount(2);
+    });
+
+    it('writes one row per password lockout window', function () use ($rows) {
+        config(['mfa.routes.password_confirmation' => true, 'mfa.rate_limit.password_per_minute' => 0]);
+        $this->actingAsMfaVerified($this->makeUser());
+
+        foreach (range(1, 3) as $_) {
+            $this->postJson(route('mfa.password.confirm'), ['password' => 'nope'])->assertStatus(429);
+        }
+
+        expect($rows())->toBe(['password_confirmation_failed:-']);
+    });
+
+    it('writes one row per send-limit window, and still counts every refusal in metrics', function () use ($rows) {
+        $recorder = new class implements MetricsRecorder
+        {
+            public array $counters = [];
+
+            public function increment(string $metric, array $tags = []): void
+            {
+                $this->counters[] = [$metric, $tags];
+            }
+
+            public function timing(string $metric, float $milliseconds, array $tags = []): void {}
+        };
+        app()->instance(MetricsRecorder::class, $recorder);
+        config(['mfa.rate_limit.send_per_hour' => 1, 'mfa.factors.sms.resend_cooldown' => 0]);
+        Mfa::fakeSms();
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
+        foreach (range(1, 3) as $_) {
+            $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertStatus(429);
+        }
+
+        expect($rows())->toBe(['verification_failed:send'])
+            ->and(array_filter($recorder->counters, fn ($c) => ($c[1]['reason'] ?? null) === 'rate_limited'))->toHaveCount(3);
+    });
+});
