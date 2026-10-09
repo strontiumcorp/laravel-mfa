@@ -100,6 +100,7 @@ it('sends SMS codes', function () {
 make install               # Composer and npm dependencies
 make ci                    # Pint, PHPStan, the test suite, the React component tests
 make test-js               # tsc and Vitest for the React components only
+make preview               # live preview of the pages and components, fake backend, http://localhost:5180
 make coverage              # with coverage; fails under 85%
 make test-matrix           # Laravel 11, 12 and 13, newest and lowest dependencies
 make typecheck-stubs APPS="../artistly ../clone-voice ../podcast-flow"

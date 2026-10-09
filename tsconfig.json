@@ -13,5 +13,5 @@
             "@/components/vendor/laravel-mfa/*": ["./stubs/inertia-react/components/*"]
         }
     },
-    "include": ["stubs/inertia-react/**/*.ts", "stubs/inertia-react/**/*.tsx", "tests/js/**/*.ts", "tests/js/**/*.tsx", "vitest.config.ts"]
+    "include": ["stubs/inertia-react/**/*.ts", "stubs/inertia-react/**/*.tsx", "tests/js/**/*.ts", "tests/js/**/*.tsx", "preview/**/*.ts", "preview/**/*.tsx", "vitest.config.ts"]
 }

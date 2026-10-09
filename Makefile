@@ -11,7 +11,7 @@ XDEBUG_COV := -d xdebug.mode=coverage
 MIN_COVERAGE ?= 85
 
 .DEFAULT_GOAL := help
-.PHONY: help install test test-js test-filter coverage lint format analyse ci test-laravel test-matrix typecheck-stubs release clean
+.PHONY: help install test test-js preview test-filter coverage lint format analyse ci test-laravel test-matrix typecheck-stubs release clean
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -26,6 +26,9 @@ test: ## Run the test suite in parallel
 test-js: ## Type-check the React stubs and run their Vitest tests (needs Node; run make install first)
 	npm run typecheck
 	npm test
+
+preview: ## Live preview of the React pages and components with a fake backend, at http://localhost:5180 (PORT=… to change)
+	node_modules/.bin/vite --config preview/vite.config.ts --port $(or $(PORT),5180) --strictPort
 
 test-filter: ## Run tests matching FILTER, e.g. make test-filter FILTER="SendLimits"
 	@test -n "$(FILTER)" || (echo 'Usage: make test-filter FILTER="pattern"' && exit 1)
