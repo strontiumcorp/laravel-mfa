@@ -68,8 +68,6 @@ const OVERLAY = ['appearance-none', 'border-0', 'p-0', 'bg-transparent', 'shadow
 const COLOR = /(?<![\w:/-])(?:text|bg|border)-(?:(?:gray|red|amber|green|indigo|sky|violet)-\d{2,3}(?:\/\d+)?|white)(?![\w/-])/;
 // The dialog's backdrop is a translucent near-black, right in both themes.
 const BOTH_THEMES = ['bg-gray-950/50'];
-// api-key-notice and settings-card are being changed on another branch; they join this check once it's merged.
-const NOT_YET = ['components/api-key-notice.tsx', 'components/settings-card.tsx'];
 
 function classStrings(source: string): string[] {
     const templates = [...source.matchAll(/`([^`]*)`/g)].map((m) => m[1]);
@@ -79,7 +77,6 @@ function classStrings(source: string): string[] {
 }
 
 const undarkened = sources
-    .filter(({ file }) => !NOT_YET.includes(file))
     .flatMap(({ file, source }) =>
         classStrings(source)
             .filter((c) => COLOR.test(c.split(/\s+/).filter((k) => !BOTH_THEMES.includes(k)).join(' ')) && !/(^|\s)dark:/.test(c))
