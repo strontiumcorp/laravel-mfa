@@ -97,7 +97,7 @@ export default function MfaRecoveryCodeForm({ onSubmit, processing = false, erro
                     Use a recovery code
                 </h2>
                 <p id={`${id}-description`} className="mt-1 text-center text-sm text-gray-500 dark:text-gray-400">
-                    Enter one code from your saved list, like k7m2p-x9q4t. Each code works once.
+                    Enter one code from your saved list, like k7m2p-x1q0t. Each code works once.
                 </p>
 
                 <form onSubmit={submit} aria-labelledby={id} className="mt-6 space-y-4">
