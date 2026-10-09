@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.3.5 - 2026-10-09
+
+_Changes since `v0.3.0`._
+
+### Features
+
+- one setup dialog for every sign-in method (627b626)
+- redesign the MFA settings page around one card per method (2cfdb9c)
+
+### Fixes
+
+- start each method setup clean, and resume a pending one only once (144c521)
+- ask for the password inside the card where the change started (83996b9)
+- keep a wrong code in its field, selected, instead of clearing it (23ce881)
+- limit authenticator code inputs to 6 digits (4c600c6)
+
+### Documentation
+
+- log the settings redesign and the UI preview in the plan (2f8280d)
+
+### Other
+
+- make preview, a live UI preview of the pages and components (4852088)
+
 ## v0.3.0 - 2026-10-09
 
 _Changes since `v0.2.0`._
