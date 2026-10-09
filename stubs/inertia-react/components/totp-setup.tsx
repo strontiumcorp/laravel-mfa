@@ -118,7 +118,7 @@ export default function MfaTotpSetup({
                 <input
                     aria-label="Code from your authenticator app"
                     value={code}
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     inputMode="numeric"
                     autoComplete="one-time-code"
                     placeholder="123456"

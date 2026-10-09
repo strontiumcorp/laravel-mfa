@@ -181,4 +181,20 @@ describe('MfaTotpSetupDialog', () => {
         expect(screen.getByRole('alert')).toHaveTextContent("Couldn't copy here. Download the codes instead.");
         expect(screen.getByRole('button', { name: 'Complete' })).toBeDisabled();
     });
+
+    it('takes at most the 6 digits of an authenticator code', async () => {
+        render(<MfaTotpSetupDialog {...base} />);
+        await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+        const input = screen.getByRole('textbox', { name: 'Code from your authenticator app' });
+
+        await userEvent.type(input, '1234567890');
+
+        expect(input).toHaveValue('123456');
+
+        // Some apps copy codes as "123 456": the digits all survive a paste.
+        await userEvent.clear(input);
+        await userEvent.click(input);
+        await userEvent.paste('654 321');
+        expect(input).toHaveValue('654321');
+    });
 });
