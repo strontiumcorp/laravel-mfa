@@ -55,12 +55,11 @@ describe('MfaSettingsCard', () => {
         expect(screen.getByRole('heading', { level: 2, name: 'Two-factor authentication' })).toBeInTheDocument();
     });
 
-    it('replaces the card surface with className, keeping the content', () => {
-        render(<MfaSettingsCard settingsUrl="/mfa/settings" hasMfa className="rounded-2xl bg-white p-4 shadow dark:bg-[#1E1F24]" />);
+    it('adds className to its own card, so layout classes keep the card', () => {
+        render(<MfaSettingsCard settingsUrl="/mfa/settings" hasMfa className="mx-auto max-w-xl dark:!bg-[#1E1F24]" />);
 
-        expect(card()).toHaveClass('rounded-2xl', 'bg-white', 'p-4', 'shadow', 'dark:bg-[#1E1F24]');
-        for (const surface of ['border', 'border-gray-200', 'dark:bg-gray-900', 'sm:p-8']) expect(card()).not.toHaveClass(surface);
-        expect(card()).toHaveTextContent('On');
+        expect(card()).toHaveClass('rounded-2xl', 'border', 'bg-white', 'p-4', 'sm:p-8', 'dark:bg-gray-900');
+        expect(card()).toHaveClass('mx-auto', 'max-w-xl', 'dark:!bg-[#1E1F24]');
         expect(screen.getByRole('link', { name: 'Manage' })).toBeInTheDocument();
     });
 

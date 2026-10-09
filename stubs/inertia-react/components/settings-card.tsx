@@ -2,9 +2,9 @@
 //
 // The "Two-factor authentication" section for an account settings page: says
 // whether it's on and links to the MFA settings page. It draws its own card
-// (light and dark), so it needs no wrapper; pass className to replace the
-// card's surface (background, border, radius, padding, shadow) with your
-// page's, e.g. className="rounded-2xl bg-white p-4 shadow sm:p-8 dark:bg-[#1E1F24]".
+// (light and dark), so it needs no wrapper. className adds to the card's own
+// classes (e.g. "mx-auto max-w-3xl"); to override one of them, use Tailwind's
+// important modifier, e.g. className="!shadow dark:!bg-[#1E1F24]".
 // Standalone: needs only React and ./icons, and knows nothing about Inertia or routes.
 //
 // In an Inertia app, take the props from the shared MFA context, and pass
@@ -29,13 +29,13 @@ export type MfaSettingsCardProps = {
     hasMfa?: boolean;
     /** An enforcement rule requires this user to set one up. */
     mustEnroll?: boolean;
-    /** Replaces the card's surface classes (background, border, radius, padding, shadow); the content keeps its own styles. */
+    /** Added to the card's own classes; override one with Tailwind's important modifier (e.g. `dark:!bg-[#1E1F24]`). */
     className?: string;
     /** Renders the link, e.g. (link) => <Link {...link} />. Defaults to a plain <a>. */
     renderLink?: (link: MfaSettingsCardLink) => ReactNode;
 };
 
-// The card's own surface; className replaces it.
+// The card's own surface; className adds to it.
 const SURFACE = 'rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-8 dark:border-gray-800 dark:bg-gray-900';
 const ACTION =
     'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 dark:focus-visible:ring-gray-100 dark:focus-visible:ring-offset-gray-900';
@@ -58,7 +58,7 @@ export default function MfaSettingsCard({ enabled = true, settingsUrl, hasMfa = 
           : { text: 'Off', className: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300' };
 
     return (
-        <section aria-labelledby="mfa-settings-card" className={className || SURFACE}>
+        <section aria-labelledby="mfa-settings-card" className={`${SURFACE} ${className}`.trim()}>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <h2 id="mfa-settings-card" className="text-lg font-semibold text-gray-900 sm:text-xl dark:text-gray-100">
                     Two-factor authentication
