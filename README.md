@@ -15,7 +15,7 @@ The package isn't on Packagist yet, so add the (public) repository to the app's 
 ```
 
 ```bash
-composer require strontiumcorp/laravel-mfa:^0.4
+composer require strontiumcorp/laravel-mfa:^0.5
 php artisan mfa:install
 php artisan migrate
 ```
@@ -63,7 +63,7 @@ The middleware is added to the `web` group, so every web route is protected. It 
 | Password, social or remember-me login | Challenged until MFA passes |
 | `Auth::setUser()` in webhooks, jobs or per-request impersonation | Not challenged |
 | Login-swap impersonation (`Auth::loginUsingId()`) | Needs `Mfa::grantForImpersonation()`; see the integration guide |
-| `actingAs()` in tests | Not challenged, so existing suites keep passing |
+| `actingAs()` in tests | Not challenged, so those tests keep passing. Tests that log enforced users in for real are sent to enroll; see [integration step 7](docs/integration.md#7-tests) |
 | JSON requests | `403 {"error": "mfa_required", "redirect": "..."}` |
 
 Users without factors aren't challenged, unless `enforcement` requires them to enroll. Enforced users must use an authenticator app by default (`enforcement.required_types`).

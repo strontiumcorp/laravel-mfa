@@ -13,10 +13,10 @@ The repository is public, but the package isn't on Packagist, so add it as a VCS
 ```
 
 ```bash
-composer require strontiumcorp/laravel-mfa:^0.4
+composer require strontiumcorp/laravel-mfa:^0.5
 ```
 
-No credentials are needed, locally, in CI or on servers. Below 1.0 a caret only allows patch releases (`^0.4` takes 0.4.x, not 0.5), so raise the constraint when you upgrade to a new minor version. If Composer hits GitHub's limit for anonymous API requests (busy CI runners), give it a token: `composer config --global github-oauth.github.com <token>`.
+No credentials are needed, locally, in CI or on servers. Below 1.0 a caret only allows patch releases (`^0.5` takes 0.5.x, not 0.6), so raise the constraint when you upgrade to a new minor version. If Composer hits GitHub's limit for anonymous API requests (busy CI runners), give it a token: `composer config --global github-oauth.github.com <token>`.
 
 ## 2. Publish and migrate
 
@@ -38,7 +38,9 @@ resources/js/
     └── ...
 ```
 
-Existing files are skipped; `--force` overwrites them. The pages import the components through the `@/` alias for `resources/js/`, which the Laravel starter kits set up in `tsconfig.json` and `vite.config`.
+Existing files are skipped; `--force` overwrites them, **`config/mfa.php` included**: every value you changed goes back to the package default (for example `enforcement.roles` returns to `[]`, so admins are no longer forced to enroll). After `--force`, run `git diff config/mfa.php` and restore your values. Settings that come from `.env` are unaffected. To keep `--force` from touching your layouts too, set the pages' layouts outside the published files (step 6). The pages import the components through the `@/` alias for `resources/js/`, which the Laravel starter kits set up in `tsconfig.json` and `vite.config`.
+
+Check that git sees the components: an unanchored `vendor/` line in the app's `.gitignore` (rather than `/vendor`) also ignores `resources/js/components/vendor/`, so they would never be committed. Anchor it, or add `!/resources/js/components/vendor/` after it; `git status` should then list the folder.
 
 The migration adds `user_id` foreign keys to the users table, so `users.id` must be a big integer (Laravel's default `$table->id()`).
 
@@ -66,8 +68,17 @@ MFA_EMAIL_ENABLED=true
 MFA_SMS_ENABLED=false            # SMS stays off for now; Twilio is ready when needed
 MFA_SMS_DRIVER=twilio
 MFA_DELIVERY_QUEUE=mfa           # send codes from a queued job; needs a worker on this queue
-MFA_LOG_CHANNEL=mfa              # optional dedicated channel
+# MFA_LOG_CHANNEL=mfa            # optional; must name a channel in config/logging.php. Unset = the app's default channel
 ```
+
+Add the same variables to `.env.example`.
+
+**A worker must serve `MFA_DELIVERY_QUEUE`.** The queue name is new, so nothing processes it until you add it everywhere the app defines workers, or email and SMS codes are queued and never sent:
+
+- Horizon: add it to each supervisor's `queue` list in `config/horizon.php`, for every environment that runs Horizon (often only `local`). Put it first so a backlog on other queues never delays sign-in codes.
+- pm2, Supervisor or systemd: a process running `php artisan queue:work --queue=mfa` (on the connection the job uses: `MFA_DELIVERY_QUEUE_CONNECTION`, else the default). A pm2 app added to `ecosystem.config.cjs` doesn't start on `pm2 restart <name>`; run `pm2 startOrReload ecosystem.config.cjs` on each server once.
+
+The worker needs no `--tries`: the job sets its own tries and backoff (`delivery.tries`, `delivery.backoff`). With `QUEUE_CONNECTION=sync` codes are sent inline, so a local setup without workers still works.
 
 `config/mfa.php`:
 
@@ -92,10 +103,15 @@ Search the app for these patterns. Each needs a change only when it's present.
 ```php
 $admin = auth()->user();
 Auth::loginUsingId($request->user_id);
-Mfa::grantForImpersonation($admin, auth()->user());
+
+/** @var \App\Models\User $target loginUsingId() just succeeded */
+$target = auth()->user();   // nullable to static analysis, hence the @var
+Mfa::grantForImpersonation($admin, $target);
 ```
 
-It throws if the target has MFA and the admin hasn't passed MFA in this session. It also drops the admin's password confirmation, so the admin can't change the target's factors. Per-request impersonation through `Auth::setUser()` needs nothing.
+The target hasn't passed MFA in this session, so without the grant the admin is sent to the target's challenge (target with MFA) or to enroll the target (enforced target without MFA). Impersonating a user without MFA works either way, which makes the gap easy to miss in testing.
+
+It throws if the target has MFA and the admin hasn't passed MFA in this session. When every role that can impersonate is enforced, the MFA middleware stops an unverified admin before the impersonation route, so the throw can't happen from a browser and a `catch` is optional. It also drops the admin's password confirmation, so the admin can't change the target's factors. Per-request impersonation through `Auth::setUser()` needs nothing. Ending a login-swap impersonation with `Auth::login($admin)` needs nothing either: logging in again keeps the admin's verification in the session (only a logout clears it).
 
 **`login()` or `loginUsingId()` outside browser requests** (jobs, commands). Fine when queued, because nothing is persisted. Dispatched synchronously from a web request, it would change that request's logged-in user.
 
@@ -107,7 +123,23 @@ It throws if the target has MFA and the admin hasn't passed MFA in this session.
 
 The published files are the app's own: restyle and rearrange them freely. `mfa:install` never overwrites them without `--force`.
 
-- Wrap the published pages in the app's layouts. The pages only wire Inertia (forms, posting, `Head`, errors) to the components, so layout changes go there.
+- Put the published pages in the app's layouts. Set the layouts from the page resolver rather than editing the pages, so `mfa:install --force` doesn't undo them. The page names are `ui.pages` in the config (`mfa/challenge`, `mfa/settings`):
+
+  ```jsx
+  // resources/js/app.jsx, in createInertiaApp({ resolve })
+  resolve: (name) => {
+      const page = resolvePageComponent(`./Pages/${name}.tsx`, import.meta.glob('./Pages/**/*.tsx'));
+      page.then((mod) => {
+          if (name === 'mfa/settings') {
+              mod.default.layout ??= (page) => <AuthenticatedLayout settings={page.props.settings}>{page}</AuthenticatedLayout>;
+          }
+      });
+      return page;
+  },
+  ```
+
+  A persistent layout gets the page element, so layout props come from `page.props`. The challenge page draws its own card and needs no layout, but see the next point.
+- The components use Tailwind's `dark:` variants with the `class` strategy, so the `dark` class must be on `<html>` (or another ancestor) whenever the app is dark. If the app keeps dark mode in state or a cookie and only some layouts set the class, a page rendered outside those layouts (often the challenge page) shows light components on a dark page or the reverse. Give it a layout that only syncs the class, e.g. one that calls the app's dark-mode hook and returns `<>{children}</>`.
 - Add the two-factor card to the account settings page. It says whether two-factor is on and links to the MFA settings page, and hides itself when MFA or its routes are off:
 
   ```tsx
@@ -188,7 +220,20 @@ The settings page adds every method through `factor-setup-dialog`. It asks for t
 
 ## 7. Tests
 
-Existing suites keep passing: `actingAs()` is never challenged. For MFA tests, use the helpers:
+Tests that use `actingAs()` keep passing: it never writes the session, so MFA doesn't apply. Tests that sign a user in for real (posting to the login route, app code calling `Auth::login()`, impersonation, a password change that logs the user back in) do get MFA. With `enforcement` on, those users are sent to enroll, and `grantForImpersonation()` refuses an enforced impersonator who was only `actingAs()`'d. Start such tests from `actingAsMfaVerified()`, or mark the session verified right after the real login:
+
+```php
+// e.g. a helper in tests/Pest.php
+function markMfaVerified(User $user): void
+{
+    session()->put(\StrontiumCorp\LaravelMfa\Facades\Mfa::sessionKey('web', $user->id), now()->getTimestamp());
+}
+
+$this->post(route('login'), ['email' => $admin->email, 'password' => 'secret']);
+markMfaVerified($admin);
+```
+
+For MFA tests, use the helpers:
 
 ```php
 uses(\StrontiumCorp\LaravelMfa\Testing\InteractsWithMfa::class);
@@ -197,7 +242,7 @@ $this->loginWithSession($user)->get('/dashboard')->assertRedirect(route('mfa.cha
 $this->actingAsMfaVerified($user)->get('/dashboard')->assertOk();
 ```
 
-Add tests for: an admin forced to enroll, impersonation, a webhook and an API key still working for a user with MFA.
+Add tests for: an admin forced to enroll, impersonating a user who has MFA and switching back, the settings page asking for the password before a change (`withConfirmedPassword()` skips it), a webhook and an API key still working for a user with MFA.
 
 ## 8. Verify and deploy
 
@@ -215,7 +260,7 @@ Manual check:
 
 Deploy:
 - Run `mfa:doctor` in the pipeline.
-- Run a queue worker for `MFA_DELIVERY_QUEUE`.
+- Run a queue worker for `MFA_DELIVERY_QUEUE` in every environment's process manager (step 4).
 - Keep the scheduler running (it prunes old codes and audit rows daily).
 - Use a shared cache and session store (Redis or database) on multiple servers.
 
@@ -225,7 +270,7 @@ To switch MFA off in an incident, set `MFA_ENABLED=false`.
 
 | Version | Notes |
 |---|---|
-| 11 | End of life, and every 11.x release has open security advisories. Composer 2.9 blocks insecure versions by default, so `composer require` can fail in an app locked to Laravel 11. Resolve that in the app first (upgrade, or an explicit audit decision). Kernel-style apps (`app/Http/Kernel.php`) work as is; `mfa:doctor` confirms the middleware is in the `web` group and reads `App\Http\Middleware\TrustProxies`. |
+| 11 | End of life, and every 11.x release has open security advisories. Composer 2.9 blocks insecure versions by default, but only among the packages it installs or updates: `composer require strontiumcorp/laravel-mfa` leaves the framework alone, and in an app locked to Laravel 11.45 it installed with an advisory warning. A command that updates the framework can still fail; resolve that in the app (upgrade, or an explicit audit decision). Kernel-style apps (`app/Http/Kernel.php`) work as is; `mfa:doctor` confirms the middleware is in the `web` group and reads `App\Http\Middleware\TrustProxies`. |
 | 12 | Nothing specific. |
 | 13 | Nothing specific. |
 
