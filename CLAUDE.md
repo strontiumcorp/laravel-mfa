@@ -92,7 +92,7 @@ Don't break these. Each one is covered by tests; read them before changing the a
 - Octane: singletons hold no per-request state. Resolve the request and auth from the live container (`Container::getInstance()`), never from the container captured at boot.
 
 **Delivery and SMS**
-- Delivery is a job (`DeliverOtp`, encrypted payload). It's queued when `delivery.queue` or `delivery.queue_connection` is set (a `sync` connection sends inline), otherwise it runs inline with immediate errors. A failed delivery discards its code, so no cooldown applies.
+- Delivery is a job (`DeliverOtp`, encrypted payload). It's queued when `delivery.queue` or `delivery.queue_connection` is set (a `sync` connection sends inline), otherwise it runs inline with immediate errors. A failed delivery discards its code, so no cooldown applies; one that may have been delivered (`DeliveryFailed::$maybeDelivered`, e.g. a read timeout) keeps it, isn't retried and ends a failover chain (no duplicate SMS).
 - SMS drivers (`twilio`, `vonage`, `infobip`, `sns` with in-package SigV4, `log`, plus the `failover` and `routing` composites) use Laravel's HTTP client through `Sms\Concerns\CallsProviderApi`: 3s connect / 5s total, and a retry **only** when the request never reached the provider (so no duplicate SMS). `SmsManager` builds drivers fresh per send (so `Http::fake()` and config changes apply) and rejects circular configs.
 - `DeliveryFailed` messages must never contain the code, the recipient, or credentials (contract; `DeliveryFailed::provider()` also redacts).
 

@@ -65,6 +65,15 @@ class DeliverOtp implements ShouldBeEncrypted, ShouldQueue
                 FactorType::Totp => null,
             };
         } catch (DeliveryFailed $e) {
+            // It may have arrived: a retry would send it twice. Fail now
+            // (failed() runs once, the code stays valid). Inline, the caller
+            // (OtpFactor) handles it.
+            if ($e->maybeDelivered && ! $this->synchronous && $this->job !== null) {
+                $this->fail($e);
+
+                return;
+            }
+
             throw $e;
         } catch (Throwable $e) {
             // Transport messages can contain the recipient (e.g. SMTP "550
@@ -88,9 +97,11 @@ class DeliverOtp implements ShouldBeEncrypted, ShouldQueue
             return;
         }
 
+        $maybeDelivered = $exception instanceof DeliveryFailed && $exception->maybeDelivered;
+
         // The code never arrived: drop it so the resend cooldown doesn't make
-        // the user wait for it.
-        if ($this->otpId !== null) {
+        // the user wait for it. One that may have arrived stays valid.
+        if ($this->otpId !== null && ! $maybeDelivered) {
             app(OtpStore::class)->discard($this->otpId);
         }
 
@@ -98,7 +109,7 @@ class DeliverOtp implements ShouldBeEncrypted, ShouldQueue
 
         app(Events::class)->dispatch(new ChallengeDeliveryFailed(
             $factor?->user, $factor?->type, FailureReason::DeliveryFailed,
-            ['factor_id' => $this->factorId, 'error' => $exception?->getMessage(), 'queued' => true],
+            ['factor_id' => $this->factorId, 'error' => $exception?->getMessage(), 'queued' => true, ...($maybeDelivered ? ['maybe_delivered' => true] : [])],
         ));
     }
 

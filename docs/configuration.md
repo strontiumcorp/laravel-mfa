@@ -163,6 +163,8 @@ Events to act on:
 
 `twilio`, `vonage`, `infobip` and `sns` call the providers' HTTP APIs directly, with no SDKs. Each attempt has a 3s connect and 5s total timeout (set `connect_timeout` / `timeout` on a driver). A request is retried only if it never reached the provider, so a retry can't send a duplicate.
 
+When the outcome is unknown (the request went out but no answer came back, e.g. a read timeout), the message may still arrive, so nothing sends it again: a `failover` chain stops there instead of trying the next provider, a queued delivery fails at once instead of using its retries (`delivery.tries`), and the code stays valid. The user is told it was sent, with the usual resend cooldown, and can ask for a new code after it if none arrives. `ChallengeDeliveryFailed` and `SmsProviderFailed` carry `maybe_delivered: true` then. A delivery that certainly failed drops its code, so the user can resend at once.
+
 Amazon SNS works from any host and needs an IAM key limited to `sns:Publish`:
 
 ```dotenv

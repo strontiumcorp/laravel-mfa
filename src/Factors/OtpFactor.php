@@ -118,12 +118,22 @@ abstract class OtpFactor implements Factor
                 $this->bus->dispatchSync($job);
             } catch (DeliveryFailed $e) {
                 report($e); // full detail (with the chained cause) to the app's error log
-                // Equivalent mutant(s): otp_id is an int primary key.
-                $this->store->discard((int) $issued['result']->context['otp_id']); // @pest-mutate-ignore: RemoveIntegerCast
 
                 $this->events->dispatch(new ChallengeDeliveryFailed(
-                    $factor->user, $this->type(), FailureReason::DeliveryFailed, ['factor_id' => $factor->getKey(), 'error' => $e->getMessage()]
+                    $factor->user, $this->type(), FailureReason::DeliveryFailed,
+                    ['factor_id' => $factor->getKey(), 'error' => $e->getMessage(), ...($e->maybeDelivered ? ['maybe_delivered' => true] : [])],
                 ));
+
+                // It may have arrived (e.g. a timeout after the provider got
+                // it): keep the code and answer as sent, with the cooldown, so
+                // the user enters it or resends later. Never sent: drop it,
+                // so a resend isn't held up by the cooldown.
+                if ($e->maybeDelivered) {
+                    return VerificationResult::success(['retry_after' => $issued['result']->context['retry_after']]);
+                }
+
+                // Equivalent mutant(s): otp_id is an int primary key.
+                $this->store->discard((int) $issued['result']->context['otp_id']); // @pest-mutate-ignore: RemoveIntegerCast
 
                 return VerificationResult::failure(FailureReason::DeliveryFailed);
             }
