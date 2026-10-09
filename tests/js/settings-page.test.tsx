@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import MfaSettings from '../../stubs/inertia-react/pages/settings';
 import { inertia } from './inertia-mock';
@@ -23,6 +23,7 @@ const props = {
         { type: 'sms' as const, label: 'SMS', recommended: false },
     ],
     recoveryCodesRemaining: 9,
+    recoveryCodesTotal: 10,
     recoveryCodes: null,
     retryAfter: null,
     passwordRetryAfter: null,
@@ -38,8 +39,8 @@ describe('settings page', () => {
     it('starts an authenticator app and an SMS method', async () => {
         render(<MfaSettings {...props} />);
 
-        await userEvent.click(screen.getByRole('button', { name: 'Authenticator app (recommended)' }));
-        await userEvent.click(screen.getByRole('button', { name: 'SMS' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Set up Authenticator app' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Set up SMS' }));
         await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+15555550100{Enter}');
 
         expect(inertia.requests).toEqual([
@@ -53,6 +54,8 @@ describe('settings page', () => {
         const pendingSms = { ...email, id: 9, type: 'sms' as const, type_label: 'SMS', destination: '+*******0100' };
         render(<MfaSettings {...props} pending={[pendingTotp, pendingSms]} />);
 
+        // The authenticator app goes through its dialog: scan, then the code.
+        await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Next' }));
         await userEvent.type(screen.getByRole('textbox', { name: 'Code from your authenticator app' }), '111111{Enter}');
         await userEvent.click(screen.getByRole('button', { name: 'Resend' }));
         await userEvent.type(screen.getByRole('textbox', { name: 'Verification code' }), '222222{Enter}');
@@ -69,7 +72,7 @@ describe('settings page', () => {
         render(<MfaSettings {...props} />);
 
         await userEvent.click(screen.getByRole('button', { name: 'Remove Email' }));
-        await userEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
+        await userEvent.click(screen.getByRole('button', { name: 'New codes' }));
 
         expect(inertia.requests).toEqual([
             { method: 'delete', url: '/mfa/factors/7', data: null },
@@ -80,7 +83,8 @@ describe('settings page', () => {
     it('tells an enforced user what they must add', () => {
         render(<MfaSettings {...props} mustEnroll requiredTypes={[{ type: 'totp', label: 'Authenticator app' }]} />);
 
-        expect(screen.getByRole('note')).toHaveTextContent('with: Authenticator app.');
+        expect(screen.getByRole('note')).toHaveTextContent('Your account needs: Authenticator app');
+        expect(screen.getByText('Required', { selector: 'header span' })).toBeInTheDocument();
     });
 
     it('shows new recovery codes even before any factor is listed', () => {
@@ -93,7 +97,7 @@ describe('settings page', () => {
         inertia.respondWith(passwordRequired);
         render(<MfaSettings {...props} />);
 
-        await userEvent.click(screen.getByRole('button', { name: 'SMS' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Set up SMS' }));
         await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+15555550100{Enter}');
         expect(screen.getByRole('heading', { name: 'Confirm your password' })).toBeInTheDocument();
 
@@ -116,7 +120,7 @@ describe('settings page', () => {
         await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
 
         inertia.respondWith(passwordRequired);
-        await userEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
+        await userEvent.click(screen.getByRole('button', { name: 'New codes' }));
         await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
 
         expect(inertia.requests.map((r) => `${r.method} ${r.url}`)).toEqual([
@@ -134,7 +138,7 @@ describe('settings page', () => {
         inertia.respondWith(passwordRequired, { password: 'The provided password is incorrect.' });
         render(<MfaSettings {...props} />);
 
-        await userEvent.click(screen.getByRole('button', { name: 'Authenticator app (recommended)' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Set up Authenticator app' }));
         await userEvent.type(screen.getByLabelText('Password'), 'wrong{Enter}');
         expect(screen.getByRole('heading', { name: 'Confirm your password' })).toBeInTheDocument();
 
@@ -148,7 +152,7 @@ describe('settings page', () => {
         inertia.respondWith({ destination: "We can't send verification codes to this destination." });
         render(<MfaSettings {...props} />);
 
-        await userEvent.click(screen.getByRole('button', { name: 'SMS' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Set up SMS' }));
         await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+15555550100{Enter}');
 
         expect(screen.queryByRole('heading', { name: 'Confirm your password' })).not.toBeInTheDocument();
@@ -159,9 +163,48 @@ describe('settings page', () => {
         inertia.respondWith(passwordRequired);
         render(<MfaSettings {...props} pending={[pendingSms]} passwordRetryAfter={60} />);
 
-        await userEvent.click(screen.getByRole('button', { name: 'Authenticator app (recommended)' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Set up Authenticator app' }));
 
         expect(screen.getByRole('button', { name: 'Try again in 1:00' })).toBeDisabled();
         expect(screen.getByRole('button', { name: 'Resend' })).toBeEnabled();
+    });
+
+    it('sets up an authenticator app in a dialog, and leaves "Continue setup" in its card when closed', async () => {
+        const pendingTotp = { ...email, id: 8, type: 'totp' as const, type_label: 'Authenticator app', destination: null, secret: 'JBSWY3DP', qr_svg: '<svg/>', otpauth_url: 'otpauth://totp/x' };
+        render(<MfaSettings {...props} pending={[pendingTotp]} />);
+
+        const dialog = screen.getByRole('dialog', { name: 'Set up an authenticator app' });
+        expect(within(dialog).getByLabelText('Setup key')).toHaveTextContent('JBSW Y3DP');
+        expect(within(dialog).getByRole('link', { name: 'Open in authenticator app' })).toHaveAttribute('href', 'otpauth://totp/x');
+        expect(screen.getByText('On', { selector: 'header span' })).toBeInTheDocument();
+
+        await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+        const totp = screen.getByRole('heading', { name: 'Authenticator app' }).closest('article') as HTMLElement;
+        await userEvent.click(within(totp).getByRole('button', { name: 'Continue setup' }));
+        expect(screen.getByRole('dialog', { name: 'Set up an authenticator app' })).toBeInTheDocument();
+    });
+
+    it('shows the new recovery codes in the dialog only, until Complete', async () => {
+        const pendingTotp = { ...email, id: 8, type: 'totp' as const, type_label: 'Authenticator app', destination: null, secret: 'JBSWY3DP', qr_svg: '<svg/>' };
+        const codes = ['aaaaa-11111', 'bbbbb-22222'];
+        // The mock keeps props as given; recoveryCodes stands for the flash after confirming.
+        const user = userEvent.setup();
+        render(<MfaSettings {...props} factors={[]} pending={[pendingTotp]} recoveryCodes={codes} />);
+
+        await user.click(screen.getByRole('button', { name: 'Next' }));
+        await user.type(screen.getByRole('textbox', { name: 'Code from your authenticator app' }), '123456{Enter}');
+
+        const dialog = screen.getByRole('dialog', { name: 'Save your recovery codes' });
+        expect(within(dialog).getAllByRole('listitem').map((li) => li.textContent)).toEqual(codes);
+        expect(screen.getAllByRole('list', { name: 'Recovery codes' })).toHaveLength(1);
+        expect(within(dialog).getByRole('button', { name: 'Complete' })).toBeDisabled();
+
+        await user.click(within(dialog).getByRole('button', { name: 'Copy' }));
+        await user.click(within(dialog).getByRole('button', { name: 'Complete' }));
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(screen.queryByRole('list', { name: 'Recovery codes' })).not.toBeInTheDocument();
     });
 });

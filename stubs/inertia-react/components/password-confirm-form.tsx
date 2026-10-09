@@ -72,12 +72,12 @@ export default function MfaPasswordConfirmForm({ onConfirm, onCancel, processing
                     onChange={(e) => setPassword(e.target.value)}
                     autoComplete="current-password"
                     autoFocus
-                    className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                    className="min-h-11 min-w-0 flex-1 rounded-lg border border-gray-300 px-3 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
                 />
                 <button
                     type="submit"
                     disabled={processing || password === '' || wait > 0}
-                    className="rounded-md bg-gray-900 px-3 py-2 text-sm text-white disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
+                    className="min-h-11 rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
                 >
                     {wait > 0 ? `Try again in ${formatWait(wait)}` : 'Confirm'}
                 </button>
@@ -86,7 +86,7 @@ export default function MfaPasswordConfirmForm({ onConfirm, onCancel, processing
                         type="button"
                         onClick={onCancel}
                         disabled={processing}
-                        className="rounded-md px-3 py-2 text-sm text-gray-600 disabled:opacity-50 dark:text-gray-400"
+                        className="min-h-11 rounded-lg px-3 text-sm font-medium text-gray-600 disabled:opacity-50 dark:text-gray-400"
                     >
                         Cancel
                     </button>

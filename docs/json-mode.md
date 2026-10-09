@@ -142,6 +142,7 @@ If the app sets `routes.confirm_middleware` to `['password.confirm']`, Laravel's
     "pending": [ /* unconfirmed factors from the last 30 minutes, same shape plus setup fields (below) */ ],
     "availableTypes": [ { "type": "totp", "label": "Authenticator app", "recommended": true }, { "type": "email", "label": "Email", "recommended": false } ],
     "recoveryCodesRemaining": 10,
+    "recoveryCodesTotal": 10,
     "mustEnroll": false,
     "requiredTypes": [],
     "passwordRetryAfter": null,
@@ -153,7 +154,7 @@ If the app sets `routes.confirm_middleware` to `['password.confirm']`, Laravel's
 }
 ```
 
-`availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have one. It's `[]` for other users.
+`recoveryCodesTotal` is how many a fresh set has (`recovery_codes.count`), for an "8 of 10 left" display. `availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have one. It's `[]` for other users.
 
 Replace `__ID__` in the URLs with a factor ID.
 

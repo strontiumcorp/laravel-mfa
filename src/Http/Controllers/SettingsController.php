@@ -46,6 +46,8 @@ class SettingsController extends Controller
             'pending' => $pending,
             'availableTypes' => $this->availableTypes(),
             'recoveryCodesRemaining' => $recoveryCodes->remaining($user),
+            // How many a fresh set has (recovery_codes.count), for the "8 of 10 left" meter.
+            'recoveryCodesTotal' => (int) config('mfa.recovery_codes.count'),
             'mustEnroll' => $this->mfa->mustEnroll($user),
             // What an enforced user must set up (enforcement.required_types); [] = any type.
             'requiredTypes' => $this->mfa->isEnforced($user)

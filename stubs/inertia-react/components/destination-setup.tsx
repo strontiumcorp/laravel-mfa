@@ -26,6 +26,11 @@ export type MfaDestinationSetupProps = {
     sent?: boolean;
     /** From confirming or resending. */
     error?: string | null;
+    /**
+     * Its own box and heading (default). false when it sits inside a card that
+     * already names the method, e.g. MfaFactorCards' setups.
+     */
+    framed?: boolean;
 };
 
 /** Seconds left until another code can be requested; ticks down to 0. */
@@ -56,6 +61,7 @@ export default function MfaDestinationSetup({
     retryAfter = null,
     sent = false,
     error = null,
+    framed = true,
 }: MfaDestinationSetupProps) {
     const wait = useCountdown(retryAfter);
     const [code, setCode] = useState('');
@@ -73,8 +79,11 @@ export default function MfaDestinationSetup({
     };
 
     return (
-        <section className="space-y-4 rounded-lg border border-blue-200 bg-blue-50/50 p-4 dark:border-blue-900 dark:bg-blue-950/30">
-            <h2 className="text-sm font-medium text-gray-900 dark:text-gray-100">Finish setting up {label.toLowerCase()}</h2>
+        <section
+            aria-label={framed ? undefined : `Finish setting up ${label.toLowerCase()}`}
+            className={framed ? 'space-y-4 rounded-lg border border-blue-200 bg-blue-50/50 p-4 dark:border-blue-900 dark:bg-blue-950/30' : 'space-y-4'}
+        >
+            {framed && <h2 className="text-sm font-medium text-gray-900 dark:text-gray-100">Finish setting up {label.toLowerCase()}</h2>}
 
             <p className="text-sm text-gray-600 dark:text-gray-400">
                 We sent a code to {destination ?? 'you'}.{' '}
@@ -92,12 +101,12 @@ export default function MfaDestinationSetup({
                     inputMode="numeric"
                     autoComplete="one-time-code"
                     placeholder="123456"
-                    className="w-40 rounded-md border border-gray-300 px-3 py-2 text-center font-mono tracking-widest dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                    className="min-h-11 w-40 rounded-lg border border-gray-300 px-3 text-center font-mono tracking-widest dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
                 />
                 <button
                     type="submit"
                     disabled={processing || code.length < 4}
-                    className="rounded-md bg-gray-900 px-3 py-2 text-sm text-white disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
+                    className="min-h-11 rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
                 >
                     Confirm
                 </button>

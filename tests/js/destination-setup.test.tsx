@@ -71,4 +71,11 @@ describe('MfaDestinationSetup', () => {
         expect(screen.getByRole('alert')).toHaveTextContent('This code has expired.');
         expect(screen.getByRole('textbox')).toHaveValue('');
     });
+
+    it('drops its own box and heading inside a card (framed={false})', () => {
+        render(<MfaDestinationSetup label="Email" destination="j***@example.com" onConfirm={() => {}} onResend={() => {}} framed={false} />);
+
+        expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+        expect(screen.getByRole('region', { name: 'Finish setting up email' })).not.toHaveClass('border');
+    });
 });

@@ -55,12 +55,19 @@ it('error shapes: 422 invalid, 429 throttled, 403 from the middleware', function
         ->assertStatus(429)->assertExactJsonStructure(['message', 'errors' => ['code'], 'retry_after']);
 });
 
+it('GET /mfa/settings says how many recovery codes a fresh set has', function () {
+    config(['mfa.recovery_codes.count' => 8]);
+    $this->loginWithSession($this->makeUser());
+
+    $this->getJson('/mfa/settings')->assertJson(['recoveryCodesRemaining' => 0, 'recoveryCodesTotal' => 8]);
+});
+
 it('GET /mfa/settings and the enrollment endpoints', function () {
     $user = $this->makeUser();
     $this->loginWithSession($user);
 
     $this->getJson('/mfa/settings')->assertOk()->assertExactJsonStructure([
-        'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label', 'recommended']], 'recoveryCodesRemaining', 'mustEnroll', 'requiredTypes',
+        'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label', 'recommended']], 'recoveryCodesRemaining', 'recoveryCodesTotal', 'mustEnroll', 'requiredTypes',
         'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'confirmPassword'], 'passwordRetryAfter', 'status', 'recoveryCodes', 'retryAfter',
     ]);
 

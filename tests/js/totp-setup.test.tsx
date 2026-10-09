@@ -10,7 +10,7 @@ describe('MfaTotpSetup', () => {
 
         expect(screen.getByRole('heading')).toHaveTextContent('Finish setting up authenticator app');
         expect(screen.getByRole('img', { name: /QR code/ })).toContainElement(screen.getByTestId('qr'));
-        expect(screen.getByText('JBSWY3DPEHPK3PXP')).toBeInTheDocument();
+        expect(screen.getByLabelText('Setup key')).toHaveTextContent('JBSW Y3DP EHPK 3PXP');
     });
 
     it('works without a QR code', () => {
@@ -50,5 +50,34 @@ describe('MfaTotpSetup', () => {
 
         expect(screen.getByRole('alert')).toHaveTextContent('Invalid code.');
         expect(screen.getByRole('textbox')).toHaveValue('');
+    });
+
+    it('drops its own box and heading inside a card (framed={false})', () => {
+        render(<MfaTotpSetup secret="S" onConfirm={() => {}} framed={false} />);
+
+        expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+        expect(screen.getByRole('region', { name: 'Finish setting up authenticator app' })).not.toHaveClass('border');
+    });
+
+    it('copies the key without the spaces', async () => {
+        const user = userEvent.setup();
+        render(<MfaTotpSetup secret="JBSWY3DPEHPK3PXP" onConfirm={() => {}} />);
+
+        await user.click(screen.getByRole('button', { name: 'Copy' }));
+
+        expect(await navigator.clipboard.readText()).toBe('JBSWY3DPEHPK3PXP');
+        expect(screen.getByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    });
+
+    it('links to the authenticator app when given the otpauth URL (shown on phones)', () => {
+        const url = 'otpauth://totp/App:jane%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=App';
+        const { rerender } = render(<MfaTotpSetup secret="S" onConfirm={() => {}} />);
+        expect(screen.queryByRole('link')).not.toBeInTheDocument();
+
+        rerender(<MfaTotpSetup secret="S" otpauthUrl={url} onConfirm={() => {}} />);
+
+        const link = screen.getByRole('link', { name: 'Open in authenticator app' });
+        expect(link).toHaveAttribute('href', url);
+        expect(link).toHaveClass('sm:hidden');
     });
 });
