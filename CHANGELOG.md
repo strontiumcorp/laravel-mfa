@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.3.0 - 2026-10-09
+
+_Changes since `v0.2.0`._
+
+### Breaking changes
+
+- confirm the password on the MFA settings page itself (bffc756)
+- remove Mfa::enforceUsing() in favour of enforcement.policy (45fa886)
+
+### Features
+
+- settings-card component for the account settings page (9bf34ce)
+
+### Documentation
+
+- log the v0.3 work in the integration plan (62087d1)
+
 ## v0.2.0 - 2026-10-09
 
 _Changes since `v0.1.1`._
