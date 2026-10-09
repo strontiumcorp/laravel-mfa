@@ -21,6 +21,11 @@ export type MfaAddFactorFormProps = {
     error?: string | null;
 };
 
+// Text fields set every part of their look (type, border, padding, colours, focus ring), so a host's
+// form styles (@tailwindcss/forms, a global `input {}` rule) can't change them.
+const FIELD =
+    'appearance-none rounded-lg border border-gray-300 bg-white text-gray-900 shadow-none placeholder:text-gray-400 focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:ring-offset-0 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-600 dark:focus:border-gray-100 dark:focus:ring-gray-100/20';
+
 export default function MfaAddFactorForm({ types, onAdd, processing = false, error = null }: MfaAddFactorFormProps) {
     const [adding, setAdding] = useState<Exclude<MfaEnrollableType, 'totp'> | null>(null);
     const [destination, setDestination] = useState('');
@@ -89,7 +94,7 @@ export default function MfaAddFactorForm({ types, onAdd, processing = false, err
                         type={adding === 'sms' ? 'tel' : 'email'}
                         placeholder={adding === 'sms' ? '+1 555 555 0100' : 'you@example.com'}
                         autoFocus
-                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                        className={`${FIELD} w-full px-3 py-2 text-sm`}
                     />
                     <div className="flex gap-2">
                         <button
@@ -99,7 +104,7 @@ export default function MfaAddFactorForm({ types, onAdd, processing = false, err
                         >
                             Send code
                         </button>
-                        <button type="button" onClick={close} className="px-3 py-1.5 text-sm text-gray-500">
+                        <button type="button" onClick={close} className="px-3 py-1.5 text-sm text-gray-500 dark:text-gray-400">
                             Cancel
                         </button>
                     </div>
@@ -107,7 +112,7 @@ export default function MfaAddFactorForm({ types, onAdd, processing = false, err
             )}
 
             {error && (
-                <p role="alert" className="text-sm text-red-600">
+                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
                     {error}
                 </p>
             )}

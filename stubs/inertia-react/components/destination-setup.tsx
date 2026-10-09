@@ -51,6 +51,11 @@ function useCountdown(seconds: number | null): number {
 
 const formatWait = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+// Text fields set every part of their look (type, border, padding, colours, focus ring), so a host's
+// form styles (@tailwindcss/forms, a global `input {}` rule) can't change them.
+const FIELD =
+    'appearance-none rounded-lg border border-gray-300 bg-white text-gray-900 shadow-none placeholder:text-gray-400 focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:ring-offset-0 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-600 dark:focus:border-gray-100 dark:focus:ring-gray-100/20';
+
 export default function MfaDestinationSetup({
     label,
     destination,
@@ -104,10 +109,11 @@ export default function MfaDestinationSetup({
                     aria-label="Verification code"
                     value={code}
                     onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    type="text"
                     inputMode="numeric"
                     autoComplete="one-time-code"
                     placeholder="123456"
-                    className="min-h-11 w-40 rounded-lg border border-gray-300 px-3 text-center font-mono tracking-widest dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                    className={`${FIELD} min-h-11 w-40 px-3 py-0 text-center font-mono text-base tracking-widest`}
                 />
                 <button
                     type="submit"
@@ -118,7 +124,7 @@ export default function MfaDestinationSetup({
                 </button>
             </form>
             {error && (
-                <p role="alert" className="text-sm text-red-600">
+                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
                     {error}
                 </p>
             )}

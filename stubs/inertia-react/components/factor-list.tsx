@@ -50,7 +50,7 @@ export default function MfaFactorList<F extends MfaListedFactor>({
                 </p>
             )}
 
-            {factors.length === 0 && !required && <p className="text-sm text-gray-500">No methods set up yet.</p>}
+            {factors.length === 0 && !required && <p className="text-sm text-gray-500 dark:text-gray-400">No methods set up yet.</p>}
 
             {factors.length > 0 && (
                 <ul className="space-y-3">
@@ -58,7 +58,7 @@ export default function MfaFactorList<F extends MfaListedFactor>({
                         <li key={f.id} className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 dark:border-gray-800">
                             <div>
                                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{f.label ?? f.type_label}</p>
-                                <p className="text-xs text-gray-500">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">
                                     {f.destination ?? f.type_label}
                                     {f.last_used_at && ` · last used ${new Date(f.last_used_at).toLocaleDateString()}`}
                                 </p>
@@ -68,7 +68,7 @@ export default function MfaFactorList<F extends MfaListedFactor>({
                                 aria-label={`Remove ${f.label ?? f.type_label}`}
                                 disabled={removingId === f.id}
                                 onClick={() => confirmRemove(f) && onRemove(f)}
-                                className="text-xs font-medium text-red-600 disabled:opacity-50"
+                                className="text-xs font-medium text-red-600 dark:text-red-400 disabled:opacity-50"
                             >
                                 Remove
                             </button>

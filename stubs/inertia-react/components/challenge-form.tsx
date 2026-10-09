@@ -132,8 +132,11 @@ function CodeBoxes({
                     );
                 })}
             </div>
+            {/* Invisible: the boxes above draw the code. Every border, padding, shadow and ring a host's form
+                styles could add is reset, or it shows as a frame around the row. */}
             <input
                 ref={input}
+                type="text"
                 aria-label="Verification code"
                 aria-describedby={describedBy}
                 aria-invalid={invalid || undefined}
@@ -148,7 +151,7 @@ function CodeBoxes({
                 pattern={`\\d{${length}}`}
                 maxLength={length}
                 autoFocus
-                className="absolute inset-0 h-full w-full cursor-text bg-transparent text-base text-transparent caret-transparent outline-none selection:bg-transparent"
+                className="absolute inset-0 m-0 h-full w-full cursor-text appearance-none rounded-none border-0 bg-transparent p-0 text-base text-transparent caret-transparent shadow-none outline-none ring-0 selection:bg-transparent focus:border-0 focus:shadow-none focus:outline-none focus:ring-0 focus:ring-offset-0"
             />
         </div>
     );

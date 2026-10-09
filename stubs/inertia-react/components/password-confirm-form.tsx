@@ -46,6 +46,11 @@ function useCountdown(seconds: number | null): number {
 // The daily cap waits up to 24 hours: show those in hours.
 const formatWait = (s: number) => (s >= 3600 ? `${Math.ceil(s / 3600)} h` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
 
+// Text fields set every part of their look (type, border, padding, colours, focus ring), so a host's
+// form styles (@tailwindcss/forms, a global `input {}` rule) can't change them.
+const FIELD =
+    'appearance-none rounded-lg border border-gray-300 bg-white text-gray-900 shadow-none placeholder:text-gray-400 focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:ring-offset-0 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-600 dark:focus:border-gray-100 dark:focus:ring-gray-100/20';
+
 export default function MfaPasswordConfirmForm({
     onConfirm,
     onCancel,
@@ -91,7 +96,7 @@ export default function MfaPasswordConfirmForm({
                     onChange={(e) => setPassword(e.target.value)}
                     autoComplete="current-password"
                     autoFocus
-                    className="min-h-11 w-full min-w-0 rounded-lg border border-gray-300 px-3 text-sm sm:flex-1 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                    className={`${FIELD} min-h-11 w-full min-w-0 px-3 py-0 text-sm sm:flex-1`}
                 />
                 {/* Phones: Cancel and Confirm side by side under the field, Confirm on the right. */}
                 <div className={`grid gap-2 sm:flex ${onCancel ? 'grid-cols-2' : 'grid-cols-1'}`}>
@@ -115,7 +120,7 @@ export default function MfaPasswordConfirmForm({
                 </div>
             </form>
             {error && (
-                <p role="alert" className="text-sm text-red-600">
+                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
                     {error}
                 </p>
             )}

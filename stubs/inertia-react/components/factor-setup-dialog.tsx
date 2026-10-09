@@ -139,7 +139,11 @@ function useSelectOnFailure(processing: boolean, error: string | null) {
 const PRIMARY = 'min-h-11 rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900';
 const SECONDARY =
     'min-h-11 rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-900 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100';
-const INPUT = 'min-h-11 w-full rounded-lg border border-gray-300 px-3 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100';
+// Text fields set every part of their look (type, border, padding, colours, focus ring), so a host's
+// form styles (@tailwindcss/forms, a global `input {}` rule) can't change them.
+const FIELD =
+    'appearance-none rounded-lg border border-gray-300 bg-white text-gray-900 shadow-none placeholder:text-gray-400 focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:ring-offset-0 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-600 dark:focus:border-gray-100 dark:focus:ring-gray-100/20';
+const INPUT = `${FIELD} min-h-11 w-full px-3 py-0 text-sm`;
 
 const TILE: Record<MfaFactorType, string> = {
     totp: 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300',
@@ -390,7 +394,7 @@ export default function MfaFactorSetupDialog({
                                 className={INPUT}
                             />
                             {passwordError && (
-                                <p role="alert" className="text-sm text-red-600">
+                                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
                                     {passwordError}
                                 </p>
                             )}
@@ -457,7 +461,7 @@ export default function MfaFactorSetupDialog({
                                 className={INPUT}
                             />
                             {destinationError && (
-                                <p role="alert" className="text-sm text-red-600">
+                                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
                                     {destinationError}
                                 </p>
                             )}
@@ -482,13 +486,14 @@ export default function MfaFactorSetupDialog({
                                 aria-label={totp ? 'Code from your authenticator app' : 'Verification code'}
                                 value={code}
                                 onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, codeLength))}
+                                type="text"
                                 inputMode="numeric"
                                 autoComplete="one-time-code"
                                 placeholder="123456"
-                                className="min-h-14 w-full rounded-lg border border-gray-300 px-4 text-center font-mono text-2xl tracking-[0.4em] dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                                className={`${FIELD} min-h-14 w-full px-4 py-0 text-center font-mono text-2xl tracking-[0.4em]`}
                             />
                             {error && (
-                                <p role="alert" className="text-sm text-red-600">
+                                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
                                     {error}
                                 </p>
                             )}
@@ -531,7 +536,7 @@ export default function MfaFactorSetupDialog({
                                 </button>
                             </div>
                             {copyFailed && (
-                                <p role="alert" className="text-sm text-red-600">
+                                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
                                     Couldn't copy here. Download the codes instead.
                                 </p>
                             )}

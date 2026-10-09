@@ -26,6 +26,14 @@ const PRIMARY = 'min-h-11 w-full rounded-lg bg-gray-900 px-5 text-sm font-semibo
 const QUIET =
     'inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100';
 
+// Text fields set every part of their look (type, border, padding, colours, focus ring), so a host's
+// form styles (@tailwindcss/forms, a global `input {}` rule) can't change them.
+// The border colour depends on the error, so it's not part of FIELD (two colour classes would clash).
+const FIELD =
+    'appearance-none rounded-lg border bg-white text-gray-900 shadow-none placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:ring-offset-0 dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-600 dark:focus:ring-gray-100/20';
+const FIELD_BORDER = 'border-gray-300 focus:border-gray-900 dark:border-gray-700 dark:focus:border-gray-100';
+const FIELD_BORDER_ERROR = 'border-red-500 focus:border-red-500 dark:border-red-500 dark:focus:border-red-500';
+
 export default function MfaRecoveryCodeForm({ onSubmit, processing = false, error = null, onTryAnotherWay, onUseVerificationCode, onSignOut }: MfaRecoveryCodeFormProps) {
     const [code, setCode] = useState('');
     const id = useId();
@@ -59,6 +67,7 @@ export default function MfaRecoveryCodeForm({ onSubmit, processing = false, erro
 
                 <form onSubmit={submit} aria-labelledby={id} className="mt-6 space-y-4">
                     <input
+                        type="text"
                         aria-label="Recovery code"
                         aria-describedby={`${id}-description`}
                         aria-invalid={error ? true : undefined}
@@ -69,8 +78,8 @@ export default function MfaRecoveryCodeForm({ onSubmit, processing = false, erro
                         autoCapitalize="none"
                         spellCheck={false}
                         autoFocus
-                        className={`min-h-12 w-full rounded-lg border px-3 text-center font-mono text-base tracking-wider text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/10 dark:bg-gray-950 dark:focus:ring-gray-100/20 dark:text-gray-100 dark:placeholder:text-gray-600 ${
-                            error ? 'border-red-500' : 'border-gray-300 focus:border-gray-900 dark:border-gray-700 dark:focus:border-gray-100'
+                        className={`${FIELD} min-h-12 w-full px-3 py-0 text-center font-mono text-base tracking-wider ${
+                            error ? FIELD_BORDER_ERROR : FIELD_BORDER
                         }`}
                     />
                     {error && (
