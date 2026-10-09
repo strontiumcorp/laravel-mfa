@@ -13,6 +13,8 @@ Everything is in `config/mfa.php`, with comments. This page covers the parts tha
 | `MFA_UI_DRIVER` | `inertia` | `json` for other frontends; see [json-mode.md](json-mode.md). |
 | `MFA_LOG_CHANNEL`, `MFA_LOG_LEVEL` | default channel, `info` | Where MFA events are logged, and the lowest level logged. |
 
+**The name in authenticator apps.** `factors.totp.issuer` (`MFA_TOTP_ISSUER`, default `APP_NAME`) is what authenticator apps show for the account. Outside production the environment is added in brackets ("Acme (staging)", "Acme (local)"), so a test account never looks like the real one; set `factors.totp.issuer_environment` to `false` to turn that off. It applies to apps added from then on: an existing entry keeps the name it was added with.
+
 **Recommended types.** `factors.{type}.recommended` in `config/mfa.php` (default: `totp` only) lists that type first with a "Recommended" badge when users add a method. It's a hint only; nothing is enforced.
 
 **Disabling a factor type fails open:** users whose only factors are of that type are no longer challenged. Disable a type only after they enroll another factor. `mfa:doctor` counts the users affected.

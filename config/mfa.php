@@ -85,7 +85,12 @@ return [
             'enabled' => env('MFA_TOTP_ENABLED', true),
             // Listed first and badged "Recommended" when users add a method.
             'recommended' => true,
+            // The name authenticator apps show for this account.
             'issuer' => env('MFA_TOTP_ISSUER', env('APP_NAME', 'Laravel')),
+            // Outside production, add the environment in brackets ("Acme (staging)"),
+            // so test accounts don't look like the real one in the app. Applies
+            // to apps added from now on; existing entries keep their name.
+            'issuer_environment' => true,
             // Number of 30s steps accepted either side of "now" (clock drift).
             'window' => 1,
         ],

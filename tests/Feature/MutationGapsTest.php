@@ -398,7 +398,30 @@ describe('factors', function () {
     });
 
     it('puts the configured issuer in the authenticator URL', function () {
-        config(['mfa.factors.totp.issuer' => 'Podcast Flow']);
+        config(['mfa.factors.totp.issuer' => 'Podcast Flow', 'app.env' => 'production']);
+        $this->loginWithSession($this->makeUser());
+
+        expect($this->postJson('/mfa/factors', ['type' => 'totp'])->json('setup.otpauth_url'))->toStartWith('otpauth://totp/Podcast%20Flow:');
+    });
+
+    it('names the environment in brackets outside production, so test accounts stand out in the app', function (string $env, string $issuer) {
+        config(['mfa.factors.totp.issuer' => 'Podcast Flow', 'app.env' => $env]);
+        app(FactorManager::class)->forgetDrivers();
+        $this->loginWithSession($this->makeUser());
+
+        $url = $this->postJson('/mfa/factors', ['type' => 'totp'])->json('setup.otpauth_url');
+
+        expect($url)->toStartWith('otpauth://totp/'.rawurlencode($issuer).':')
+            ->and($url)->toContain('issuer='.rawurlencode($issuer));
+    })->with([
+        'production' => ['production', 'Podcast Flow'],
+        'staging' => ['staging', 'Podcast Flow (staging)'],
+        'local' => ['local', 'Podcast Flow (local)'],
+    ]);
+
+    it('leaves the issuer alone when factors.totp.issuer_environment is off', function () {
+        config(['mfa.factors.totp.issuer' => 'Podcast Flow', 'mfa.factors.totp.issuer_environment' => false, 'app.env' => 'staging']);
+        app(FactorManager::class)->forgetDrivers();
         $this->loginWithSession($this->makeUser());
 
         expect($this->postJson('/mfa/factors', ['type' => 'totp'])->json('setup.otpauth_url'))->toStartWith('otpauth://totp/Podcast%20Flow:');

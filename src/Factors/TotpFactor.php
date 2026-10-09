@@ -18,11 +18,27 @@ final class TotpFactor implements Factor
 {
     private const STEP_SECONDS = 30;
 
-    /** @param array{issuer?: string, window?: int} $config */
+    /** @param array{issuer?: string, issuer_environment?: bool, window?: int} $config */
     public function __construct(
         private readonly Google2FA $google2fa,
         private readonly array $config,
+        private readonly string $environment = 'production',
     ) {}
+
+    /**
+     * The name authenticator apps show: factors.totp.issuer, with the
+     * environment in brackets outside production ("Acme (staging)").
+     */
+    public function issuer(): string
+    {
+        // Equivalent mutant(s): the issuer is a string in config.
+        $issuer = (string) ($this->config['issuer'] ?? 'Laravel'); // @pest-mutate-ignore: RemoveStringCast
+
+        // The default (on) is in config/mfa.php; the deep merge always provides the key.
+        return ! empty($this->config['issuer_environment']) && $this->environment !== '' && $this->environment !== 'production'
+            ? "{$issuer} ({$this->environment})"
+            : $issuer;
+    }
 
     public function type(): FactorType
     {
@@ -52,8 +68,7 @@ final class TotpFactor implements Factor
     public function setupData(MfaFactor $factor, MultiFactorAuthenticatable $user): array
     {
         $url = $this->google2fa->getQRCodeUrl(
-            // Equivalent mutant(s): the issuer is a string in config.
-            (string) ($this->config['issuer'] ?? 'Laravel'), // @pest-mutate-ignore: RemoveStringCast
+            $this->issuer(),
             $user->getMfaLabel(),
             // Equivalent mutant(s): the secret is always a string for TOTP factors.
             (string) $factor->secret, // @pest-mutate-ignore: RemoveStringCast

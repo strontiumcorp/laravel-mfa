@@ -35,7 +35,7 @@ class FactorManager extends Manager
 
     protected function createTotpDriver(): TotpFactor
     {
-        return new TotpFactor(new Google2FA, (array) $this->config->get('mfa.factors.totp'));
+        return new TotpFactor(new Google2FA, (array) $this->config->get('mfa.factors.totp'), (string) $this->config->get('app.env'));
     }
 
     protected function createEmailDriver(): EmailOtpFactor
