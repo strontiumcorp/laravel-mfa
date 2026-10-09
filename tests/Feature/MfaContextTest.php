@@ -22,6 +22,16 @@ it('describes a guest', function () {
             'dismissLabel' => 'Not today',
             'dismissUrl' => route('mfa.nudge.dismiss'),
         ],
+        'trustReminder' => [
+            'show' => false,
+            'expiresAt' => null,
+            'title' => 'Two-factor check coming up',
+            'body' => "This browser will ask for your sign-in code again :when. Do it now so it doesn't interrupt you later.",
+            'button' => 'Verify now',
+            'dismissLabel' => 'Later',
+            'verifyUrl' => route('mfa.challenge', ['renew' => 1]),
+            'dismissUrl' => route('mfa.trusted-browsers.reminder.dismiss'),
+        ],
     ]);
 });
 

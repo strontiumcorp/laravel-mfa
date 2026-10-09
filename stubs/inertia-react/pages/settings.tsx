@@ -5,8 +5,9 @@ import MfaFactorCards, { type MfaCardFactor, type MfaFactorType } from '@/compon
 import MfaFactorSetupDialog, { type MfaRecoveryCodesFile } from '@/components/vendor/laravel-mfa/factor-setup-dialog';
 import MfaPasswordConfirmForm from '@/components/vendor/laravel-mfa/password-confirm-form';
 import MfaRecoveryCodesPanel from '@/components/vendor/laravel-mfa/recovery-codes-panel';
+import MfaTrustedBrowsersPanel, { type MfaTrustedBrowser } from '@/components/vendor/laravel-mfa/trusted-browsers-panel';
 import { Head, router, useForm } from '@inertiajs/react';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 
 type Pending = MfaCardFactor & { secret?: string; qr_svg?: string; otpauth_url?: string };
 
@@ -25,13 +26,34 @@ type Props = {
     passwordRetryAfter: number | null;
     /** Adding or removing a method would ask for the password right now. */
     passwordConfirmationRequired: boolean;
+    /**
+     * Adding the first method needs proof it's this account, beyond the
+     * password: a code emailed to `email` (masked), or, when it's null, a
+     * setup link from an administrator. null = not needed.
+     */
+    enrollmentVerification: { email: string | null } | null;
     mustEnroll: boolean;
     /** What an enforced user must set up; [] = any method. */
     requiredTypes: { type: MfaFactorType; label: string }[];
     /** The nudge's title and body, as a notice for a user with no method who isn't enforced (config mfa.nudge); null otherwise. */
     nudge: { title: string; body: string } | null;
+    /** Browsers that skip the challenge, newest first; null = the feature is off. */
+    trustedBrowsers: MfaTrustedBrowser[] | null;
     status: string | null;
-    urls: { store: string; confirm: string; resend: string; destroy: string; recoveryCodes: string; confirmPassword: string };
+    urls: {
+        store: string;
+        confirm: string;
+        resend: string;
+        destroy: string;
+        recoveryCodes: string;
+        confirmPassword: string;
+        sendEnrollmentCode: string;
+        verifyEnrollmentCode: string;
+        /** DELETE; contains __ID__. */
+        forgetTrustedBrowser: string;
+        /** DELETE: forgets every trusted browser. */
+        forgetTrustedBrowsers: string;
+    };
 };
 
 const withId = (url: string, id: number) => url.replace('__ID__', String(id));
@@ -51,7 +73,9 @@ export default function MfaSettings(props: Props) {
         retryAfter,
         passwordRetryAfter,
         passwordConfirmationRequired,
+        enrollmentVerification,
         nudge,
+        trustedBrowsers,
         urls,
     } = props;
 
@@ -65,6 +89,8 @@ export default function MfaSettings(props: Props) {
     const [resendingId, setResendingId] = useState<number | null>(null);
     const [removingId, setRemovingId] = useState<number | null>(null);
     const [regenerating, setRegenerating] = useState(false);
+    const [forgettingBrowserId, setForgettingBrowserId] = useState<number | null>(null);
+    const [forgettingAllBrowsers, setForgettingAllBrowsers] = useState(false);
 
     // Removing a method and new recovery codes may answer "confirm your
     // password first" (routes.password_confirmation): ask for it inside the
@@ -91,9 +117,43 @@ export default function MfaSettings(props: Props) {
         });
     };
 
+    // Before an account's first method, a code emailed to the account (or an
+    // administrator's link) proves it's this account. Both answer under "code".
+    const sendEmailCodeForm = useForm<{ code?: string }>({});
+    const verifyEmailCodeForm = useForm<{ code?: string }>({});
+    // A code went out (kept while the page is open, so reopening the dialog
+    // doesn't ask to send another), and the server asked for the check mid-way.
+    const [emailCodeSent, setEmailCodeSent] = useState(false);
+    const [verifyAgain, setVerifyAgain] = useState(false);
+    // The address the code goes to, kept for when the server asks again mid-way.
+    const knownVerification = useRef(enrollmentVerification);
+    if (enrollmentVerification) knownVerification.current = enrollmentVerification;
+
+    const sendEmailCode = () => {
+        verifyEmailCodeForm.clearErrors();
+        sendEmailCodeForm.transform(() => ({}));
+        sendEmailCodeForm.post(urls.sendEnrollmentCode, { preserveScroll: true, onSuccess: () => setEmailCodeSent(true) });
+    };
+
+    const verifyEmailCode = (code: string, then: () => void) => {
+        let verified = false;
+        sendEmailCodeForm.clearErrors();
+        verifyEmailCodeForm.transform(() => ({ code }));
+        verifyEmailCodeForm.post(urls.verifyEnrollmentCode, {
+            preserveScroll: true,
+            onSuccess: () => {
+                verified = true;
+            },
+            // Go on once this visit is over, so the next request doesn't interrupt it.
+            onFinish: () => {
+                if (verified) then();
+            },
+        });
+    };
+
     // Adding a method runs in one dialog for every type: password (when
-    // needed), then the QR code or the address/number, then the code, then the
-    // recovery codes. A setup left pending (e.g. after a reload) reopens it,
+    // needed), then the account check (when needed), then the QR code or the
+    // address/number, then the code, then the recovery codes. A setup left pending (e.g. after a reload) reopens it,
     // unless the user closed it ("Continue setup" in its card).
     const [setupType, setSetupType] = useState<MfaFactorType | null>(null);
     const [closedIds, setClosedIds] = useState<number[]>([]);
@@ -114,6 +174,9 @@ export default function MfaSettings(props: Props) {
     const dialogType = setupType ?? confirming?.type ?? resumable?.type ?? null;
     const current = confirming ?? (dialogType ? (pending.find((p) => p.type === dialogType) ?? null) : null);
     const needsPassword = (passwordConfirmationRequired && !passwordDone) || passwordAgain;
+    const needsVerification = !!enrollmentVerification || verifyAgain;
+    // Asked before the setup starts, or again when the server says so mid-way.
+    const verifyEmail = (!!enrollmentVerification && !current) || verifyAgain ? (enrollmentVerification ?? knownVerification.current ?? { email: null }) : null;
 
     const store = (type: MfaFactorType, destination?: string) => {
         setLastDestination(destination);
@@ -122,6 +185,7 @@ export default function MfaSettings(props: Props) {
             preserveScroll: true,
             onError: (errors) => {
                 if (errors.password_confirmation_required) setPasswordAgain(true);
+                if (errors.enrollment_verification_required) setVerifyAgain(true);
             },
         });
     };
@@ -132,18 +196,32 @@ export default function MfaSettings(props: Props) {
         confirmForm.clearErrors();
         resend.clearErrors();
         passwordForm.clearErrors();
+        sendEmailCodeForm.clearErrors();
+        verifyEmailCodeForm.clearErrors();
         setSetupType(type);
         setClosedIds((ids) => ids.filter((id) => !pending.some((p) => p.id === id && p.type === type)));
         // An authenticator app has nothing to ask first: get its key right away.
-        if (type === 'totp' && !needsPassword && !pending.some((p) => p.type === 'totp')) store('totp');
+        if (type === 'totp' && !needsPassword && !needsVerification && !pending.some((p) => p.type === 'totp')) store('totp');
+    };
+
+    // Carry on where the setup was: an authenticator app gets its key, an
+    // address or number sent before the server asked for a check is sent again.
+    const continueSetup = () => {
+        if (!dialogType || current) return;
+        if (dialogType === 'totp') store('totp');
+        else if (lastDestination !== undefined) store(dialogType, lastDestination);
     };
 
     const afterPassword = () => {
         setPasswordDone(true);
         setPasswordAgain(false);
-        if (!dialogType || current) return;
-        if (dialogType === 'totp') store('totp');
-        else if (lastDestination !== undefined) store(dialogType, lastDestination);
+        if (!needsVerification) continueSetup();
+    };
+
+    const afterVerification = () => {
+        setVerifyAgain(false);
+        setEmailCodeSent(false);
+        continueSetup();
     };
 
     const endSetup = (complete: boolean) => {
@@ -153,6 +231,7 @@ export default function MfaSettings(props: Props) {
         setConfirming(null);
         setConfirmed(false);
         setPasswordAgain(false);
+        setVerifyAgain(false);
         // The next setup asks again if the server says so (passwordConfirmationRequired).
         setPasswordDone(false);
         setLastDestination(undefined);
@@ -162,7 +241,13 @@ export default function MfaSettings(props: Props) {
         setConfirming(p);
         setConfirmingId(p.id);
         confirmForm.transform(() => ({ code }));
-        confirmForm.post(withId(urls.confirm, p.id), { preserveScroll: true, onSuccess: () => setConfirmed(true) });
+        confirmForm.post(withId(urls.confirm, p.id), {
+            preserveScroll: true,
+            onSuccess: () => setConfirmed(true),
+            onError: (errors) => {
+                if (errors.enrollment_verification_required) setVerifyAgain(true);
+            },
+        });
     };
 
     const resendCode = (id: number) => {
@@ -185,6 +270,21 @@ export default function MfaSettings(props: Props) {
             onStart: () => setRegenerating(true),
             onFinish: () => setRegenerating(false),
             onError: askPasswordFor('recovery', regenerate),
+        });
+
+    // Forgetting a trusted browser needs no password: the browser only skipped the code.
+    const forgetBrowser = (id: number) =>
+        router.delete(withId(urls.forgetTrustedBrowser, id), {
+            preserveScroll: true,
+            onStart: () => setForgettingBrowserId(id),
+            onFinish: () => setForgettingBrowserId(null),
+        });
+
+    const forgetAllBrowsers = () =>
+        router.delete(urls.forgetTrustedBrowsers, {
+            preserveScroll: true,
+            onStart: () => setForgettingAllBrowsers(true),
+            onFinish: () => setForgettingAllBrowsers(false),
         });
 
     // A setup the user closed stays in its card, to pick up again.
@@ -264,6 +364,14 @@ export default function MfaSettings(props: Props) {
                     passwordProcessing={passwordForm.processing}
                     passwordError={passwordForm.errors.password}
                     passwordRetryAfter={passwordRetryAfter}
+                    verifyEmail={verifyEmail}
+                    onSendEmailCode={sendEmailCode}
+                    emailCodeSending={sendEmailCodeForm.processing}
+                    emailCodeSent={emailCodeSent}
+                    emailCodeRetryAfter={retryAfter}
+                    onVerifyEmailCode={(code) => verifyEmailCode(code, afterVerification)}
+                    emailCodeProcessing={verifyEmailCodeForm.processing}
+                    emailCodeError={verifyEmailCodeForm.errors.code ?? sendEmailCodeForm.errors.code}
                     onSubmitDestination={(destination) => store(dialogType, destination)}
                     destinationProcessing={storeForm.processing}
                     destinationError={storeForm.errors.destination ?? storeForm.errors.type}
@@ -295,6 +403,19 @@ export default function MfaSettings(props: Props) {
                         onRegenerate={regenerate}
                         processing={regenerating}
                         passwordPrompt={retry?.at === 'recovery' ? passwordPrompt : null}
+                    />
+                </section>
+            )}
+
+            {trustedBrowsers && (
+                <section className="space-y-3">
+                    <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Trusted browsers</h2>
+                    <MfaTrustedBrowsersPanel
+                        browsers={trustedBrowsers}
+                        onForget={forgetBrowser}
+                        onForgetAll={forgetAllBrowsers}
+                        forgettingId={forgettingBrowserId}
+                        forgettingAll={forgettingAllBrowsers}
                     />
                 </section>
             )}

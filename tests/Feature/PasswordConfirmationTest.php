@@ -248,12 +248,17 @@ it('gives the password prompt its own countdown, never the code-resend one', fun
 });
 
 it('lets an enforced user who must enroll confirm their password', function () {
+    Mfa::fakeCodes();
     config(['mfa.enforcement.policy' => EnforceForAdmins::class]);
     $this->loginWithSession($this->makeUser(['is_admin' => true]));
 
     $this->get('/dashboard')->assertRedirect(route('mfa.settings'));
     $this->postJson(route('mfa.factors.store'), ['type' => 'totp'])->assertStatus(423);
     $this->postJson(route('mfa.password.confirm'), ['password' => 'password'])->assertOk();
+    // Then proof of ownership beyond the password (enrollment_verification).
+    $this->postJson(route('mfa.factors.store'), ['type' => 'totp'])->assertStatus(423)->assertJson(['error' => 'enrollment_verification_required']);
+    $this->postJson(route('mfa.enrollment-verification.send'))->assertOk();
+    $this->postJson(route('mfa.enrollment-verification.verify'), ['code' => '123456'])->assertOk();
     $this->postJson(route('mfa.factors.store'), ['type' => 'totp'])->assertOk();
 });
 

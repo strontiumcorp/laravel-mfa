@@ -7,6 +7,7 @@ use StrontiumCorp\LaravelMfa\Console\Concerns\ResolvesUser;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
+use StrontiumCorp\LaravelMfa\Models\MfaTrustedBrowser;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
 
 /**
@@ -34,6 +35,7 @@ class StatusCommand extends Command
         $this->components->twoColumnDetail('Has active MFA (cached)', $mfa->hasConfirmedFactors($user) ? 'yes' : 'no');
         $this->components->twoColumnDetail('Must enroll (policy)', $mfa->mustEnroll($user) ? 'yes' : 'no');
         $this->components->twoColumnDetail('Recovery codes remaining', (string) $recoveryCodes->remaining($user));
+        $this->components->twoColumnDetail('Trusted browsers', (string) MfaTrustedBrowser::query()->where('user_id', $user->getAuthIdentifier())->where('expires_at', '>', now())->count());
 
         $this->newLine();
         $this->table(

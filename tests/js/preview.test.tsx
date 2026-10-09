@@ -39,11 +39,59 @@ describe('UI preview', () => {
         expect(settingsProps(initialState({ mustEnroll: true })).nudge).toBeNull();
     });
 
+    it('asks an enforced user to confirm it is them before the first method', () => {
+        const s = initialState({ mustEnroll: true, enrollmentEmail: 'j***@example.com' });
+        expect(settingsProps(s).enrollmentVerification).toEqual({ email: 'j***@example.com' });
+
+        expect(handle(s, 'post', '/mfa/factors', { type: 'totp' }).errors).toHaveProperty('enrollment_verification_required');
+        expect(handle(s, 'post', '/mfa/enrollment-verification/send', {}).errors).toBeUndefined();
+        expect(settingsProps(s).retryAfter).toBe(60);
+        expect(handle(s, 'post', '/mfa/enrollment-verification/send', {}).errors).toEqual({ code: 'Please wait before requesting another code.' });
+        expect(handle(s, 'post', '/mfa/enrollment-verification', { code: '000000' }).errors).toEqual({ code: 'The provided code is invalid.' });
+        expect(handle(s, 'post', '/mfa/enrollment-verification', { code: CODE })).toEqual({});
+        expect(settingsProps(s).enrollmentVerification).toBeNull();
+        expect(handle(s, 'post', '/mfa/factors', { type: 'totp' })).toEqual({});
+
+        const link = initialState({ mustEnroll: true, enrollmentEmail: null });
+        expect(settingsProps(link).enrollmentVerification).toEqual({ email: null });
+        expect(handle(link, 'post', '/mfa/enrollment-verification/send', {}).errors).toHaveProperty('code');
+    });
+
     it('asks for the password first when the scenario says so', () => {
         const s = initialState({ requirePassword: true });
 
         expect(handle(s, 'post', '/mfa/factors', { type: 'totp' }).errors).toHaveProperty('password_confirmation_required');
         expect(handle(s, 'post', '/mfa/confirm-password', { password: PASSWORD })).toEqual({});
         expect(handle(s, 'post', '/mfa/factors', { type: 'totp' })).toEqual({});
+    });
+
+    it('remembers a browser on request, and forgets one or all', () => {
+        const s = initialState({ factors: [], trustBrowserDays: 30 });
+        expect(settingsProps(s).trustedBrowsers).toEqual([]);
+        expect(challengeProps(s).trustBrowser).toEqual({ days: 30 });
+        expect(challengeProps(initialState()).trustBrowser).toBeNull();
+        expect(settingsProps(initialState()).trustedBrowsers).toBeNull();
+
+        handle(s, 'post', '/mfa/challenge', { factor_id: 1, code: CODE });
+        expect(s.trustedBrowsers).toEqual([]);
+        handle(s, 'post', '/mfa/challenge', { factor_id: 1, code: CODE, remember: true });
+        handle(s, 'post', '/mfa/challenge', { factor_id: 1, code: CODE, remember: true });
+        expect(s.trustedBrowsers.map((b) => b.current)).toEqual([true, false]);
+
+        expect(handle(s, 'delete', `/mfa/trusted-browsers/${s.trustedBrowsers[1].id}`, {})).toEqual({});
+        expect(s.trustedBrowsers).toHaveLength(1);
+        expect(settingsProps(s).status).toBe('trusted-browsers-forgotten');
+        handle(s, 'post', '/mfa/challenge', { factor_id: 1, code: CODE, remember: true });
+        expect(handle(s, 'delete', '/mfa/trusted-browsers', {})).toEqual({});
+        expect(s.trustedBrowsers).toEqual([]);
+    });
+
+    it('hides the trusted browser reminder for the session on "Later"', () => {
+        const s = initialState({ factors: [], trustEndsInMinutes: 60 });
+
+        expect(handle(s, 'post', '/mfa/trusted-browsers/reminder/dismiss', {})).toEqual({});
+        expect(s.trustReminderDismissed).toBe(true);
+        expect(challengeProps(initialState({ renew: true })).renew).toBe(true);
+        expect(challengeProps(initialState()).renew).toBe(false);
     });
 });

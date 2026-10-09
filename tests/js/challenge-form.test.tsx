@@ -283,4 +283,101 @@ describe('MfaChallengeForm', () => {
         expect(onSignOut).toHaveBeenCalledOnce();
         expect(onSubmit).not.toHaveBeenCalled();
     });
+
+    describe("don't ask again on this browser", () => {
+        const checkbox = () => screen.queryByRole('checkbox', { name: /Don't ask again on this browser/ });
+
+        it('is hidden unless offered', () => {
+            const { rerender } = setup();
+            expect(checkbox()).not.toBeInTheDocument();
+
+            rerender({ trustBrowserDays: null });
+            expect(checkbox()).not.toBeInTheDocument();
+        });
+
+        it('shows the days, unticked, above Verify', () => {
+            const { rerender } = setup({ trustBrowserDays: 30 });
+
+            expect(screen.getByRole('checkbox', { name: "Don't ask again on this browser for 30 days" })).not.toBeChecked();
+            expect(checkbox()!.compareDocumentPosition(screen.getByRole('button', { name: 'Verify' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+            rerender({ trustBrowserDays: 1 });
+            expect(screen.getByRole('checkbox', { name: "Don't ask again on this browser for 1 day" })).toBeInTheDocument();
+        });
+
+        it('passes the choice with the code', async () => {
+            const { onSubmit } = setup({ trustBrowserDays: 30 });
+
+            await userEvent.type(codeInput(), '123456{Enter}');
+            expect(onSubmit).toHaveBeenLastCalledWith('123456', { trustBrowser: false });
+
+            await userEvent.click(screen.getByText(/Don't ask again/)); // the label ticks it
+            expect(checkbox()).toBeChecked();
+            await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
+            expect(onSubmit).toHaveBeenLastCalledWith('123456', { trustBrowser: true });
+        });
+
+        it('is ticked from the keyboard', async () => {
+            setup({ trustBrowserDays: 30 });
+
+            checkbox()!.focus();
+            await userEvent.keyboard(' ');
+
+            expect(checkbox()).toBeChecked();
+        });
+
+        it('calls onSubmit with the code alone when not offered', async () => {
+            const { onSubmit } = setup();
+
+            await userEvent.type(codeInput(), '123456{Enter}');
+
+            expect(onSubmit.mock.calls).toEqual([['123456']]);
+        });
+
+        it('is not on the list of methods', async () => {
+            setup({ trustBrowserDays: 30, onUseRecoveryCode: () => {} });
+
+            await userEvent.click(screen.getByRole('button', { name: 'Try another way' }));
+
+            expect(checkbox()).not.toBeInTheDocument();
+        });
+    });
+
+    describe('verifying early', () => {
+        it('can start with the box ticked', async () => {
+            const { onSubmit } = setup({ trustBrowserDays: 30, trustBrowserDefault: true });
+
+            expect(screen.getByRole('checkbox', { name: "Don't ask again on this browser for 30 days" })).toBeChecked();
+            await userEvent.type(codeInput(), '123456{Enter}');
+
+            expect(onSubmit).toHaveBeenCalledWith('123456', { trustBrowser: true });
+        });
+
+        it('offers a cancel button, labelled "Not now" unless told otherwise', async () => {
+            const onCancel = vi.fn();
+            const { rerender } = setup({ onCancel });
+
+            await userEvent.click(screen.getByRole('button', { name: 'Not now' }));
+            expect(onCancel).toHaveBeenCalledOnce();
+            expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+
+            rerender({ onCancel, cancelLabel: 'Back to the app' });
+            expect(screen.getByRole('button', { name: 'Back to the app' })).toBeInTheDocument();
+        });
+
+        it('has no cancel button by default, and keeps Sign out', () => {
+            setup({ onSignOut: () => {} });
+
+            expect(screen.queryByRole('button', { name: 'Not now' })).not.toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+        });
+
+        it('shows cancel on the list of methods too', async () => {
+            setup({ onCancel: () => {}, onUseRecoveryCode: () => {} });
+
+            await userEvent.click(screen.getByRole('button', { name: 'Try another way' }));
+
+            expect(screen.getByRole('button', { name: 'Not now' })).toBeInTheDocument();
+        });
+    });
 });

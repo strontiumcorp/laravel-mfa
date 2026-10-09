@@ -1,7 +1,9 @@
 <?php
 
 use StrontiumCorp\LaravelMfa\Events\ChallengeRequired;
+use StrontiumCorp\LaravelMfa\Notifications\EnrollmentCodeNotification;
 use StrontiumCorp\LaravelMfa\Notifications\OtpCodeNotification;
+use StrontiumCorp\LaravelMfa\Notifications\SecurityAlertNotification;
 
 return [
 
@@ -71,6 +73,129 @@ return [
         'roles' => [],
         'policy' => null,
         'required_types' => ['totp'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Enrollment verification
+    |--------------------------------------------------------------------------
+    |
+    | Before an account's first factor is added, the session must prove it
+    | owns the account beyond its password. Otherwise someone with only a
+    | leaked password could add their own authenticator app to an account
+    | that must enroll, and the account would then be theirs.
+    |
+    | required_for => "enforced": users an enforcement rule applies to (they
+    |                 can reach nothing but the MFA settings page anyway).
+    |                 "everyone": every user adding a first factor (also
+    |                 stops a password-only attacker from locking an opt-in
+    |                 owner out). null or false: never.
+    | email        => accept a code sent to the account's email address
+    |                 (getMfaEmail()), proving access to the inbox. false =
+    |                 only an administrator's one-time link proves it
+    |                 (mfa:enrollment-link / Mfa::enrollmentLink()), for apps
+    |                 where the mailbox can't be trusted. Users with no email
+    |                 address always need a link.
+    | link_ttl     => minutes an administrator's link stays valid (one use,
+    |                 the user's own signed-in session, revoked by a password
+    |                 change).
+    | notification => the email with the code. Same constructor arguments as
+    |                 the default (code, TTL in seconds).
+    |
+    | The code reuses factors.email (length, ttl, max_attempts,
+    | resend_cooldown) and counts toward the account's send caps.
+    |
+    */
+
+    'enrollment_verification' => [
+        'required_for' => env('MFA_ENROLLMENT_VERIFICATION', 'enforced'),
+        'email' => true,
+        'link_ttl' => 1440,
+        'notification' => EnrollmentCodeNotification::class,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Trusted browsers
+    |--------------------------------------------------------------------------
+    |
+    | "Don't ask again on this browser for N days", a checkbox on the
+    | challenge. The user still signs in with their password (and is logged
+    | back in by remember-me as before); only the MFA step is skipped on that
+    | browser, for that user, until it expires. Ends early when the password
+    | changes, a sign-in method is added or removed, a recovery code is used,
+    | on mfa:reset, or from the settings page. Logging out doesn't end it.
+    | Never offered after signing in with a recovery code.
+    |
+    | enabled        => offer it at all (off by default).
+    | days           => how long a browser stays trusted.
+    | allow_enforced => offer it to users enforcement applies to (admins).
+    |                   Weigh it: a stolen trusted browser plus the password
+    |                   then skips their second factor.
+    | cookie         => cookie name prefix (one cookie per guard and user).
+    | reminder       => in the last `hours` of a browser's trust, the nudge
+    |                   card (MfaEnableNudge) says the challenge is coming,
+    |                   so it doesn't arrive unannounced mid-task. "Verify
+    |                   now" passes the challenge early (trusting the browser
+    |                   for another `days`) and returns to the page. 0 = never.
+    |                   :when becomes e.g. "in 5 hours". Through __().
+    |
+    */
+
+    'trusted_browsers' => [
+        'enabled' => env('MFA_TRUSTED_BROWSERS', false),
+        'days' => 30,
+        'allow_enforced' => false,
+        'cookie' => 'mfa_trusted',
+        'reminder' => [
+            'hours' => 12,
+            'title' => 'Two-factor check coming up',
+            'body' => "This browser will ask for your sign-in code again :when. Do it now so it doesn't interrupt you later.",
+            'button' => 'Verify now',
+            'dismiss_label' => 'Later',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Security notifications
+    |--------------------------------------------------------------------------
+    |
+    | Emails the account owner (getMfaEmail()) when their two-factor setup
+    | changes or looks attacked, so they notice someone else acting with
+    | their password. Never contains codes or secrets: what happened, when,
+    | and from which IP address. Sent like codes: queued on the delivery
+    | queue (delivery.*) when one is set, inline otherwise. A failing send
+    | is reported and never blocks the request.
+    |
+    | events => one switch per event:
+    |   factor_enabled           a sign-in method was added
+    |   factor_disabled          a sign-in method was removed (also mfa:reset)
+    |   recovery_codes_generated new recovery codes (not the first set,
+    |                            which comes with factor_enabled)
+    |   recovery_code_used       someone signed in with a recovery code
+    |   suspicious_code_requests sign-in codes keep being requested without
+    |                            being used, or hit the send cap (someone
+    |                            may have the password); at most one an hour
+    |   enrollment_link_issued   an administrator's setup link was created
+    |                            (mfa:enrollment-link / Mfa::enrollmentLink())
+    | notification => the email. Receives the event's name (as above) and
+    |                 its details (method, IP address, time); see
+    |                 Notifications\SecurityAlertNotification.
+    |
+    */
+
+    'notifications' => [
+        'enabled' => env('MFA_NOTIFICATIONS_ENABLED', true),
+        'events' => [
+            'factor_enabled' => true,
+            'factor_disabled' => true,
+            'recovery_codes_generated' => true,
+            'recovery_code_used' => true,
+            'suspicious_code_requests' => true,
+            'enrollment_link_issued' => true,
+        ],
+        'notification' => SecurityAlertNotification::class,
     ],
 
     /*
@@ -294,7 +419,7 @@ return [
 
         // Fire SuspiciousCodeRequests after this many login-code sends with
         // no successful verification (0 = never). Someone may have the
-        // password: listen to the event and warn the owner.
+        // password: the owner is emailed (notifications.events).
         'warn_after_unverified_sends' => 4,
     ],
 
@@ -493,6 +618,7 @@ return [
         'otp_codes' => 'mfa_otp_codes',
         'recovery_codes' => 'mfa_recovery_codes',
         'audit_logs' => 'mfa_audit_logs',
+        'trusted_browsers' => 'mfa_trusted_browsers',
     ],
 
 ];

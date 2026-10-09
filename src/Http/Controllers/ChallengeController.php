@@ -13,6 +13,7 @@ use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Support\ChallengeService;
 use StrontiumCorp\LaravelMfa\Support\ChallengeState;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
+use StrontiumCorp\LaravelMfa\Support\TrustedBrowsers;
 use Symfony\Component\HttpFoundation\Response;
 
 class ChallengeController extends Controller
@@ -23,13 +24,28 @@ class ChallengeController extends Controller
         private readonly Mfa $mfa,
         private readonly ChallengeService $challenges,
         private readonly UiResponse $ui,
+        private readonly TrustedBrowsers $trustedBrowsers,
     ) {}
 
     public function show(Request $request, RecoveryCodes $recoveryCodes): mixed
     {
         $user = $this->sessionUser($request, $this->mfa);
+        $guard = $this->mfa->guardFor($request, $user);
 
-        if ($this->mfa->isVerifiedFor($request, $user) || ! $this->mfa->hasConfirmedFactors($user)) {
+        // Renewing a trusted browser before it expires (the reminder's
+        // "Verify now"): a verified user passes the challenge early, then
+        // returns to the page they came from.
+        $renew = $request->boolean('renew') && $this->mfa->isVerifiedFor($request, $user)
+            && $this->trustedBrowsers->offeredTo($user) && $this->trustedBrowsers->runsOnTrustedBrowser($request, $user, $guard);
+
+        if ($renew && ! $request->header('X-Inertia-Partial-Data')) {
+            $previous = url()->previous();
+            if ($previous !== url()->current() && ! str_starts_with($previous, route('mfa.challenge'))) {
+                $request->session()->put('url.intended', $previous);
+            }
+        }
+
+        if (! $renew && ($this->mfa->isVerifiedFor($request, $user) || ! $this->mfa->hasConfirmedFactors($user))) {
             // Equivalent mutant(s): home is a string in config.
             return redirect()->intended((string) config('mfa.routes.home')); // @pest-mutate-ignore: RemoveStringCast
         }
@@ -49,6 +65,10 @@ class ChallengeController extends Controller
             // Equivalent mutant(s): the page is only shown when the user has at least one enabled factor.
             'defaultFactorId' => $factors->first()?->id, // @pest-mutate-ignore: RemoveNullSafeOperator
             'hasRecoveryCodes' => $recoveryCodes->remaining($user) > 0,
+            // "Don't ask again on this browser for N days" (trusted_browsers); null = not offered.
+            'trustBrowser' => $this->trustedBrowsers->offeredTo($user) ? ['days' => $this->trustedBrowsers->days()] : null,
+            // Renewing a trusted browser: the page ticks "don't ask again" and offers to go back instead of signing out.
+            'renew' => $renew,
             'urls' => [
                 'send' => route('mfa.challenge.send'),
                 'verify' => route('mfa.challenge.verify'),
@@ -76,8 +96,9 @@ class ChallengeController extends Controller
 
     public function verify(Request $request): Response
     {
-        $validated = $request->validate(['factor_id' => ['required', 'integer'], 'code' => ['required', 'string', 'max:16']]);
+        $validated = $request->validate(['factor_id' => ['required', 'integer'], 'code' => ['required', 'string', 'max:16'], 'remember' => ['sometimes', 'boolean']]);
         $user = $this->sessionUser($request, $this->mfa);
+        $guard = $this->mfa->guardFor($request, $user);
 
         $result = $this->challenges->verify($user, $validated['factor_id'], $validated['code']);
 
@@ -86,6 +107,12 @@ class ChallengeController extends Controller
         }
 
         $this->mfa->markVerified($request, $user, $result->context['factor'] ?? null, ['factor_id' => $result->context['factor_id'] ?? null]);
+
+        // "Don't ask again on this browser" (trusted_browsers). Not offered
+        // after a recovery code, which often means a lost device.
+        if (($validated['remember'] ?? false) && $this->trustedBrowsers->offeredTo($user)) {
+            $this->trustedBrowsers->trust($request, $user, $guard);
+        }
 
         $intended = $this->intended($request);
 

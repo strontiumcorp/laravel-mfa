@@ -2,18 +2,22 @@
 //
 // Adding a sign-in method, as one dialog for every type:
 //   1. Confirm your password (only when the change needs it).
-//   2. Authenticator app: scan the QR code or enter the key ("Open in
+//   2. Confirm it's you (only before an enforced account's first method): a
+//      code emailed to the account's address, or "ask an administrator".
+//   3. Authenticator app: scan the QR code or enter the key ("Open in
 //      authenticator app" on phones). Email/SMS: the address or number.
-//   3. Enter the code.
-//   4. Save the recovery codes (Complete unlocks once they're copied or
+//   4. Enter the code.
+//   5. Save the recovery codes (Complete unlocks once they're copied or
 //      downloaded), or a short "added" step when there are no new ones.
-// The steps follow the props: a password requested mid-way (it expired)
-// brings that step back, and a code that's been sent moves on to the code.
+// The steps follow the props: a password or account check requested mid-way
+// (it expired) brings that step back, and a code that's been sent moves on to the code.
 // A bottom sheet on phones, a centred dialog from `sm` up. Needs only React and
 // ./icons; imports no other component and knows nothing about Inertia or routes.
 //
 //     <MfaFactorSetupDialog open type="sms" label="SMS"
 //         askPassword={needsPassword} onConfirmPassword={confirmPassword}
+//         verifyEmail={enrollmentVerification} onSendEmailCode={sendEmailCode}
+//         emailCodeSent={sent} onVerifyEmailCode={verifyEmailCode}
 //         onSubmitDestination={(to) => store('sms', to)} sentTo={pending?.destination}
 //         onConfirm={(code) => confirm(pending.id, code)} onResend={resend}
 //         confirmed={confirmed} recoveryCodes={codes} onClose={close} onComplete={done} />
@@ -33,6 +37,26 @@ export type MfaFactorSetupDialogProps = {
     passwordError?: string | null;
     /** Seconds until another password attempt is allowed. */
     passwordRetryAfter?: number | null;
+
+    /**
+     * Ask the user to prove it's their account before the method is set up
+     * (null/undefined = not needed): `email` is the masked address a code
+     * goes to, or null when only an administrator's setup link can do it.
+     * Once shown, the step stays in the numbering, like the password's.
+     */
+    verifyEmail?: { email: string | null } | null;
+    /** "Email me a code" / "Resend code" in that step. */
+    onSendEmailCode?: () => void;
+    emailCodeSending?: boolean;
+    /** A code went out (in this dialog): shows the code input. */
+    emailCodeSent?: boolean;
+    /** Seconds until another code can be emailed; a new value restarts the countdown. */
+    emailCodeRetryAfter?: number | null;
+    /** Called with the digits of the emailed code. */
+    onVerifyEmailCode?: (code: string) => void;
+    emailCodeProcessing?: boolean;
+    /** Why sending or checking the emailed code failed. */
+    emailCodeError?: string | null;
 
     /** Email/SMS: called with the address or number as typed (empty email = the account email). */
     onSubmitDestination?: (destination: string) => void;
@@ -117,7 +141,7 @@ function recoveryCodesDownload(codes: string[], file: MfaRecoveryCodesFile | nul
     return { name: `${unsafeInFileName(name)}.txt`, text };
 }
 
-type Step = 'password' | 'scan' | 'destination' | 'code' | 'saved';
+type Step = 'password' | 'verify' | 'scan' | 'destination' | 'code' | 'saved';
 
 /**
  * Copy to the clipboard, falling back to a selected textarea where the
@@ -204,6 +228,14 @@ export default function MfaFactorSetupDialog({
     passwordProcessing = false,
     passwordError = null,
     passwordRetryAfter = null,
+    verifyEmail = null,
+    onSendEmailCode,
+    emailCodeSending = false,
+    emailCodeSent = false,
+    emailCodeRetryAfter = null,
+    onVerifyEmailCode,
+    emailCodeProcessing = false,
+    emailCodeError = null,
     onSubmitDestination,
     destinationProcessing = false,
     destinationError = null,
@@ -228,11 +260,13 @@ export default function MfaFactorSetupDialog({
     const [password, setPassword] = useState('');
     const [destination, setDestination] = useState('');
     const [code, setCode] = useState('');
+    const [emailCode, setEmailCode] = useState('');
     // Authenticator: the user pressed Next. Email/SMS: the user went back to change the destination.
     const [scanned, setScanned] = useState(false);
     const [changing, setChanging] = useState(false);
     // Once asked, the password stays in the step list, so the numbering doesn't jump.
     const [passwordStep, setPasswordStep] = useState(askPassword);
+    const [verifyStep, setVerifyStep] = useState(!!verifyEmail);
     const [keyCopied, setKeyCopied] = useState(false);
     const [saved, setSaved] = useState<'copied' | 'downloaded' | null>(null);
     const [copyFailed, setCopyFailed] = useState(false);
@@ -240,6 +274,7 @@ export default function MfaFactorSetupDialog({
     const titleId = useId();
     const passwordWait = useCountdown(passwordRetryAfter);
     const resendWait = useCountdown(retryAfter);
+    const emailCodeWait = useCountdown(emailCodeRetryAfter);
 
     // A fresh start every time it opens.
     useEffect(() => {
@@ -247,16 +282,27 @@ export default function MfaFactorSetupDialog({
         setPassword('');
         setDestination('');
         setCode('');
+        setEmailCode('');
         setScanned(false);
         setChanging(false);
         setPasswordStep(askPassword);
+        setVerifyStep(!!verifyEmail);
         setKeyCopied(false);
         setSaved(null);
         setCopyFailed(false);
-    }, [open]); // Only on open: askPassword is read as it is then.
+    }, [open]); // Only on open: askPassword and verifyEmail are read as they are then.
     useEffect(() => {
         if (askPassword) setPasswordStep(true);
     }, [askPassword]);
+    useEffect(() => {
+        if (verifyEmail) setVerifyStep(true);
+    }, [verifyEmail]);
+    // A new emailed code (sent, or re-sent without an error): typing starts empty.
+    const wasSendingEmailCode = useRef(emailCodeSending);
+    useEffect(() => {
+        if (wasSendingEmailCode.current && !emailCodeSending && !emailCodeError) setEmailCode('');
+        wasSendingEmailCode.current = emailCodeSending;
+    }, [emailCodeSending, emailCodeError]);
     // A new code went out: on to the code, empty. (sentTo alone misses a
     // re-send to the same number, so a send that finished without an error counts too.)
     useEffect(() => {
@@ -280,12 +326,15 @@ export default function MfaFactorSetupDialog({
     }, [passwordProcessing, passwordError]);
     const destinationInput = useSelectOnFailure(destinationProcessing, destinationError);
     const codeInput = useSelectOnFailure(processing, error);
+    const emailCodeInput = useSelectOnFailure(emailCodeProcessing, emailCodeError);
 
     const step: Step = confirmed
         ? 'saved'
         : askPassword
           ? 'password'
-          : totp
+          : verifyEmail
+            ? 'verify'
+            : totp
             ? scanned && secret
                 ? 'code'
                 : 'scan'
@@ -310,19 +359,20 @@ export default function MfaFactorSetupDialog({
         if (!open) return;
         const target = panel.current?.querySelector<HTMLElement>('[data-autofocus]') ?? panel.current;
         target?.focus();
-    }, [open, step, secret]);
+    }, [open, step, secret, emailCodeSent]);
 
     if (!open) return null;
 
     const hasCodes = !!recoveryCodes && recoveryCodes.length > 0;
     // Recovery codes are shown once: no way out but Complete.
     const closable = step !== 'saved';
-    const steps: Step[] = [...(passwordStep ? (['password'] as const) : []), totp ? 'scan' : 'destination', 'code', 'saved'];
+    const steps: Step[] = [...(passwordStep ? (['password'] as const) : []), ...(verifyStep ? (['verify'] as const) : []), totp ? 'scan' : 'destination', 'code', 'saved'];
     const stepNumber = steps.indexOf(step) + 1;
     const where = type === 'sms' ? 'number' : 'address';
 
     const title = {
         password: 'Confirm your password',
+        verify: "Confirm it's you",
         scan: 'Set up an authenticator app',
         destination: type === 'sms' ? 'Add a phone number' : 'Add an email address',
         code: 'Enter the code',
@@ -375,6 +425,10 @@ export default function MfaFactorSetupDialog({
     const submit = (e: { preventDefault(): void }) => {
         e.preventDefault();
         if (step === 'password') onConfirmPassword?.(password);
+        if (step === 'verify' && verifyEmail?.email) {
+            if (emailCodeSent) onVerifyEmailCode?.(emailCode);
+            else onSendEmailCode?.();
+        }
         if (step === 'destination') onSubmitDestination?.(destination.trim());
         if (step === 'code') onConfirm(code);
     };
@@ -382,6 +436,8 @@ export default function MfaFactorSetupDialog({
     const codeLength = totp ? 6 : 10;
     const ready = {
         password: password !== '' && !passwordProcessing && passwordWait === 0,
+        send: !emailCodeSending && emailCodeWait === 0,
+        verify: !emailCodeProcessing && emailCode.length >= 4,
         destination: !destinationProcessing && (type === 'email' || destination.trim() !== ''),
         code: !processing && code.length >= (totp ? 6 : 4),
     };
@@ -443,6 +499,60 @@ export default function MfaFactorSetupDialog({
                                     {passwordError}
                                 </p>
                             )}
+                        </>
+                    )}
+
+                    {step === 'verify' && !verifyEmail?.email && (
+                        <p className="text-sm text-gray-600 dark:text-gray-400">Ask an administrator for a setup link to add your first sign-in method.</p>
+                    )}
+
+                    {step === 'verify' && verifyEmail?.email && !emailCodeSent && (
+                        <>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                Before you add your first sign-in method, we'll email a code to{' '}
+                                <span className="font-medium text-gray-900 dark:text-gray-100">{verifyEmail.email}</span> to check it's you.
+                            </p>
+                            {emailCodeError && (
+                                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+                                    {emailCodeError}
+                                </p>
+                            )}
+                        </>
+                    )}
+
+                    {step === 'verify' && verifyEmail?.email && emailCodeSent && (
+                        <>
+                            <label htmlFor={`${titleId}-email-code`} className="block text-sm text-gray-600 dark:text-gray-400">
+                                We sent a code to <span className="font-medium text-gray-900 dark:text-gray-100">{verifyEmail.email}</span>.
+                            </label>
+                            <input
+                                id={`${titleId}-email-code`}
+                                ref={emailCodeInput}
+                                data-autofocus
+                                aria-label="Code from the email"
+                                value={emailCode}
+                                onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                                type="text"
+                                inputMode="numeric"
+                                autoComplete="one-time-code"
+                                placeholder="123456"
+                                className={`${FIELD} min-h-14 w-full px-4 py-0 text-center font-mono text-2xl tracking-[0.4em]`}
+                            />
+                            {emailCodeError && (
+                                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+                                    {emailCodeError}
+                                </p>
+                            )}
+                            <div className="text-sm">
+                                <button
+                                    type="button"
+                                    disabled={emailCodeSending || emailCodeWait > 0}
+                                    onClick={onSendEmailCode}
+                                    className="min-h-11 font-medium text-gray-700 underline disabled:no-underline disabled:opacity-60 dark:text-gray-300"
+                                >
+                                    {emailCodeWait > 0 ? `Resend in ${formatWait(emailCodeWait)}` : 'Resend code'}
+                                </button>
+                            </div>
                         </>
                     )}
 
@@ -607,6 +717,27 @@ export default function MfaFactorSetupDialog({
                             <button type="submit" form={formId} disabled={!ready.password} className={PRIMARY}>
                                 {passwordWait > 0 ? `Try again in ${formatWait(passwordWait)}` : 'Continue'}
                             </button>
+                        </>
+                    )}
+                    {step === 'verify' && !verifyEmail?.email && (
+                        <button type="button" data-autofocus onClick={onClose} className={SECONDARY}>
+                            Cancel
+                        </button>
+                    )}
+                    {step === 'verify' && verifyEmail?.email && (
+                        <>
+                            <button type="button" onClick={onClose} className={SECONDARY}>
+                                Cancel
+                            </button>
+                            {emailCodeSent ? (
+                                <button type="submit" form={formId} disabled={!ready.verify} className={PRIMARY}>
+                                    Confirm
+                                </button>
+                            ) : (
+                                <button type="submit" form={formId} data-autofocus={ready.send ? true : undefined} disabled={!ready.send} className={PRIMARY}>
+                                    {emailCodeWait > 0 ? `Try again in ${formatWait(emailCodeWait)}` : 'Email me a code'}
+                                </button>
+                            )}
                         </>
                     )}
                     {step === 'scan' && (

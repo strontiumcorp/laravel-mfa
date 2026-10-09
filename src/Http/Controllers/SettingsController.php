@@ -8,6 +8,7 @@ use Illuminate\Validation\Rule;
 use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Enums\FailureReason;
+use StrontiumCorp\LaravelMfa\Enums\TrustedBrowserRevocation;
 use StrontiumCorp\LaravelMfa\Events\PasswordConfirmationFailed;
 use StrontiumCorp\LaravelMfa\Events\PasswordConfirmed;
 use StrontiumCorp\LaravelMfa\Exceptions\EnrollmentFailed;
@@ -16,9 +17,11 @@ use StrontiumCorp\LaravelMfa\Http\UiResponse;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Support\EnrollmentService;
+use StrontiumCorp\LaravelMfa\Support\EnrollmentVerification;
 use StrontiumCorp\LaravelMfa\Support\PendingEnrollments;
 use StrontiumCorp\LaravelMfa\Support\RateLimits;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
+use StrontiumCorp\LaravelMfa\Support\TrustedBrowsers;
 use StrontiumCorp\LaravelMfa\Support\VerificationResult;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -30,7 +33,7 @@ class SettingsController extends Controller
         private readonly UiResponse $ui,
     ) {}
 
-    public function show(Request $request, RecoveryCodes $recoveryCodes): mixed
+    public function show(Request $request, RecoveryCodes $recoveryCodes, EnrollmentVerification $verification, TrustedBrowsers $browsers): mixed
     {
         $user = $this->sessionUser($request, $this->mfa);
         $factors = $user->mfaFactors()->orderBy('id')->get();
@@ -68,7 +71,19 @@ class SettingsController extends Controller
                 'destroy' => route('mfa.factors.destroy', ['factor' => '__ID__']),
                 'recoveryCodes' => route('mfa.recovery-codes.store'),
                 'confirmPassword' => route('mfa.password.confirm'),
+                'sendEnrollmentCode' => route('mfa.enrollment-verification.send'),
+                'verifyEnrollmentCode' => route('mfa.enrollment-verification.verify'),
+                'forgetTrustedBrowser' => route('mfa.trusted-browsers.destroy', ['browser' => '__ID__']),
+                'forgetTrustedBrowsers' => route('mfa.trusted-browsers.destroy-all'),
             ],
+            // Browsers that skip the challenge (trusted_browsers), newest first;
+            // "current" is this one. null when the feature is off; [] when none.
+            'trustedBrowsers' => config('mfa.trusted_browsers.enabled') ? $browsers->list($request, $user) : null,
+            // Adding the first method needs proof of ownership first, and this
+            // session hasn't given it (enrollment_verification): where the code
+            // goes (masked; null = only an administrator's link works). null =
+            // not needed. The factor routes still enforce it.
+            'enrollmentVerification' => $verification->required($request->session(), $user) ? $verification->describe($user) : null,
             // Whether adding or removing a factor would ask for the password right
             // now, so the setup dialog can show that step from the start. The
             // factor routes still enforce it (RequirePasswordConfirmation).
@@ -186,6 +201,14 @@ class SettingsController extends Controller
         $this->mfa->refreshEnrollmentRequirement($request, $user);
 
         return $this->ui->success(route('mfa.settings'), 'factor-disabled');
+    }
+
+    /** Stop trusting one browser (DELETE trusted-browsers/{browser}) or all of them. */
+    public function forgetTrustedBrowsers(Request $request, TrustedBrowsers $browsers, ?string $browser = null): Response
+    {
+        $browsers->forget($this->sessionUser($request, $this->mfa), TrustedBrowserRevocation::Settings, $browser === null ? null : (int) $browser);
+
+        return $this->ui->success(route('mfa.settings'), 'trusted-browsers-forgotten');
     }
 
     public function regenerateRecoveryCodes(Request $request): Response

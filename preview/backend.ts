@@ -19,6 +19,15 @@ export type Factor = {
     otpauth_url?: string;
 };
 
+export type TrustedBrowser = {
+    id: number;
+    label: string | null;
+    created_at: string | null;
+    last_used_at: string | null;
+    expires_at: string;
+    current: boolean;
+};
+
 export type State = {
     factors: Factor[];
     pending: Factor[];
@@ -30,12 +39,32 @@ export type State = {
     requirePassword: boolean;
     passwordConfirmed: boolean;
     passwordAttempts: number;
+    /**
+     * Adding the first method needs a code emailed to the account first
+     * (enrollment verification): the masked address, or null when only an
+     * administrator's setup link can do it. undefined = not needed.
+     */
+    enrollmentEmail?: string | null;
+    /** The account check passed (or wasn't needed). */
+    enrollmentVerified: boolean;
+    /** When the account-check code went out (ms), for its 60s cooldown. */
+    enrollmentCodeSentAt: number | null;
     /** "Not today" on the nudge was clicked (until the frame reloads). */
     nudgeDismissed: boolean;
     /** Challenge: when each email/SMS factor's code went out (ms), for its send state. */
     codeSentAt: Record<number, number>;
     /** Challenge: when a code was last used to verify (ms): the next send waits 120s from then (the cooldown spans logins). */
     codeUsedAt: Record<number, number>;
+    /** Trusted browsers (mfa.trusted_browsers): days a ticked "don't ask again" lasts; null = the feature is off. */
+    trustBrowserDays: number | null;
+    /** Newest first. */
+    trustedBrowsers: TrustedBrowser[];
+    /** This browser's trust ends in this many minutes (the app pages show the reminder); null = not a trusted browser. */
+    trustEndsInMinutes: number | null;
+    /** "Later" on the reminder (for the rest of the session). */
+    trustReminderDismissed: boolean;
+    /** The challenge opened from the reminder's "Verify now" (?renew=1). */
+    renew: boolean;
     // One-request flashes, as the package's session flashes.
     status: string | null;
     retryAfter: number | null;
@@ -59,9 +88,22 @@ export const urls = {
         destroy: '/mfa/factors/__ID__',
         recoveryCodes: '/mfa/recovery-codes',
         confirmPassword: '/mfa/confirm-password',
+        sendEnrollmentCode: '/mfa/enrollment-verification/send',
+        verifyEnrollmentCode: '/mfa/enrollment-verification',
+        forgetTrustedBrowser: '/mfa/trusted-browsers/__ID__',
+        forgetTrustedBrowsers: '/mfa/trusted-browsers',
     },
     challenge: { send: '/mfa/challenge/send', verify: '/mfa/challenge', recover: '/mfa/challenge/recover', logout: '/logout' },
     nudgeDismiss: '/mfa/nudge/dismiss',
+    trustReminderDismiss: '/mfa/trusted-browsers/reminder/dismiss',
+    trustReminderVerify: '/mfa/challenge?renew=1',
+};
+
+export const TRUST_REMINDER = {
+    title: 'Two-factor check coming up',
+    body: "This browser will ask for your sign-in code again :when. Do it now so it doesn't interrupt you later.",
+    button: 'Verify now',
+    dismissLabel: 'Later',
 };
 
 export const NUDGE = {
@@ -99,6 +141,23 @@ export function pendingTotp(): Factor {
     });
 }
 
+const DAY = 86_400_000;
+
+/** A trusted browser added `addedDaysAgo` days ago, trusted for `days`. */
+export function trustedBrowser(label: string | null, addedDaysAgo: number, overrides: Partial<TrustedBrowser> = {}, days = 30): TrustedBrowser {
+    const added = Date.now() - addedDaysAgo * DAY;
+
+    return {
+        id: nextId++,
+        label,
+        created_at: new Date(added).toISOString(),
+        last_used_at: null,
+        expires_at: new Date(added + days * DAY).toISOString(),
+        current: false,
+        ...overrides,
+    };
+}
+
 export function initialState(overrides: Partial<State> = {}): State {
     return {
         factors: [],
@@ -110,8 +169,15 @@ export function initialState(overrides: Partial<State> = {}): State {
         requirePassword: false,
         passwordConfirmed: false,
         passwordAttempts: 0,
+        enrollmentVerified: false,
+        enrollmentCodeSentAt: null,
         codeSentAt: {},
         codeUsedAt: {},
+        trustBrowserDays: null,
+        trustedBrowsers: [],
+        trustEndsInMinutes: null,
+        trustReminderDismissed: false,
+        renew: false,
         nudgeDismissed: false,
         status: null,
         retryAfter: null,
@@ -134,6 +200,7 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
     const id = Number(url.match(/\/factors\/(\d+)/)?.[1]);
     const needsPassword = () => s.requirePassword && !s.passwordConfirmed;
     const passwordRequired = { errors: { password_confirmation_required: 'Please confirm your password to continue.' } };
+    const verificationRequired = { errors: { enrollment_verification_required: "Confirm it's you before adding your first sign-in method." } };
 
     if (method === 'post' && url === urls.settings.confirmPassword) {
         if (++s.passwordAttempts > 5) {
@@ -147,8 +214,30 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
         return {};
     }
 
+    if (method === 'post' && url === urls.settings.sendEnrollmentCode) {
+        if (needsPassword()) return passwordRequired;
+        if (s.enrollmentEmail === null) return { errors: { code: 'Ask an administrator for a setup link to add your first sign-in method.' } };
+        const wait = s.enrollmentCodeSentAt === null ? 0 : 60 - Math.floor((Date.now() - s.enrollmentCodeSentAt) / 1000);
+        if (wait > 0) {
+            s.retryAfter = wait;
+            return { errors: { code: 'Please wait before requesting another code.' } };
+        }
+        s.enrollmentCodeSentAt = Date.now();
+        s.retryAfter = 60;
+        s.status = 'enrollment-code-sent';
+        return { toast: `Sent code ${CODE} (preview)` };
+    }
+
+    if (method === 'post' && url === urls.settings.verifyEnrollmentCode) {
+        if (data.code !== CODE) return { errors: { code: 'The provided code is invalid.' } };
+        s.enrollmentVerified = true;
+        s.status = 'enrollment-verified';
+        return {};
+    }
+
     if (method === 'post' && url === urls.settings.store) {
         if (needsPassword()) return passwordRequired;
+        if (needsVerification(s)) return verificationRequired;
         const type = data.type as FactorType;
         let pending: Factor;
 
@@ -170,6 +259,7 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
     }
 
     if (method === 'post' && url.endsWith('/confirm')) {
+        if (needsVerification(s)) return verificationRequired;
         const pending = s.pending.find((p) => p.id === id);
         if (!pending) return { errors: { code: 'This verification method is not available.' } };
         if (data.code !== CODE) return { errors: { code: 'The provided code is invalid.' } };
@@ -223,7 +313,20 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
     }
 
     if (method === 'post' && url === urls.challenge.verify) {
-        return data.code === CODE ? { toast: 'Verified. The app would now open the page the user asked for.' } : { errors: { code: 'The provided code is invalid.' } };
+        if (data.code !== CODE) return { errors: { code: 'The provided code is invalid.' } };
+        if (data.remember === true && s.trustBrowserDays !== null) {
+            s.trustEndsInMinutes = s.trustBrowserDays * 24 * 60;
+            s.trustedBrowsers = [trustedBrowser('Chrome on Mac', 0, { current: true }, s.trustBrowserDays), ...s.trustedBrowsers.map((b) => ({ ...b, current: false }))];
+            return { toast: `Verified. This browser won't be asked again for ${s.trustBrowserDays} days.` };
+        }
+        return { toast: 'Verified. The app would now open the page the user asked for.' };
+    }
+
+    if (method === 'delete' && url.startsWith('/mfa/trusted-browsers')) {
+        const browserId = Number(url.match(/\/trusted-browsers\/(\d+)/)?.[1]);
+        s.trustedBrowsers = url === urls.settings.forgetTrustedBrowsers ? [] : s.trustedBrowsers.filter((b) => b.id !== browserId);
+        s.status = 'trusted-browsers-forgotten';
+        return {};
     }
 
     if (method === 'post' && url === urls.challenge.recover) {
@@ -233,6 +336,12 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
     }
 
     if (method === 'post' && url === urls.challenge.logout) return { toast: 'Signed out (preview).' };
+
+    if (method === 'post' && url === urls.trustReminderDismiss) {
+        s.trustReminderDismissed = true;
+        s.status = 'trust-reminder-dismissed';
+        return {};
+    }
 
     if (method === 'post' && url === urls.nudgeDismiss) {
         s.nudgeDismissed = true;
@@ -257,12 +366,19 @@ export function settingsProps(s: State) {
         requiredTypes: s.mustEnroll || s.requiredTypes.length > 0 ? s.requiredTypes.map((type) => ({ type, label: LABELS[type] })) : [],
         passwordRetryAfter: s.passwordRetryAfter,
         passwordConfirmationRequired: s.requirePassword && !s.passwordConfirmed,
+        enrollmentVerification: needsVerification(s) ? { email: s.enrollmentEmail ?? null } : null,
         nudge: s.factors.length === 0 && !s.mustEnroll ? { title: NUDGE.title, body: NUDGE.body } : null,
+        trustedBrowsers: s.trustBrowserDays === null ? null : s.trustedBrowsers,
         status: s.status,
         recoveryCodes: s.recoveryCodes,
         retryAfter: s.retryAfter,
         urls: urls.settings,
     };
+}
+
+/** Adding a method needs the account check: asked for, not passed, and no method yet. */
+function needsVerification(s: State): boolean {
+    return s.enrollmentEmail !== undefined && !s.enrollmentVerified && s.factors.length === 0;
 }
 
 /** Seconds until a new code can follow one used to verify (120s here), or null. */
@@ -289,6 +405,9 @@ export function challengeProps(s: State) {
         hasRecoveryCodes: s.recoveryCodesRemaining > 0,
         status: s.status,
         retryAfter: s.retryAfter,
+        // null when off (the package also withholds it from enforced users unless trusted_browsers.allow_enforced).
+        trustBrowser: s.trustBrowserDays === null ? null : { days: s.trustBrowserDays },
+        renew: s.renew,
         urls: urls.challenge,
     };
 }

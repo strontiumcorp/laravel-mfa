@@ -10,6 +10,7 @@ use StrontiumCorp\LaravelMfa\Events\ChallengeRequired;
 use StrontiumCorp\LaravelMfa\Events\EnrollmentRequired;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Support\RequestContext;
+use StrontiumCorp\LaravelMfa\Support\TrustedBrowsers;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -21,6 +22,8 @@ use Symfony\Component\HttpFoundation\Response;
  *  - session already verified                   → pass, no queries (a session
  *    flag holds enforced users who still lack a required factor type)
  *  - user has no factors and is not enforced    → pass, one cached lookup
+ *  - unverified, but a browser they trusted     → verified, one query (only
+ *    when the browser sends that user's trusted-browser cookie)
  */
 class EnsureMfaVerified
 {
@@ -28,9 +31,9 @@ class EnsureMfaVerified
     private const CHALLENGE_ROUTES = ['mfa.challenge', 'mfa.challenge.*'];
 
     /** Reachable by users who must enroll (no factor yet, or no required type). */
-    private const ENROLLMENT_ROUTES = ['mfa.settings', 'mfa.factors.*', 'mfa.recovery-codes.*', 'mfa.password.confirm'];
+    private const ENROLLMENT_ROUTES = ['mfa.settings', 'mfa.factors.*', 'mfa.recovery-codes.*', 'mfa.password.confirm', 'mfa.enrollment-verification.*'];
 
-    public function __construct(private readonly Mfa $mfa) {}
+    public function __construct(private readonly Mfa $mfa, private readonly TrustedBrowsers $trustedBrowsers) {}
 
     public function handle(Request $request, Closure $next): Response
     {
@@ -52,7 +55,7 @@ class EnsureMfaVerified
 
             $user = $identity->user();
 
-            if ($user instanceof MultiFactorAuthenticatable && ($denied = $this->check($request, $user))) {
+            if ($user instanceof MultiFactorAuthenticatable && ($denied = $this->check($request, $user, $identity->guard))) {
                 return $denied;
             }
         }
@@ -61,9 +64,17 @@ class EnsureMfaVerified
     }
 
     /** A denial response if this unverified user may not proceed, else null. */
-    private function check(Request $request, MultiFactorAuthenticatable $user): ?Response
+    private function check(Request $request, MultiFactorAuthenticatable $user, string $guard): ?Response
     {
         if ($this->mfa->hasConfirmedFactors($user)) {
+            // A browser the user trusted after an earlier challenge (only
+            // looked up when it sends that user's cookie).
+            if ($this->trustedBrowsers->attempt($request, $user, $guard)) {
+                return $this->mfa->mustEnrollAfterVerification($request->session(), $guard, $user->getAuthIdentifier())
+                    ? $this->requireEnrollment($request, $user)
+                    : null;
+            }
+
             if ($this->routeIs($request, self::CHALLENGE_ROUTES)) {
                 return null;
             }

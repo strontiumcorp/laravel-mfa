@@ -24,6 +24,8 @@ enum FailureReason: string
     case DeliveryFailed = 'delivery_failed';
     case InvalidRecoveryCode = 'invalid_recovery_code';
     case InvalidPassword = 'invalid_password';
+    case EnrollmentLinkRequired = 'enrollment_link_required';
+    case InvalidLink = 'invalid_link';
 
     /**
      * The end-user message. $retryAfter (seconds), when known, says when to
@@ -46,6 +48,8 @@ enum FailureReason: string
             self::DestinationNotAllowed => "We can't send verification codes to this destination.",
             self::DeliveryFailed => 'We could not send your code. Please try again.',
             self::InvalidPassword => 'The provided password is incorrect.',
+            self::EnrollmentLinkRequired => 'Ask an administrator for a setup link to add your first sign-in method.',
+            self::InvalidLink => 'This setup link is not valid. Ask for a new one.',
         };
     }
 

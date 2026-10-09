@@ -3,6 +3,7 @@
 namespace StrontiumCorp\LaravelMfa;
 
 use Illuminate\Auth\Events\Logout;
+use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Contracts\Foundation\CachesConfiguration;
@@ -19,13 +20,16 @@ use StrontiumCorp\LaravelMfa\Contracts\MfaActivity;
 use StrontiumCorp\LaravelMfa\Contracts\SmsSender;
 use StrontiumCorp\LaravelMfa\Http\Middleware\EnsureMfaVerified;
 use StrontiumCorp\LaravelMfa\Listeners\ForgetMfaStateOnLogout;
+use StrontiumCorp\LaravelMfa\Listeners\ForgetTrustedBrowsers;
 use StrontiumCorp\LaravelMfa\Listeners\LogMfaActivity;
+use StrontiumCorp\LaravelMfa\Listeners\NotifyAccountOwner;
 use StrontiumCorp\LaravelMfa\Listeners\RecordMfaMetrics;
 use StrontiumCorp\LaravelMfa\Listeners\WriteMfaAuditLog;
 use StrontiumCorp\LaravelMfa\Metrics\LogMetricsRecorder;
 use StrontiumCorp\LaravelMfa\Metrics\NullMetricsRecorder;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use StrontiumCorp\LaravelMfa\Models\MfaOtpCode;
+use StrontiumCorp\LaravelMfa\Models\MfaTrustedBrowser;
 use StrontiumCorp\LaravelMfa\Sms\SmsManager;
 use StrontiumCorp\LaravelMfa\Support\CodeHasher;
 use StrontiumCorp\LaravelMfa\Support\ConfigMerge;
@@ -174,6 +178,9 @@ class MfaServiceProvider extends ServiceProvider
         Event::listen(MfaActivity::class, LogMfaActivity::class);
         Event::listen(MfaActivity::class, WriteMfaAuditLog::class);
         Event::listen(MfaActivity::class, RecordMfaMetrics::class);
+        Event::listen(array_keys(NotifyAccountOwner::EVENTS), NotifyAccountOwner::class);
+        Event::listen(array_keys(ForgetTrustedBrowsers::EVENTS), ForgetTrustedBrowsers::class);
+        Event::listen([PasswordReset::class, 'eloquent.updated: '.Mfa::userModel()], [ForgetTrustedBrowsers::class, 'passwordChanged']);
         Event::listen(Logout::class, ForgetMfaStateOnLogout::class);
     }
 
@@ -188,6 +195,7 @@ class MfaServiceProvider extends ServiceProvider
             Console\DoctorCommand::class,
             Console\StatusCommand::class,
             Console\ResetCommand::class,
+            Console\EnrollmentLinkCommand::class,
         ]);
 
         AboutCommand::add('MFA', fn () => [
@@ -206,7 +214,7 @@ class MfaServiceProvider extends ServiceProvider
     {
         $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
             if (config('mfa.prune.schedule')) {
-                $schedule->command('model:prune', ['--model' => [MfaOtpCode::class, MfaAuditLog::class]])
+                $schedule->command('model:prune', ['--model' => [MfaOtpCode::class, MfaAuditLog::class, MfaTrustedBrowser::class]])
                     ->daily()
                     ->onOneServer()
                     ->withoutOverlapping()

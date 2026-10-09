@@ -38,7 +38,7 @@ class ResetCommand extends Command
 
         $user->mfaFactors()->get()->each(function (MfaFactor $factor) use ($user) {
             $factor->delete();
-            event(new FactorDisabled($user, $factor->type, null, ['factor_id' => $factor->id, 'via' => 'console:mfa:reset']));
+            event(new FactorDisabled($user, $factor->type, null, ['factor_id' => $factor->id, 'via' => 'console:mfa:reset', 'by_administrator' => true]));
         });
 
         $recoveryCodes->clear($user);

@@ -32,6 +32,15 @@ describe('MfaEnableNudge', () => {
         expect(screen.getByRole('button', { name: 'Dismiss for today' })).toBeInTheDocument();
     });
 
+    it('names the × button after closeLabel when given', async () => {
+        const onDismiss = vi.fn();
+        render(<MfaEnableNudge {...props} closeLabel="Dismiss" onDismiss={onDismiss} />);
+
+        await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+        expect(onDismiss).toHaveBeenCalledOnce();
+    });
+
     it('does not take the focus', () => {
         render(<MfaEnableNudge {...props} />);
 

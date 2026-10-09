@@ -9,7 +9,7 @@ import MfaSettingsCard from '../stubs/inertia-react/components/settings-card';
 import MfaChallenge from '../stubs/inertia-react/pages/challenge';
 import { mfaApiKeyNoticeProps, mfaSettingsCardProps, useMfaNudge, type MfaContext } from '../stubs/inertia-react/pages/mfa-context';
 import MfaSettings from '../stubs/inertia-react/pages/settings';
-import { CODE, NUDGE, PASSWORD, RECOVERY_CODE, challengeProps, settingsProps, urls, type State } from './backend';
+import { CODE, NUDGE, PASSWORD, RECOVERY_CODE, TRUST_REMINDER, challengeProps, settingsProps, urls, type State } from './backend';
 import { boot, Link, toasts, useBackendState } from './inertia';
 import { scenarios } from './scenarios';
 
@@ -33,6 +33,13 @@ function contextFor(s: State): MfaContext {
         urls: { settings: '/mfa/settings', challenge: '/mfa/challenge' },
         // As Mfa::context() decides it, for an app page (never shown on the MFA pages).
         nudge: { show: s.factors.length === 0 && !s.mustEnroll && !s.nudgeDismissed, ...NUDGE, dismissUrl: urls.nudgeDismiss },
+        trustReminder: {
+            show: s.factors.length > 0 && s.trustEndsInMinutes !== null && s.trustEndsInMinutes <= 12 * 60 && !s.trustReminderDismissed,
+            expiresAt: s.trustEndsInMinutes === null ? null : new Date(Date.now() + s.trustEndsInMinutes * 60_000).toISOString(),
+            ...TRUST_REMINDER,
+            verifyUrl: urls.trustReminderVerify,
+            dismissUrl: urls.trustReminderDismiss,
+        },
     };
 }
 

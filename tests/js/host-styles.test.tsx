@@ -59,6 +59,8 @@ const has = (tag: string, classes: string[]) => classes.filter((c) => !new RegEx
 
 // What a visible text field must set itself: everything the forms plugin's base layer sets.
 const FIELD = ['appearance-none', 'border', 'rounded-', 'px-', 'py-', 'bg-white', 'dark:bg-', 'text-gray-', 'dark:text-', 'placeholder:text-', 'shadow-none', 'focus:outline-none', 'focus:ring-', 'focus:border-', 'dark:focus:ring-', 'dark:focus:border-'];
+// A checkbox draws its own box, check and focus ring in both themes (the forms plugin would make it blue).
+const CHECKBOX = ['appearance-none', 'border', 'rounded', 'bg-white', 'bg-none', 'dark:bg-', 'checked:bg-', 'checked:bg-none', 'dark:checked:bg-', 'text-gray-', 'dark:text-', 'shadow-none', 'focus:outline-none', 'focus:ring-0', 'focus:ring-offset-0', 'focus-visible:ring-', 'dark:focus-visible:ring-'];
 // The challenge's invisible code input: nothing may draw a frame around the boxes.
 const OVERLAY = ['appearance-none', 'border-0', 'p-0', 'bg-transparent', 'shadow-none', 'ring-0', 'focus:border-0', 'focus:shadow-none', 'focus:outline-none', 'focus:ring-0', 'focus:ring-offset-0'];
 
@@ -98,7 +100,7 @@ describe('host form styles', () => {
 
     it.each(inputs)('$name has a type and sets its own look', ({ tag }) => {
         expect(tag).toMatch(/\stype=/);
-        expect(has(tag, tag.includes('bg-transparent') ? OVERLAY : FIELD)).toEqual([]);
+        expect(has(tag, tag.includes('type="checkbox"') ? CHECKBOX : tag.includes('bg-transparent') ? OVERLAY : FIELD)).toEqual([]);
     });
 
     it.each(buttons)('$name has a type', ({ tag }) => {

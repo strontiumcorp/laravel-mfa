@@ -15,7 +15,7 @@ use RuntimeException;
  */
 final class CodeHasher
 {
-    /** @var list<string> */
+    /** @var non-empty-list<string> */
     private array $keys;
 
     /** @param list<string> $rawKeys current key first */
@@ -47,7 +47,7 @@ final class CodeHasher
         return $this->hashWith($this->keys[0], $code, $scope);
     }
 
-    /** @return list<string> hashes under the current and every previous key */
+    /** @return non-empty-list<string> hashes under the current key first, then every previous key */
     public function candidates(string $code, string $scope = ''): array
     {
         return array_map(fn (string $key): string => $this->hashWith($key, $code, $scope), $this->keys);

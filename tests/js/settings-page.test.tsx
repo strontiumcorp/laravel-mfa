@@ -12,6 +12,10 @@ const urls = {
     destroy: '/mfa/factors/__ID__',
     recoveryCodes: '/mfa/recovery-codes',
     confirmPassword: '/mfa/confirm-password',
+    sendEnrollmentCode: '/mfa/enrollment-verification/send',
+    verifyEnrollmentCode: '/mfa/enrollment-verification',
+    forgetTrustedBrowser: '/mfa/trusted-browsers/__ID__',
+    forgetTrustedBrowsers: '/mfa/trusted-browsers',
 };
 const passwordRequired = { password_confirmation_required: 'Please confirm your password to continue.' };
 const email = { id: 7, type: 'email' as const, type_label: 'Email', label: null, destination: 'j***@example.com', last_used_at: null };
@@ -29,9 +33,11 @@ const props = {
     retryAfter: null,
     passwordRetryAfter: null,
     passwordConfirmationRequired: false,
+    enrollmentVerification: null,
     mustEnroll: false,
     requiredTypes: [],
     nudge: null,
+    trustedBrowsers: null,
     status: null,
     urls,
 };
@@ -278,6 +284,122 @@ describe('settings page', () => {
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
 
+    describe("confirming it's the account before the first method", () => {
+        const check = { email: 'j***@example.com' };
+        const verificationRequired = { enrollment_verification_required: "Confirm it's you before adding your first sign-in method." };
+        const first = { ...props, factors: [], mustEnroll: true, enrollmentVerification: check };
+
+        it('emails a code and checks it, then gets an authenticator app its key', async () => {
+            render(<MfaSettings {...first} />);
+
+            await userEvent.click(screen.getByRole('button', { name: 'Set up Authenticator app' }));
+            expect(inertia.requests).toEqual([]);
+            const dialog = screen.getByRole('dialog', { name: "Confirm it's you" });
+            expect(dialog).toHaveTextContent('j***@example.com');
+            await userEvent.click(within(dialog).getByRole('button', { name: 'Email me a code' }));
+            await userEvent.type(within(dialog).getByRole('textbox', { name: 'Code from the email' }), '123456{Enter}');
+
+            expect(inertia.requests).toEqual([
+                { method: 'post', url: urls.sendEnrollmentCode, data: {} },
+                { method: 'post', url: urls.verifyEnrollmentCode, data: { code: '123456' } },
+                { method: 'post', url: urls.store, data: { type: 'totp' } },
+            ]);
+        });
+
+        it('asks for the password first, then the check, then the setup', async () => {
+            render(<MfaSettings {...first} passwordConfirmationRequired />);
+
+            await userEvent.click(screen.getByRole('button', { name: 'Set up Authenticator app' }));
+            expect(screen.getByText('Authenticator app · Step 1 of 5')).toBeInTheDocument();
+            await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
+            expect(screen.getByRole('dialog', { name: "Confirm it's you" })).toBeInTheDocument();
+            await userEvent.click(screen.getByRole('button', { name: 'Email me a code' }));
+            await userEvent.type(screen.getByRole('textbox', { name: 'Code from the email' }), '123456{Enter}');
+
+            expect(inertia.requests.map((r) => r.url)).toEqual([urls.confirmPassword, urls.sendEnrollmentCode, urls.verifyEnrollmentCode, urls.store]);
+        });
+
+        it('shows why a send or a code failed, and stays on the check', async () => {
+            inertia.respondWith({ code: 'Please wait before requesting another code.' });
+            const { rerender } = render(<MfaSettings {...first} />);
+
+            await userEvent.click(screen.getByRole('button', { name: 'Set up SMS' }));
+            await userEvent.click(screen.getByRole('button', { name: 'Email me a code' }));
+            expect(screen.getByRole('alert')).toHaveTextContent('Please wait before requesting another code.');
+            expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+
+            await userEvent.click(screen.getByRole('button', { name: 'Email me a code' }));
+            rerender(<MfaSettings {...first} retryAfter={60} />);
+            expect(screen.getByRole('button', { name: 'Resend in 1:00' })).toBeDisabled();
+
+            inertia.respondWith({ code: 'The provided code is invalid.' });
+            await userEvent.type(screen.getByRole('textbox', { name: 'Code from the email' }), '000000{Enter}');
+            expect(screen.getByRole('alert')).toHaveTextContent('The provided code is invalid.');
+            expect(screen.getByRole('dialog', { name: "Confirm it's you" })).toBeInTheDocument();
+            expect(inertia.requests.map((r) => r.url)).toEqual([urls.sendEnrollmentCode, urls.sendEnrollmentCode, urls.verifyEnrollmentCode]);
+        });
+
+        it('goes on to the number once checked', async () => {
+            const { rerender } = render(<MfaSettings {...first} />);
+
+            await userEvent.click(screen.getByRole('button', { name: 'Set up SMS' }));
+            await userEvent.click(screen.getByRole('button', { name: 'Email me a code' }));
+            await userEvent.type(screen.getByRole('textbox', { name: 'Code from the email' }), '123456{Enter}');
+            // The mock keeps props as given: the server's next props no longer ask.
+            rerender(<MfaSettings {...first} enrollmentVerification={null} />);
+
+            expect(screen.getByRole('dialog', { name: 'Add a phone number' })).toBeInTheDocument();
+            expect(screen.getByText('SMS · Step 2 of 4')).toBeInTheDocument();
+            expect(inertia.requests.map((r) => r.url)).toEqual([urls.sendEnrollmentCode, urls.verifyEnrollmentCode]);
+        });
+
+        it('says to ask an administrator when no code can be emailed', async () => {
+            render(<MfaSettings {...first} enrollmentVerification={{ email: null }} />);
+
+            await userEvent.click(screen.getByRole('button', { name: 'Set up Authenticator app' }));
+
+            expect(screen.getByRole('dialog', { name: "Confirm it's you" })).toHaveTextContent('Ask an administrator for a setup link to add your first sign-in method.');
+            expect(screen.queryByRole('button', { name: 'Email me a code' })).not.toBeInTheDocument();
+            expect(inertia.requests).toEqual([]);
+        });
+
+        it('brings the check back when adding answers 423, then sends the same number again', async () => {
+            inertia.respondWith(verificationRequired);
+            const { rerender } = render(<MfaSettings {...props} factors={[]} />);
+
+            await userEvent.click(screen.getByRole('button', { name: 'Set up SMS' }));
+            await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+15555550100{Enter}');
+            // The 423 comes back with fresh props that ask for the check.
+            rerender(<MfaSettings {...props} factors={[]} enrollmentVerification={check} />);
+            expect(screen.getByRole('dialog', { name: "Confirm it's you" })).toBeInTheDocument();
+            await userEvent.click(screen.getByRole('button', { name: 'Email me a code' }));
+            await userEvent.type(screen.getByRole('textbox', { name: 'Code from the email' }), '123456{Enter}');
+
+            expect(inertia.requests).toEqual([
+                { method: 'post', url: urls.store, data: { type: 'sms', destination: '+15555550100' } },
+                { method: 'post', url: urls.sendEnrollmentCode, data: {} },
+                { method: 'post', url: urls.verifyEnrollmentCode, data: { code: '123456' } },
+                { method: 'post', url: urls.store, data: { type: 'sms', destination: '+15555550100' } },
+            ]);
+        });
+
+        it('brings the check back when confirming answers 423, then returns to the code', async () => {
+            const pendingSms = { ...email, id: 9, type: 'sms' as const, type_label: 'SMS', destination: '+*******0100' };
+            inertia.respondWith(verificationRequired);
+            const { rerender } = render(<MfaSettings {...props} factors={[]} pending={[pendingSms]} />);
+
+            await userEvent.type(screen.getByRole('textbox', { name: 'Verification code' }), '222222{Enter}');
+            rerender(<MfaSettings {...props} factors={[]} pending={[pendingSms]} enrollmentVerification={check} />);
+            expect(screen.getByRole('dialog', { name: "Confirm it's you" })).toBeInTheDocument();
+            await userEvent.click(screen.getByRole('button', { name: 'Email me a code' }));
+            await userEvent.type(screen.getByRole('textbox', { name: 'Code from the email' }), '123456{Enter}');
+            rerender(<MfaSettings {...props} factors={[]} pending={[pendingSms]} />);
+
+            expect(screen.getByRole('dialog', { name: 'Enter the code' })).toBeInTheDocument();
+            expect(inertia.requests.map((r) => r.url)).toEqual(['/mfa/factors/9/confirm', urls.sendEnrollmentCode, urls.verifyEnrollmentCode]);
+        });
+    });
+
     it('shows the nudge copy as a notice when the server sends it', () => {
         const { rerender } = render(<MfaSettings {...props} factors={[]} nudge={{ title: 'Protect your account', body: 'Turn on two-factor sign-in now.' }} />);
 
@@ -299,5 +421,38 @@ describe('settings page', () => {
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
         expect(screen.getAllByRole('button', { name: 'Continue setup' })).toHaveLength(2);
     });
-});
 
+    describe('trusted browsers', () => {
+        const browsers = [
+            { id: 4, label: 'Chrome on Mac', created_at: '2026-10-01T10:00:00Z', last_used_at: null, expires_at: '2026-10-31T10:00:00Z', current: true },
+            { id: 3, label: 'Firefox on Windows', created_at: '2026-09-20T10:00:00Z', last_used_at: null, expires_at: '2026-10-20T10:00:00Z', current: false },
+        ];
+
+        it('is hidden when the feature is off', () => {
+            render(<MfaSettings {...props} />);
+
+            expect(screen.queryByRole('heading', { name: 'Trusted browsers' })).not.toBeInTheDocument();
+        });
+
+        it('says when there are none', () => {
+            render(<MfaSettings {...props} trustedBrowsers={[]} />);
+
+            expect(screen.getByRole('heading', { name: 'Trusted browsers' })).toBeInTheDocument();
+            expect(screen.getByText(/None yet\./)).toBeInTheDocument();
+        });
+
+        it('forgets one browser, then all, at their DELETE URLs', async () => {
+            render(<MfaSettings {...props} trustedBrowsers={browsers} />);
+
+            await userEvent.click(screen.getByRole('button', { name: 'Forget Firefox on Windows' }));
+            await userEvent.click(screen.getByRole('button', { name: 'Forget all' }));
+
+            expect(inertia.requests).toEqual([
+                { method: 'delete', url: '/mfa/trusted-browsers/3', data: null },
+                { method: 'delete', url: urls.forgetTrustedBrowsers, data: null },
+            ]);
+            // No password asked: the buttons are free again.
+            expect(screen.getByRole('button', { name: 'Forget this browser' })).toBeEnabled();
+        });
+    });
+});

@@ -138,6 +138,17 @@ it('still honours the v0.1 "enforce" key, and mfa:doctor says to move it', funct
     expect(Mfa::mustEnroll($this->makeUser(['is_admin' => true])))->toBeTrue();
 });
 
+it('makes mfa:doctor warn when enforced users could enroll with only the password', function () {
+    config(['session.driver' => 'database', 'mfa.enforcement.roles' => ['admin']]);
+    $this->artisan('mfa:doctor')->doesntExpectOutputToContain('Enrollment verification is off');
+
+    config(['mfa.enrollment_verification.required_for' => null]);
+    $this->artisan('mfa:doctor')->expectsOutputToContain('Enrollment verification is off');
+
+    config(['mfa.enrollment_verification.required_for' => 'enforced', 'mfa.enrollment_verification.email' => false]);
+    $this->artisan('mfa:doctor')->expectsOutputToContain('administrator links only');
+});
+
 it('makes mfa:doctor fail on an unknown required type and warn when none is enabled', function () {
     config(['session.driver' => 'database']);
 

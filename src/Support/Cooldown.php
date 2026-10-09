@@ -35,4 +35,15 @@ final class Cooldown
         // Equivalent mutant(s): the int return type coerces the integral result.
         return (int) min($max, $base * $multiplier ** ($sends - 1)); // @pest-mutate-ignore: RemoveIntegerCast
     }
+
+    /**
+     * after(), but never longer than the code's lifetime: once the code is
+     * out of date, a new one may be sent at once.
+     *
+     * @param  int|array{base?: int, multiplier?: int|float, max?: int}  $config
+     */
+    public static function capped(int $sends, int|array $config, int $ttl): int
+    {
+        return min(self::after($sends, $config), $ttl);
+    }
 }

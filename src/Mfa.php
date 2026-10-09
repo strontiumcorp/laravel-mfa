@@ -29,14 +29,18 @@ use StrontiumCorp\LaravelMfa\Exceptions\ImpersonationNotAllowed;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForRoles;
 use StrontiumCorp\LaravelMfa\Sms\SmsManager;
+use StrontiumCorp\LaravelMfa\Support\EnrollmentLinks;
 use StrontiumCorp\LaravelMfa\Support\MfaContext;
 use StrontiumCorp\LaravelMfa\Support\Nudge;
 use StrontiumCorp\LaravelMfa\Support\RequestContext;
 use StrontiumCorp\LaravelMfa\Support\SessionIdentity;
+use StrontiumCorp\LaravelMfa\Support\TrustedBrowsers;
 use StrontiumCorp\LaravelMfa\Testing\FakeSmsSender;
 use StrontiumCorp\LaravelMfa\Testing\FixedCodeGenerator;
 
 /**
+ * @phpstan-import-type TrustReminder from MfaContext
+ *
  * Facade root (StrontiumCorp\LaravelMfa\Facades\Mfa).
  *
  * Holds no per-request state — the session/request are always passed in —
@@ -533,6 +537,21 @@ class Mfa
     }
 
     /**
+     * A one-time link that lets this user add their first factor without an
+     * email code (enrollment_verification), for an administrator to hand
+     * over on a channel they trust: for users without an email address, or
+     * when email codes are off because the mailbox can't be trusted. Valid
+     * for $minutes (enrollment_verification.link_ttl by default), only when
+     * opened in the user's own signed-in session, and only until their
+     * password changes. Emits EnrollmentLinkIssued (via "app"), which emails
+     * the owner (notifications.events.enrollment_link_issued).
+     */
+    public function enrollmentLink(MultiFactorAuthenticatable $user, ?int $minutes = null): string
+    {
+        return $this->live()->make(EnrollmentLinks::class)->issue($user, $minutes);
+    }
+
+    /**
      * MFA state for the frontend (see Support\MfaContext), about the user who
      * logged in to this session. Cheap: one cached lookup for unverified users.
      */
@@ -577,7 +596,36 @@ class Mfa
                 ...$this->nudgeCopy(),
                 'dismissUrl' => $routes ? route('mfa.nudge.dismiss') : null,
             ],
+            trustReminder: $this->trustReminder($request, $routes, ($user['verified'] ?? false) ? $identity : null),
         );
+    }
+
+    /**
+     * The renewal reminder for a trusted browser (trusted_browsers.reminder),
+     * for a verified session on one whose trust ends soon, off MFA's own
+     * pages. Read from the session: no query.
+     *
+     * @return TrustReminder
+     */
+    private function trustReminder(Request $request, bool $routes, ?SessionIdentity $identity): array
+    {
+        $model = $identity?->user();
+        $due = $routes && $identity !== null && $model instanceof MultiFactorAuthenticatable
+            && ! ($request->route() !== null && $request->routeIs('mfa.*'))
+            ? $this->live()->make(TrustedBrowsers::class)->reminderDue($request, $model, $identity->guard)
+            : null;
+        $text = fn (string $key): string => (string) __((string) $this->config->get("mfa.trusted_browsers.reminder.{$key}"));
+
+        return [
+            'show' => $due !== null,
+            'expiresAt' => $due?->toIso8601String(),
+            'title' => $text('title'),
+            'body' => $text('body'),
+            'button' => $text('button'),
+            'dismissLabel' => $text('dismiss_label'),
+            'verifyUrl' => $routes ? route('mfa.challenge', ['renew' => 1]) : null,
+            'dismissUrl' => $routes ? route('mfa.trusted-browsers.reminder.dismiss') : null,
+        ];
     }
 
     /**
@@ -722,7 +770,11 @@ class Mfa
         return self::SESSION_PREFIX.'.'.$guard.'.'.$id; // @pest-mutate-ignore: ConcatRemoveRight
     }
 
-    private function guardFor(Request $request, Authenticatable $user): string
+    /**
+     * The guard this user is logged in with in this request (the first MFA
+     * guard if none matches).
+     */
+    public function guardFor(Request $request, Authenticatable $user): string
     {
         $id = (string) $user->getAuthIdentifier();
         $pending = $this->sessionIdentity($request);

@@ -13,6 +13,9 @@ Everything is in `config/mfa.php`, with comments. This page covers the parts tha
 | `MFA_UI_DRIVER` | `inertia` | `json` for other frontends; see [json-mode.md](json-mode.md). |
 | `MFA_LOG_CHANNEL`, `MFA_LOG_LEVEL` | default channel, `info` | Where MFA events are logged, and the lowest level logged. |
 | `MFA_NUDGE_ENABLED` | `true` | The "turn on two-factor" nudge for users without a method; see [Nudge](#nudge). |
+| `MFA_ENROLLMENT_VERIFICATION` | `enforced` | Who must prove ownership (an email code or an admin link) before their first factor: `enforced`, `everyone` or `null`; see [Enrollment verification](#enrollment-verification). |
+| `MFA_TRUSTED_BROWSERS` | `false` | Offer "Don't ask again on this browser for N days" on the challenge; see [Trusted browsers](#trusted-browsers). |
+| `MFA_NOTIFICATIONS_ENABLED` | `true` | Security emails to the account owner; see [Security notifications](#security-notifications). |
 
 **The name in authenticator apps.** `factors.totp.issuer` (`MFA_TOTP_ISSUER`, default `APP_NAME`) is what authenticator apps show for the account. Outside production the environment is added in brackets ("Acme (staging)", "Acme (local)"), so a test account never looks like the real one; set `factors.totp.issuer_environment` to `false` to turn that off. It applies to apps added from then on: an existing entry keeps the name it was added with. The downloaded recovery codes file is named after the same name (`acme-staging-recovery-codes-…`).
 
@@ -116,6 +119,46 @@ In host-app tests, `$this->actingAsMfaVerified($user)->withConfirmedPassword()` 
 - A published config that still has `'confirm_middleware' => ['password.confirm']` keeps sending users to the app's confirm page, and works as before. Set it to `[]` to use MFA's prompt.
 - A published config with `'confirm_middleware' => []` to turn confirmation **off** (social login) now asks for the password. Add `'password_confirmation' => false`, or exempt password-less users with `password_confirmation_policy`.
 
+## Enrollment verification
+
+Before an account's **first** factor is added, the session must prove it owns the account beyond the password. Without this, someone holding only a leaked password could sign in as a user who must enroll (`enforcement.roles` / `.policy`), add their own authenticator app on the settings page, and own the account: the real owner would then be challenged for a factor they don't have. The password prompt doesn't stop them, because they have the password.
+
+```php
+'enrollment_verification' => [
+    'required_for' => env('MFA_ENROLLMENT_VERIFICATION', 'enforced'), // 'enforced' | 'everyone' | null
+    'email' => true,          // accept a code emailed to the account's address; false = admin links only
+    'link_ttl' => 1440,       // minutes an administrator's link stays valid
+    'notification' => \StrontiumCorp\LaravelMfa\Notifications\EnrollmentCodeNotification::class,
+],
+```
+
+| `required_for` | Who proves ownership before their first factor |
+|---|---|
+| `'enforced'` (default) | Users an enforcement rule applies to. They can reach nothing but the MFA settings page until they enroll, which is exactly what a password-only attacker would use. |
+| `'everyone'` | Every user adding a first factor. Also stops someone with the password from locking an opt-in owner out by adding a factor the owner doesn't have. Costs every user one email code on first setup. |
+| `null` / `false` | Nobody (v0.5 behaviour). `mfa:doctor` warns when enforcement is configured. |
+
+Users who already have a factor never need it: they passed MFA to reach the settings page. It is asked after the password confirmation, and only on the routes that add a factor (`POST mfa/factors`, and again at `POST mfa/factors/{id}/confirm`).
+
+**Two proofs are accepted:**
+
+1. **An email code** (`email => true`): the settings page says "we'll email a code to j\*\*\*@example.com" and the user enters it. The code goes to `getMfaEmail()` (the account's `email` by default), is bound to the browser session that asked for it, reuses the email factor's settings (`factors.email.length`, `ttl`, `max_attempts`, `resend_cooldown`), counts toward the verify rate limits, and toward the account's send caps (`rate_limit.send_per_hour`, `factors.email.send_per_day`, `rate_limit.confirmed_global_per_hour`), so it can't be used to flood the owner's inbox. The email also warns the owner: "Someone signed in to your account and is setting up two-factor sign-in… If this was not you, change your password now." So a password-only attempt is noticed even if nobody acts on the code. It is queued on the delivery queue (encrypted) when one is set, sent inline otherwise.
+2. **An administrator's link**, for users without an email address, or for everyone when the mailbox can't be trusted (`email => false`):
+
+   ```bash
+   php artisan mfa:enrollment-link jane@example.com --minutes=60
+   ```
+
+   or `Mfa::enrollmentLink($user, minutes: 60)` from your own admin screen. The link is signed, works once, only in that user's own signed-in session (a signed-out user is sent to log in first), and stops working when their password changes or after `link_ttl` minutes. Verify the person out of band and send it on a channel you trust: with the password, it is enough to set up two-factor. Issuing one fires `EnrollmentLinkIssued`.
+
+**If the email account is the thing that's compromised** (same password reused for the mailbox, say), an email code proves nothing: whoever has both can enroll. The owner still gets the code email and the "method added" notification (see [Security notifications](#security-notifications)), but in the same inbox. For roles where that matters, set `email => false` so only an administrator's link works, and treat that link like a password reset.
+
+The proof lasts for the session (logging out clears it). `EnrollmentVerificationRequired` (context `path`), `EnrollmentVerificationSent`, `EnrollmentVerified` (context `method`: `email` or `link`) and `EnrollmentLinkIssued` reach the log, the audit table and metrics; wrong codes and refused links are `VerificationFailed` with `stage` `enrollment_verification` / `enrollment_link` (reason `invalid_link` for links, with `problem`: `other_account`, `revoked` or `used`). `EnrollmentLinkIssued` carries `via` (`app` from `Mfa::enrollmentLink()`, `console:mfa:enrollment-link` from the command, which also sets `by_administrator`) and emails the owner.
+
+In host-app tests, `$this->loginWithSession($user)->withEnrollmentVerified($user)` (from `InteractsWithMfa`) skips it.
+
+**Upgrading from v0.5:** republish the settings page and `factor-setup-dialog` ([integration step 6](integration.md#6-frontend)); an older page can't show the new step. This is on by default for enforced users. An enforced user who hasn't enrolled yet now gets one email code before adding their first method. Users with a factor see no change. If your app's tests enroll an enforced user, add `withEnrollmentVerified($user)` (or fake notifications and enter the emailed code). To keep the old behaviour, set `MFA_ENROLLMENT_VERIFICATION=null`.
+
 ## Nudge
 
 Users who aren't required to use MFA can be asked to turn it on: a small floating card in the app's layout (`MfaEnableNudge`, [integration step 6](integration.md#6-frontend)), and the same title and body as a notice on the MFA settings page.
@@ -162,10 +205,46 @@ The challenge opens on the user's authenticator app when they have one (it is on
 SMS numbers must also match `factors.sms.allowed_calling_codes` and not `factors.sms.blocked_prefixes` (by default, premium-rate ranges behind `+1`). Also turn on your provider's geo-permissions and fraud protection.
 
 Events to act on:
-- `SuspiciousCodeRequests`: repeated login codes without a successful login, which usually means the password leaked. Notify the owner.
+- `SuspiciousCodeRequests`: repeated login codes without a successful login, which usually means the password leaked. The owner is emailed (see [Security notifications](#security-notifications)).
 - `SendingCircuitTripped` (critical): an app-wide limit was hit, once per window (at most hourly) for each: `scope` is `unconfirmed` (enrollments paused) or `confirmed` (login codes paused; authenticator apps and recovery codes still work). Alert on it.
 
 **Choosing `confirmed_global_per_hour`.** It stops SMS pumping through many accounts that each stay under the per-account cap (each account's number was confirmed once, so the enrollment limits no longer apply). It counts every email and SMS login code. The default, 1000 an hour (about 17 a minute, sustained, and twice the enrollment breaker), is far above what a login flow of a few thousand daily users sends, since a code goes out only for a new session of a user with an email or SMS method. Set it to about three times your busiest hour of login codes (the `challenge_sent` metric or audit rows); a refused send costs no quota.
+
+## Security notifications
+
+The account owner is emailed (at `getMfaEmail()`) when their two-factor setup changes, or when it looks like someone else has their password, so they notice an attack they didn't make:
+
+| Event | Email |
+|---|---|
+| `FactorEnabled` | "A sign-in method was added to your account" |
+| `FactorDisabled` | "A sign-in method was removed", or "An administrator removed …" after `mfa:reset` |
+| `RecoveryCodesGenerated` | "New recovery codes … your previous ones no longer work" (not the first set, which comes with the first method) |
+| `RecoveryCodeUsed` | "Someone signed in with one of your recovery codes", with how many are left |
+| `SuspiciousCodeRequests` | "Someone signed in with your password and keeps asking for sign-in codes" (at most one an hour, however many methods or caps raise it) |
+| `EnrollmentLinkIssued` | "A two-factor setup link was created for your account" ([enrollment verification](#enrollment-verification); "An administrator created…" from `mfa:enrollment-link`) |
+
+Each says what happened, when (in `app.timezone`) and from which IP address, and never contains a code, a secret or the destination. They are on by default:
+
+```php
+'notifications' => [
+    'enabled' => env('MFA_NOTIFICATIONS_ENABLED', true),
+    'events' => [
+        'factor_enabled' => true,
+        'factor_disabled' => true,
+        'recovery_codes_generated' => true,
+        'recovery_code_used' => true,
+        'suspicious_code_requests' => true,
+        'enrollment_link_issued' => true,
+    ],
+    'notification' => \StrontiumCorp\LaravelMfa\Notifications\SecurityAlertNotification::class,
+],
+```
+
+They go out like codes: queued on the delivery queue (`delivery.queue` / `delivery.queue_connection`) when one is set, inline otherwise, so they never wait on a queue nobody works. A failing send is reported and never blocks the request. To change the email, point `notification` at your own class: it receives the event's name (the keys above) and an array of details (`factor`, the method's label; `ip`; `occurred_at`, ISO 8601; `by_administrator`; `remaining`, for `recovery_code_used`). Extend `SecurityAlertNotification` to keep the queueing, or implement `ShouldQueue` yourself; a connection or queue your class sets itself is kept. To send through another channel as well, listen to the events directly.
+
+Users without an email address get none. Changes made while impersonating are reported to the impersonated user, like any other.
+
+**Upgrading from v0.5:** owners now get these emails. Check that the mailer works in each environment (`mfa:doctor` warns about the `log` and `array` mailers in production), and turn off any you don't want. If you already notify on `SuspiciousCodeRequests` yourself, set `suspicious_code_requests` to `false` to avoid sending two.
 
 ## SMS providers
 
@@ -223,15 +302,73 @@ php artisan mfa:status 42 --flow=3f2c...           # one login attempt
 php artisan mfa:reset jane@example.com             # locked-out user; verify their identity first
 ```
 
+## Trusted browsers
+
+"Don't ask again on this browser for 30 days": an opt-in checkbox on the challenge. The user still signs in with their password (or is logged back in by remember-me); only the MFA step is skipped, on that browser, for that user, until it expires. Anyone else signing in on the same browser is still asked.
+
+```php
+'trusted_browsers' => [
+    'enabled' => env('MFA_TRUSTED_BROWSERS', false),
+    'days' => 30,
+    'allow_enforced' => false,   // offer it to users enforcement applies to (admins)?
+    'cookie' => 'mfa_trusted',   // cookie name prefix
+],
+```
+
+- **What is stored.** The browser gets an http-only cookie (per guard and user, using the session cookie's path, domain, `secure` and `same_site`) holding a random token. The `mfa_trusted_browsers` table keeps only a keyed hash of it, a keyed hash of the user's password hash, a label from the user agent ("Chrome on Mac"), and when it was added, last used and expires. Rows go with the user and are pruned daily after they expire.
+- **When it ends**, besides expiry: the password changes (at once: on Laravel's `PasswordReset` event and whenever the user model, exactly `Mfa::userModel()`, not a subclass, is saved with a new password; a password changed some other way stops counting on the browser's next use). Laravel's rehash on login (`hash.rehash_on_login`, on by default since Laravel 11) counts too: after you change the hashing cost, each user's trusted browsers end at their next sign-in; a sign-in method is added or removed (`mfa:reset` included); a recovery code is used (often a lost device); the user forgets it on the settings page (one browser, or all of them); or the feature is turned off. Logging out does **not** end it: that's the point.
+- **Key rotation.** The cookie's name and token hashes are keyed from `APP_KEY`, with `APP_PREVIOUS_KEYS` honoured, so rotating the key with the old one listed keeps browsers trusted.
+- **Never offered** after signing in with a recovery code, or to enforced users unless `allow_enforced` is on. Turning `allow_enforced` off later makes their existing trust stop counting.
+- **The trade-off.** A trusted browser plus the password is enough to sign in, so stealing the cookie from that browser skips the second factor. That is why it's off by default and opt-in per sign-in. For admins, weigh a shorter `days` before turning on `allow_enforced`.
+- **A reminder before it ends.** Trust is checked when a new session starts, so when it has run out, the next sign-in (say, after lunch, once remember-me logs the user back in) asks for the code again. To avoid that surprise mid-task, in the last `reminder.hours` (12) of a browser's trust the nudge card (`MfaEnableNudge`, [integration step 6](integration.md#6-frontend)) says "Two-factor check coming up … This browser will ask for your sign-in code again in 5 hours." **Verify now** opens the challenge early (`/mfa/challenge?renew=1`), with "don't ask again" already ticked, and returns to the page the user was on; the browser is then trusted for another `days`. **Later** hides it for the rest of the session. It shows only on a verified session running on that browser, never on MFA's own pages, and costs no query (the expiry is kept in the session). `reminder.hours => 0` turns it off; the copy (`reminder.title`, `body` with `:when`, `button`, `dismiss_label`) goes through `__()`. Opening `?renew=1` on a session that isn't on a trusted browser just redirects as before, so it can't be used to re-trust without the code.
+- **Cost.** Nothing for verified sessions and for browsers without the cookie. A browser that sends one costs one indexed query, once, when its new session starts.
+- **Events.** `BrowserTrusted` (context `trusted_browser_id`, `label`, `expires_at`); signing in on one is `VerificationSucceeded` with `via: trusted_browser`; `TrustedBrowsersForgotten` (context `count`, `cause`: `settings`, `factor_enabled`, `factor_disabled`, `recovery_code_used` or `password_changed`). `mfa:status` shows how many a user has.
+
+**Upgrading:** it adds a migration (`mfa_trusted_browsers`); run `php artisan migrate`. Apps that published the migrations (`--tag=mfa-migrations`, or `Mfa::ignoreMigrations()`) publish the new one too. To offer it, set `MFA_TRUSTED_BROWSERS=true` and republish the challenge and settings pages with their components ([integration step 6](integration.md#6-frontend)).
+
+## Sessions, remember-me and re-challenges
+
+Verification is stored in the session, so it lasts exactly as long as the session does. Then the user is asked again:
+
+| What happened | Challenged again? |
+|---|---|
+| A new request in the same session | No (and it costs no MFA queries). |
+| Logged out, then logged in again | Yes. Logging out clears the verification even if the app keeps the session. |
+| Idle longer than `session.lifetime`, logged back in by the remember-me cookie | **Yes.** Laravel restores the login from the recaller cookie into a fresh session, which has no verification in it. (Not on a [trusted browser](#trusted-browsers).) |
+| Browser closed, with `session.expire_on_close` | Yes, on the next visit (remember-me or not). |
+
+The remember-me case is deliberate: a remember-me cookie is a long-lived password substitute, so treating it as "already passed MFA" would let a stolen cookie skip the second factor. It does mean an app that forces remember-me with a short session (artistly: `SESSION_LIFETIME=120`) challenges its users after every two hours idle. Options, from least to most change:
+
+- Accept it. For admins (who are enforced) this is a reasonable cadence; an authenticator code takes seconds.
+- Raise `SESSION_LIFETIME` (e.g. to a working day). The session cookie is then the long-lived credential instead, with the same trade-off as above.
+- Turn on [trusted browsers](#trusted-browsers): after a challenge the user may tick "Don't ask again on this browser for N days". For admins this also needs `allow_enforced`.
+
+## Blocked requests
+
+How the gate answers a request from a user who hasn't passed MFA yet (or must enroll):
+
+| Request | Answer | Intended URL remembered? |
+|---|---|---|
+| A page the user opens (`Sec-Fetch-Mode: navigate` to a document; or, from browsers without Fetch Metadata, a `GET` that accepts `text/html`) | `302` to the challenge (or settings) | Yes: they land there after verifying |
+| An Inertia visit | `302` for `GET`, `303` otherwise, to the challenge | No (the page they were on reloads) |
+| A blocked `POST`, `PUT`, `PATCH` or `DELETE` (a stale tab, a form) | `303`, so the browser follows it with a `GET` (inertia-laravel 2.x doesn't turn the gate's 302 into a 303 itself, and a re-sent `PUT` to the challenge would be a `405`) | No |
+| A JSON request (`Accept: application/json`, or axios' `X-Requested-With`), or a script's `fetch()` (`Sec-Fetch-Mode` `cors`, `same-origin` or `no-cors`) | `403` JSON `{ "error": "mfa_required" | "mfa_enrollment_required", "redirect": "…" }` | No |
+| A prefetch, prerender or iframe load | `302` | No |
+
+So a background poll in a stale tab gets a JSON error it can handle, and never replaces the page the user was going to. Apps whose own scripts call the backend should send the user to the challenge on that error: see the interceptor in [integration step 6](integration.md#6-frontend).
+
 ## Security model
 
 - TOTP secrets, phone numbers and email destinations are encrypted. Codes and recovery codes are stored only as keyed hashes (from `APP_KEY`; `APP_PREVIOUS_KEYS` keeps old ones valid after a rotation).
+- With [trusted browsers](#trusted-browsers) on, a browser the user trusted skips the challenge until it expires, the password or the methods change, or a recovery code is used; only a keyed hash of its token is stored.
 - Codes are single use, expire, and are burned after 5 wrong attempts. TOTP codes can't be replayed. Concurrent requests can't use a code twice.
 - Verification attempts are limited per user per minute and per day; the daily cap stops slow brute force.
 - The session ID changes after verification. Logging out clears verification even if the app doesn't invalidate the session.
 - Each logged-in guard must pass MFA on its own.
 - The gate runs before route model binding (it is placed ahead of `SubstituteBindings` in the middleware priority, after the session and auth middleware), so an unverified user gets the challenge for every URL, whether the record exists or not, and the app's binding code doesn't run for them. An app that replaces the whole priority list (`->priority([...])` in `bootstrap/app.php`, or `$middlewarePriority` in a Kernel) should list `EnsureMfaVerified` right before `SubstituteBindings` itself.
 - A user who has factors but hasn't verified can't open the MFA settings, so a stolen password can't add a factor.
+- A user who must enroll (and, with `required_for => 'everyone'`, any user) proves ownership with an email code or an administrator's link before their first factor, so a stolen password alone can't enroll the attacker's authenticator (see [Enrollment verification](#enrollment-verification)).
+- The owner is emailed when a method is added or removed, recovery codes are created or used, and when codes keep being requested (see [Security notifications](#security-notifications)).
 - Adding or removing a factor and regenerating recovery codes ask for the password again (see [Password confirmation](#password-confirmation)), so a stolen session alone can't change them (unless confirmation is off or the user is exempt).
 - A pending enrollment belongs to the browser session that started it and expires after 30 minutes.
 - Deleting a user deletes their factors and codes. Their audit rows stay, unlinked, until pruned.
@@ -243,6 +380,8 @@ Trade-offs we know about and have accepted for now. Each says who it affects, wh
 - **Someone with only the password can block code entry for a day.** Wrong codes count against `rate_limit.verify_per_day` (default 50) per user, not per network, so whoever has the password can use all 50 and the owner can't enter any code until the next day, authenticator-app codes and recovery codes included. Sending isn't affected: the daily send caps count per network, so the owner still gets codes; they just can't enter them.
   - *When it happens:* the owner sees the rate-limit message on the challenge. Verify their identity out of band, then `php artisan mfa:reset <email>` (or wait a day), and have them change their password: the attacker has it.
   - *What could change:* count the daily verify cap per user and per network, as the daily send caps already are (a per-network bucket keeps the owner's own network usable). Tracked on the roadmap.
+- **A password and a mailbox stolen together can enroll.** The email code before a first factor proves inbox access, so someone who has both (a reused password, say) can still add their authenticator to an account that hasn't enrolled yet. The owner's warning emails go to that same inbox.
+  - *What to do:* for roles that matter, set `enrollment_verification.email` to `false` so only an administrator's link works ([Enrollment verification](#enrollment-verification)).
 - **People behind one IP share the daily send budget.** The per-method daily caps (`factors.email.send_per_day`, `factors.sms.send_per_day`) count per user and per network, so two devices of the same user on one office network or carrier-grade NAT share one budget. At 15 email / 5 SMS a day per user this rarely matters.
 - **The per-network limits trust the client IP.** An app that trusts every proxy (`'*'`) can be sent a spoofed `X-Forwarded-For`, which dodges the per-IP and per-network limits; the per-account hourly cap and the app-wide caps still hold. Trust only your load balancer or CDN ranges (`mfa:doctor` warns).
 

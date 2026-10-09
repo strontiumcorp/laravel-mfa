@@ -3,7 +3,9 @@
 // A small floating card asking a user without two-factor to turn it on, for
 // the app's global layout. "Not today" (or ×) hides it at once and tells the
 // app, which hides it until the user's next local midnight. Standalone: needs
-// only React and ./icons, and knows nothing about Inertia or routes.
+// only React and ./icons, and knows nothing about Inertia or routes. The same
+// card also carries the trusted browser reminder ("Verify now" / "Later"):
+// only the copy, the link and closeLabel differ, and useMfaNudge() fills them.
 //
 // In an Inertia app, useMfaNudge() from the MFA pages' mfa-context.ts gives
 // every prop (the shared context, the dismiss request and Inertia's <Link>):
@@ -50,6 +52,8 @@ export type MfaEnableNudgeProps = {
     className?: string;
     /** Renders the link, e.g. (link) => <Link {...link} />. Defaults to a plain <a>. */
     renderLink?: (link: MfaEnableNudgeLink) => ReactNode;
+    /** The × button's accessible name; defaults to "Dismiss for today". */
+    closeLabel?: string;
     /**
      * Still shows, but "Not today" and × only hide it for this page view and
      * never call onDismiss, e.g. while an admin impersonates the user.
@@ -93,6 +97,7 @@ export default function MfaEnableNudge({
     offset = 24,
     className = '',
     renderLink = defaultLink,
+    closeLabel = 'Dismiss for today',
     disabled = false,
 }: MfaEnableNudgeProps) {
     const id = useId();
@@ -125,7 +130,7 @@ export default function MfaEnableNudge({
             <button
                 type="button"
                 onClick={dismiss}
-                aria-label="Dismiss for today"
+                aria-label={closeLabel}
                 className="absolute right-2 top-2 flex size-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-500 dark:hover:bg-gray-800 dark:hover:text-gray-200"
             >
                 <MfaIconClose size={16} />

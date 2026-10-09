@@ -90,8 +90,9 @@ class DoctorCommand extends Command
             }
         }
 
-        if ($mfa->isTypeEnabled(FactorType::Email) && in_array(config('mail.default'), ['log', 'array'], true) && app()->isProduction()) {
-            $this->warn_('Mailer is "'.config('mail.default').'" in production — email codes will not be delivered');
+        $mails = $mfa->isTypeEnabled(FactorType::Email) || config('mfa.notifications.enabled') || config('mfa.enrollment_verification.email');
+        if ($mails && in_array(config('mail.default'), ['log', 'array'], true) && app()->isProduction()) {
+            $this->warn_('Mailer is "'.config('mail.default').'" in production — email codes and security notifications will not be delivered');
         }
 
         if (in_array(config('session.driver'), ['array'], true)) {
@@ -344,6 +345,14 @@ class DoctorCommand extends Command
 
         if ($mfa->enforcesAnyone() && $required !== [] && $mfa->requiredTypes() === []) {
             $this->warn_('none of enforcement.required_types is enabled — any factor satisfies enforcement');
+        }
+
+        $verification = config('mfa.enrollment_verification.required_for');
+
+        if ($mfa->enforcesAnyone() && ! in_array($verification, ['enforced', 'everyone'], true)) {
+            $this->warn_('Enrollment verification is off (enrollment_verification.required_for): someone with only the password of an account that must enroll can add their own authenticator app and take the account over');
+        } elseif (in_array($verification, ['enforced', 'everyone'], true) && ! config('mfa.enrollment_verification.email')) {
+            $this->components->twoColumnDetail('Enrollment verification', 'administrator links only (mfa:enrollment-link)');
         }
     }
 

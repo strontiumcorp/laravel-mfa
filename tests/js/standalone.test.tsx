@@ -32,6 +32,7 @@ describe('published components', () => {
             'send-code-button.tsx',
             'settings-card.tsx',
             'totp-setup.tsx',
+            'trusted-browsers-panel.tsx',
         ]);
     });
 

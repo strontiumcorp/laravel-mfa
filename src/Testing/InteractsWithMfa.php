@@ -9,6 +9,7 @@ use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Factors\TotpFactor;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
+use StrontiumCorp\LaravelMfa\Support\EnrollmentVerification;
 
 /**
  * Helpers for host-application tests.
@@ -49,6 +50,18 @@ trait InteractsWithMfa
     public function withConfirmedPassword(): static
     {
         app(Mfa::class)->markPasswordConfirmed($this->app['session']->driver());
+
+        return $this;
+    }
+
+    /**
+     * Mark this session as having proved ownership of $user's account, so
+     * adding their first factor doesn't answer "enrollment verification
+     * required" (enrollment_verification).
+     */
+    public function withEnrollmentVerified(Authenticatable $user): static
+    {
+        $this->app['session']->put(EnrollmentVerification::SESSION_PREFIX.'.'.$user->getAuthIdentifier(), now()->getTimestamp());
 
         return $this;
     }

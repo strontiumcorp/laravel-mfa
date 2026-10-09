@@ -1,11 +1,13 @@
 <?php
 
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Notification;
 use PragmaRX\Google2FA\Google2FA;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
+use StrontiumCorp\LaravelMfa\Tests\Fixtures\EnforceForEveryone;
 
 /*
  * Pins the JSON contract documented in docs/json-mode.md. If one of these
@@ -18,10 +20,33 @@ it('GET /mfa/challenge', function () {
 
     $this->loginWithSession($user)->getJson('/mfa/challenge')->assertOk()->assertExactJsonStructure([
         'factors' => ['*' => ['id', 'type', 'type_label', 'label', 'destination', 'confirmed', 'confirmed_at', 'last_used_at', 'code_sent', 'retry_after', 'expires_in', 'code_length']],
-        'defaultFactorId', 'hasRecoveryCodes',
+        'defaultFactorId', 'hasRecoveryCodes', 'trustBrowser', 'renew',
         'urls' => ['send', 'verify', 'recover', 'logout'],
         'status', 'recoveryCodes', 'retryAfter',
     ]);
+
+    config(['mfa.trusted_browsers.enabled' => true, 'mfa.trusted_browsers.days' => 14]);
+    $this->getJson('/mfa/challenge')->assertJsonPath('trustBrowser', ['days' => 14]);
+});
+
+it('POST /mfa/challenge with remember, then the trusted browsers in /mfa/settings and forgetting them', function () {
+    config(['mfa.trusted_browsers.enabled' => true]);
+    [$user, $factor] = $this->userWithFactor();
+    $this->loginWithSession($user);
+
+    $this->postJson('/mfa/challenge', ['factor_id' => $factor->id, 'code' => $this->currentTotpCode($factor), 'remember' => true])
+        ->assertOk()->assertExactJson(['status' => 'verified', 'redirect' => '/dashboard']);
+
+    $this->getJson('/mfa/settings')->assertExactJsonStructure([
+        'factors', 'pending', 'availableTypes', 'recoveryCodesRemaining', 'recoveryCodesTotal', 'recoveryCodesFile', 'mustEnroll', 'requiredTypes',
+        'urls', 'passwordConfirmationRequired', 'passwordRetryAfter', 'nudge', 'status', 'recoveryCodes', 'retryAfter', 'enrollmentVerification',
+        'trustedBrowsers' => ['*' => ['id', 'label', 'created_at', 'last_used_at', 'expires_at', 'current']],
+    ]);
+    $id = $this->getJson('/mfa/settings')->json('trustedBrowsers.0.id');
+
+    $this->deleteJson("/mfa/trusted-browsers/{$id}")->assertOk()->assertExactJson(['status' => 'trusted-browsers-forgotten']);
+    $this->deleteJson('/mfa/trusted-browsers')->assertOk()->assertExactJson(['status' => 'trusted-browsers-forgotten']);
+    $this->getJson('/mfa/settings')->assertJsonPath('trustedBrowsers', []);
 });
 
 it('POST /mfa/challenge/send, /mfa/challenge, /mfa/challenge/recover', function () {
@@ -102,7 +127,8 @@ it('GET /mfa/settings and the enrollment endpoints', function () {
 
     $this->getJson('/mfa/settings')->assertOk()->assertExactJsonStructure([
         'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label', 'recommended']], 'recoveryCodesRemaining', 'recoveryCodesTotal', 'recoveryCodesFile' => ['app', 'slug', 'account'], 'mustEnroll', 'requiredTypes',
-        'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'confirmPassword'], 'passwordConfirmationRequired', 'passwordRetryAfter', 'nudge' => ['title', 'body'], 'status', 'recoveryCodes', 'retryAfter',
+        'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'confirmPassword', 'sendEnrollmentCode', 'verifyEnrollmentCode', 'forgetTrustedBrowser', 'forgetTrustedBrowsers'], 'passwordConfirmationRequired', 'passwordRetryAfter', 'nudge' => ['title', 'body'], 'status', 'recoveryCodes', 'retryAfter',
+        'enrollmentVerification', 'trustedBrowsers',
     ]);
 
     $created = $this->postJson('/mfa/factors', ['type' => 'totp'])->assertOk()->assertExactJsonStructure([
@@ -140,6 +166,45 @@ it('POST /mfa/factors (and the other factor changes) answer 423 until the passwo
         'error' => 'password_confirmation_required',
         'confirm_url' => route('mfa.password.confirm'),
     ]);
+});
+
+it('POST /mfa/factors answers 423 until an enforced user proves ownership, then the email code endpoints', function () {
+    Notification::fake();
+    Mfa::fakeCodes();
+    config(['mfa.enforcement.policy' => EnforceForEveryone::class]);
+    $this->loginWithSession($this->makeUser(['email' => 'jane@example.com']));
+
+    $this->getJson('/mfa/settings')->assertJsonPath('enrollmentVerification', ['email' => 'j***@example.com']);
+    $this->postJson('/mfa/factors', ['type' => 'totp'])->assertStatus(423)->assertExactJson([
+        'message' => 'Enter the code we email you to confirm it is you.',
+        'error' => 'enrollment_verification_required',
+        'email' => 'j***@example.com',
+        'send_url' => route('mfa.enrollment-verification.send'),
+        'verify_url' => route('mfa.enrollment-verification.verify'),
+    ]);
+
+    $this->postJson('/mfa/enrollment-verification/send')->assertOk()->assertExactJson(['status' => 'enrollment-code-sent', 'retry_after' => 120, 'email' => 'j***@example.com']);
+    $this->postJson('/mfa/enrollment-verification/send')->assertStatus(429)->assertExactJsonStructure(['message', 'errors' => ['code'], 'retry_after']);
+    $this->postJson('/mfa/enrollment-verification', ['code' => '000000'])->assertStatus(422)->assertExactJsonStructure(['message', 'errors' => ['code']]);
+    $this->postJson('/mfa/enrollment-verification', ['code' => '123456'])->assertOk()->assertExactJson(['status' => 'enrollment-verified']);
+
+    $this->getJson('/mfa/settings')->assertJsonPath('enrollmentVerification', null);
+    $this->postJson('/mfa/factors', ['type' => 'totp'])->assertOk();
+});
+
+it('POST /mfa/factors answers 423 without the email endpoints when only a link works', function () {
+    config(['mfa.enforcement.policy' => EnforceForEveryone::class, 'mfa.enrollment_verification.email' => false]);
+    $this->loginWithSession($this->makeUser());
+
+    $this->postJson('/mfa/factors', ['type' => 'totp'])->assertStatus(423)->assertExactJson([
+        'message' => 'Ask an administrator for a setup link to add your first sign-in method.',
+        'error' => 'enrollment_verification_required',
+        'email' => null,
+        'send_url' => null,
+        'verify_url' => null,
+    ]);
+    $this->postJson('/mfa/enrollment-verification/send')->assertStatus(422)
+        ->assertJsonPath('errors.code.0', 'Ask an administrator for a setup link to add your first sign-in method.');
 });
 
 it('POST /mfa/confirm-password', function () {

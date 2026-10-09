@@ -13,10 +13,18 @@ type Props = {
     hasRecoveryCodes: boolean;
     status: string | null;
     retryAfter: number | null;
+    /** "Don't ask again on this browser" is offered for this many days; null = not offered. */
+    trustBrowser: { days: number } | null;
+    /**
+     * Verifying early (?renew=1, from the trusted browser reminder): the user is
+     * already verified and comes back to keep this browser trusted. The box
+     * starts ticked and "Not now" goes back instead of "Sign out".
+     */
+    renew: boolean;
     urls: { send: string; verify: string; recover: string; logout: string | null };
 };
 
-export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCodes, status, retryAfter, urls }: Props) {
+export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCodes, status, retryAfter, trustBrowser, renew = false, urls }: Props) {
     const [factorId, setFactorId] = useState<number | null>(defaultFactorId);
     const [useRecovery, setUseRecovery] = useState(false);
     // Leaving the recovery form with "Try another way" reopens the list of methods.
@@ -39,8 +47,10 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
         send.clearErrors();
     };
 
-    const submitCode = (code: string) => {
-        verify.transform(() => ({ factor_id: factorId, code }));
+    // remember: skip the challenge on this browser for trustBrowser.days (only sent when ticked).
+    const submitCode = (code: string, options?: { trustBrowser: boolean }) => {
+        const remember = Boolean(trustBrowser && options?.trustBrowser);
+        verify.transform(() => (remember ? { factor_id: factorId, code, remember: true } : { factor_id: factorId, code }));
         verify.post(urls.verify, { preserveScroll: true });
     };
 
@@ -83,7 +93,10 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
     }, [expiresAt, resendAt]);
     const expired = expiresAt !== null && expiresAt <= Date.now();
 
-    const signOut = logoutUrl ? () => router.post(logoutUrl) : undefined;
+    // Verifying early, the user is signed in and verified already: offer the way back, not out.
+    const signOut = logoutUrl && !renew ? () => router.post(logoutUrl) : undefined;
+    // Back where they came from; opened in a new tab (no history), to the app's start page.
+    const goBack = renew ? () => (window.history.length > 1 ? window.history.back() : window.location.assign('/')) : undefined;
     const sentHere = sentToId === factorId;
     // A code is out: from the server (it survives a refresh), or the send just
     // answered; until it expires, when the server says when that is.
@@ -111,6 +124,11 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
 
             <main className="w-full max-w-sm">
                 <h1 className="sr-only">Verify it's you</h1>
+                {renew && trustBrowser && !useRecovery && (
+                    <p className="mb-4 text-center text-sm text-gray-600 dark:text-gray-400">
+                        Verify now so this browser keeps skipping the code for another {trustBrowser.days} {trustBrowser.days === 1 ? 'day' : 'days'}.
+                    </p>
+                )}
 
                 {useRecovery ? (
                     <MfaRecoveryCodeForm
@@ -138,6 +156,9 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
                         sendFailed={Boolean(sendError)}
                         expired={expired && !send.processing}
                         waiting={waiting}
+                        trustBrowserDays={trustBrowser?.days ?? null}
+                        trustBrowserDefault={renew}
+                        onCancel={goBack}
                     >
                         {delivered && (
                             <MfaSendCodeButton

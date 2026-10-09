@@ -14,7 +14,7 @@ const factors = [
 const urls = { send: '/mfa/challenge/send', verify: '/mfa/challenge/verify', recover: '/mfa/challenge/recover', logout: '/logout' };
 /** The factors, with a code already out for one of them (as after a refresh). */
 const withSent = (id: number, retryAfter: number | null) => factors.map((f) => (f.id === id ? { ...f, code_sent: true, retry_after: retryAfter } : f));
-const props = { factors, defaultFactorId: 1, hasRecoveryCodes: true, status: null, retryAfter: null, urls };
+const props = { factors, defaultFactorId: 1, hasRecoveryCodes: true, status: null, retryAfter: null, trustBrowser: null, renew: false, urls };
 /** "Try another way", then the method whose row starts with this name. */
 const choose = async (name: string) => {
     await userEvent.click(screen.getByRole('button', { name: 'Try another way' }));
@@ -367,5 +367,102 @@ describe('challenge page', () => {
         await userEvent.type(screen.getByRole('textbox', { name: 'Verification code' }), '12345678{Enter}');
 
         expect(inertia.requests).toEqual([{ method: 'post', url: urls.verify, data: { factor_id: 2, code: '12345678' } }]);
+    });
+
+    describe("don't ask again on this browser", () => {
+        const checkbox = () => screen.queryByRole('checkbox', { name: /Don't ask again on this browser/ });
+
+        it('is not offered when the server says null', () => {
+            render(<MfaChallenge {...props} />);
+
+            expect(checkbox()).not.toBeInTheDocument();
+        });
+
+        it('sends remember: true only when ticked', async () => {
+            render(<MfaChallenge {...props} trustBrowser={{ days: 30 }} />);
+            expect(screen.getByRole('checkbox', { name: "Don't ask again on this browser for 30 days" })).not.toBeChecked();
+
+            await userEvent.type(screen.getByRole('textbox', { name: 'Verification code' }), '111111{Enter}');
+            await userEvent.click(checkbox()!);
+            await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
+
+            expect(inertia.requests).toEqual([
+                { method: 'post', url: urls.verify, data: { factor_id: 1, code: '111111' } },
+                { method: 'post', url: urls.verify, data: { factor_id: 1, code: '111111', remember: true } },
+            ]);
+        });
+
+        it('is never sent with a recovery code', async () => {
+            render(<MfaChallenge {...props} trustBrowser={{ days: 30 }} />);
+            await userEvent.click(checkbox()!);
+
+            await choose('Recovery code');
+            expect(checkbox()).not.toBeInTheDocument();
+            await userEvent.type(screen.getByRole('textbox', { name: 'Recovery code' }), 'abcde-12345{Enter}');
+
+            expect(inertia.requests).toEqual([{ method: 'post', url: urls.recover, data: { code: 'abcde-12345' } }]);
+        });
+    });
+
+    describe('verifying early (renew)', () => {
+        const checkbox = () => screen.queryByRole('checkbox', { name: /Don't ask again on this browser/ });
+
+        it('starts with the box ticked and keeps the browser trusted', async () => {
+            render(<MfaChallenge {...props} renew trustBrowser={{ days: 30 }} />);
+
+            expect(screen.getByText('Verify now so this browser keeps skipping the code for another 30 days.')).toBeInTheDocument();
+            expect(checkbox()).toBeChecked();
+            await userEvent.type(screen.getByRole('textbox', { name: 'Verification code' }), '123456{Enter}');
+
+            expect(inertia.requests).toEqual([{ method: 'post', url: urls.verify, data: { factor_id: 1, code: '123456', remember: true } }]);
+        });
+
+        it('can still be unticked', async () => {
+            render(<MfaChallenge {...props} renew trustBrowser={{ days: 30 }} />);
+
+            await userEvent.click(checkbox()!);
+            await userEvent.type(screen.getByRole('textbox', { name: 'Verification code' }), '123456{Enter}');
+
+            expect(inertia.requests).toEqual([{ method: 'post', url: urls.verify, data: { factor_id: 1, code: '123456' } }]);
+        });
+
+        it('goes back with "Not now" instead of signing out', async () => {
+            const length = vi.spyOn(window.history, 'length', 'get').mockReturnValue(3);
+            const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+            render(<MfaChallenge {...props} renew trustBrowser={{ days: 30 }} />);
+
+            expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+            await userEvent.click(screen.getByRole('button', { name: 'Not now' }));
+
+            expect(back).toHaveBeenCalledOnce();
+            expect(inertia.requests).toEqual([]);
+            back.mockRestore();
+            length.mockRestore();
+        });
+
+        it('goes to the start page with "Not now" when there is no page to go back to (a new tab)', async () => {
+            const length = vi.spyOn(window.history, 'length', 'get').mockReturnValue(1);
+            const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+            const assign = vi.fn();
+            vi.stubGlobal('location', { ...window.location, assign });
+            render(<MfaChallenge {...props} renew trustBrowser={{ days: 30 }} />);
+
+            await userEvent.click(screen.getByRole('button', { name: 'Not now' }));
+
+            expect(assign).toHaveBeenCalledWith('/');
+            expect(back).not.toHaveBeenCalled();
+            vi.unstubAllGlobals();
+            back.mockRestore();
+            length.mockRestore();
+        });
+
+        it('is off by default: the box starts unticked, with Sign out and no Not now', () => {
+            render(<MfaChallenge {...props} trustBrowser={{ days: 30 }} />);
+
+            expect(checkbox()).not.toBeChecked();
+            expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Not now' })).not.toBeInTheDocument();
+            expect(screen.queryByText(/keeps skipping the code/)).not.toBeInTheDocument();
+        });
     });
 });

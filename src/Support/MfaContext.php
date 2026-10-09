@@ -15,6 +15,9 @@ use JsonSerializable;
  * Mirrored by the MfaContext type in the published {Pages|pages}/mfa/mfa-context.ts;
  * the shape is pinned by tests/Feature/MfaContextTest.php. Change both together.
  *
+ * @phpstan-type NudgeShape array{show: bool, title: string, body: string, button: string, dismissLabel: string, dismissUrl: string|null}
+ * @phpstan-type TrustReminder array{show: bool, expiresAt: string|null, title: string, body: string, button: string, dismissLabel: string, verifyUrl: string|null, dismissUrl: string|null}
+ *
  * @implements Arrayable<string, mixed>
  */
 final class MfaContext implements Arrayable, JsonSerializable
@@ -23,7 +26,8 @@ final class MfaContext implements Arrayable, JsonSerializable
      * @param  list<string>  $factors  enabled factor types
      * @param  array{hasMfa: bool, verified: bool, mustEnroll: bool}|null  $user  null for guests
      * @param  array{settings: string|null, challenge: string|null}  $urls  null when MFA routes are off
-     * @param  array{show: bool, title: string, body: string, button: string, dismissLabel: string, dismissUrl: string|null}  $nudge  the turn-on-two-factor nudge (config mfa.nudge)
+     * @param  NudgeShape  $nudge  the turn-on-two-factor nudge (config mfa.nudge)
+     * @param  TrustReminder  $trustReminder  verify early on a trusted browser before its trust ends (config mfa.trusted_browsers.reminder)
      */
     public function __construct(
         public readonly bool $enabled,
@@ -32,10 +36,11 @@ final class MfaContext implements Arrayable, JsonSerializable
         public readonly ?array $user,
         public readonly array $urls,
         public readonly array $nudge,
+        public readonly array $trustReminder,
     ) {}
 
     /**
-     * @return array{enabled: bool, factors: list<string>, passwordConfirmation: bool, user: array{hasMfa: bool, verified: bool, mustEnroll: bool}|null, urls: array{settings: string|null, challenge: string|null}, nudge: array{show: bool, title: string, body: string, button: string, dismissLabel: string, dismissUrl: string|null}}
+     * @return array{enabled: bool, factors: list<string>, passwordConfirmation: bool, user: array{hasMfa: bool, verified: bool, mustEnroll: bool}|null, urls: array{settings: string|null, challenge: string|null}, nudge: NudgeShape, trustReminder: TrustReminder}
      */
     public function toArray(): array
     {
@@ -46,6 +51,7 @@ final class MfaContext implements Arrayable, JsonSerializable
             'user' => $this->user,
             'urls' => $this->urls,
             'nudge' => $this->nudge,
+            'trustReminder' => $this->trustReminder,
         ];
     }
 

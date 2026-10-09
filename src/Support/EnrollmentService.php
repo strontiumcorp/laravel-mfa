@@ -66,7 +66,10 @@ final class EnrollmentService
 
         $this->events->dispatch(new FactorEnabled($user, $factor->type, null, ['factor_id' => $factor->getKey()]));
 
-        $codes = $this->recoveryCodes->remaining($user) === 0 ? $this->regenerateRecoveryCodes($user) : null;
+        // "initial": the set that comes with the account's first method (its
+        // FactorEnabled email says so), not a new set after all were used.
+        $first = ! $user->mfaFactors()->whereNotNull('confirmed_at')->whereKeyNot($factor->getKey())->exists();
+        $codes = $this->recoveryCodes->remaining($user) === 0 ? $this->regenerateRecoveryCodes($user, initial: $first) : null;
 
         return ['result' => $result, 'recovery_codes' => $codes];
     }
@@ -95,12 +98,15 @@ final class EnrollmentService
         $this->events->dispatch(new FactorDisabled($user, $factor->type, null, ['factor_id' => $factor->getKey()]));
     }
 
-    /** @return list<string> */
-    public function regenerateRecoveryCodes(MultiFactorAuthenticatable $user): array
+    /**
+     * @param  bool  $initial  the set that comes with the account's first factor (context "initial")
+     * @return list<string>
+     */
+    public function regenerateRecoveryCodes(MultiFactorAuthenticatable $user, bool $initial = false): array
     {
         $codes = $this->recoveryCodes->generate($user);
 
-        $this->events->dispatch(new RecoveryCodesGenerated($user, null, null, ['count' => count($codes)]));
+        $this->events->dispatch(new RecoveryCodesGenerated($user, null, null, ['count' => count($codes), ...($initial ? ['initial' => true] : [])]));
 
         return $codes;
     }

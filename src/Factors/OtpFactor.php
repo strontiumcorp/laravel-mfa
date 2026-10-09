@@ -15,6 +15,7 @@ use StrontiumCorp\LaravelMfa\Exceptions\EnrollmentFailed;
 use StrontiumCorp\LaravelMfa\Jobs\DeliverOtp;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Support\ChallengeState;
+use StrontiumCorp\LaravelMfa\Support\DeliveryQueue;
 use StrontiumCorp\LaravelMfa\Support\Mask;
 use StrontiumCorp\LaravelMfa\Support\OtpStore;
 use StrontiumCorp\LaravelMfa\Support\RequestContext;
@@ -169,22 +170,9 @@ abstract class OtpFactor implements Factor
         return $this->store->status($factor, $this->config);
     }
 
-    /**
-     * Queued when a connection or a queue name is set (a queue name alone
-     * uses the default connection), unless that connection is "sync": then
-     * the code is sent inline, with immediate error feedback.
-     */
     private function queued(): bool
     {
-        $connection = ($this->delivery['queue_connection'] ?? null) ?: null;
-
-        if ($connection === null && empty($this->delivery['queue'])) {
-            return false;
-        }
-
-        $connection ??= config('queue.default');
-
-        return config("queue.connections.{$connection}.driver") !== 'sync';
+        return DeliveryQueue::queued($this->delivery);
     }
 
     public function verify(MfaFactor $factor, string $code): VerificationResult

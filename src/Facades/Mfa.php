@@ -27,6 +27,8 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool isVerified(\Illuminate\Contracts\Session\Session $session, \Illuminate\Contracts\Auth\Authenticatable $user, ?string $guard = null)
  * @method static bool isVerifiedFor(\Illuminate\Http\Request $request, \Illuminate\Contracts\Auth\Authenticatable $user)
  * @method static void markVerified(\Illuminate\Http\Request $request, \Illuminate\Contracts\Auth\Authenticatable $user, ?\StrontiumCorp\LaravelMfa\Enums\FactorType $via = null, array<string, mixed> $context = [])
+ * @method static string enrollmentLink(\StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable $user, ?int $minutes = null)
+ * @method static string guardFor(\Illuminate\Http\Request $request, \Illuminate\Contracts\Auth\Authenticatable $user)
  * @method static void grantForImpersonation(\Illuminate\Contracts\Auth\Authenticatable $impersonator, \Illuminate\Contracts\Auth\Authenticatable $target, ?\Illuminate\Http\Request $request = null)
  * @method static \StrontiumCorp\LaravelMfa\Mfa extend(string $type, \Closure $callback)
  * @method static \StrontiumCorp\LaravelMfa\Mfa extendSms(string $driver, \Closure $callback)

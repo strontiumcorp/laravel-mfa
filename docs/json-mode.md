@@ -19,7 +19,7 @@ Every response shape below is pinned by `tests/Feature/JsonContractTest.php`. If
 
 ## Detecting that MFA is needed
 
-Any protected `web` route that receives a JSON request from a user who hasn't verified yet returns:
+Any protected `web` route that receives a JSON request (or a script's `fetch()`, which browsers mark with `Sec-Fetch-Mode: cors`, `same-origin` or `no-cors`) from a user who hasn't verified yet returns:
 
 ```http
 HTTP/1.1 403 Forbidden
@@ -34,12 +34,14 @@ A global response interceptor is the simplest way to handle both:
 ```js
 axios.interceptors.response.use(null, (error) => {
     const data = error.response?.data;
-    if (error.response?.status === 403 && data?.error?.startsWith('mfa_')) {
+    if (error.response?.status === 403 && ['mfa_required', 'mfa_enrollment_required'].includes(data?.error)) {
         window.location.href = data.redirect; // or open your MFA modal
     }
     return Promise.reject(error);
 });
 ```
+
+For `fetch()`, see the wrapper in [integration step 6](integration.md#background-requests). Page navigations still get a redirect (`302`, or `303` after a blocked `POST`/`PUT`/`PATCH`/`DELETE`, so the browser follows it with a `GET`), and only they set the page to return to after verifying; [configuration.md](configuration.md#blocked-requests) has the full table.
 
 ## Errors
 
@@ -50,6 +52,7 @@ axios.interceptors.response.use(null, (error) => {
 | `503` | An app-wide send cap was hit (likely an attack): new destinations (`unconfirmed_global_per_hour`), or login codes (`confirmed_global_per_hour`; authenticator apps and recovery codes still work) | Same shape, plus `"retry_after": <seconds>` until sending resumes |
 | `403` | Not verified yet (see above), or settings opened while a challenge is pending | `{ "error": "mfa_required", ... }` |
 | `423` | A factor change needs the password first (see [Password confirmation](#password-confirmation)) | `{ "message": "...", "error": "password_confirmation_required", "confirm_url": "…/mfa/confirm-password" }` |
+| `423` | A first factor needs proof of ownership first (see [Enrollment verification](#enrollment-verification)) | `{ "message": "...", "error": "enrollment_verification_required", "email": "j***@example.com", "send_url": "…", "verify_url": "…" }` |
 
 The messages are written for end users and are safe to display as-is. For the machine-readable reason, check the audit log or the `VerificationFailed` event, not the message text.
 
@@ -66,6 +69,7 @@ The messages are written for end users and are safe to display as-is. For the ma
     ],
     "defaultFactorId": 7,
     "hasRecoveryCodes": true,
+    "trustBrowser": null,
     "urls": { "send": "…/mfa/challenge/send", "verify": "…/mfa/challenge", "recover": "…/mfa/challenge/recover", "logout": "…/logout" },
     "status": null,
     "recoveryCodes": null,
@@ -93,9 +97,11 @@ The messages are written for end users and are safe to display as-is. For the ma
 ### `POST /mfa/challenge`
 
 ```json
-{ "factor_id": 7, "code": "482913" }
+{ "factor_id": 7, "code": "482913", "remember": true }
 ```
 → `{ "status": "verified", "redirect": "https://app.test/dashboard" }`
+
+`remember` (optional) trusts this browser: the next sessions of this user on it skip the challenge for `trusted_browsers.days` (see [configuration.md](configuration.md#trusted-browsers)). It is ignored unless `GET /mfa/challenge` returned `trustBrowser` (`{ "days": 30 }`; `null` when it isn't offered). `GET /mfa/challenge?renew=1` from a verified session on a trusted browser returns the challenge with `"renew": true` instead of redirecting (the shared context's `trustReminder.verifyUrl`, shown in the last hours of the trust); passing it with `remember: true` trusts the browser again and `redirect` is the page the user came from. `renew` is `false` otherwise. `POST /mfa/trusted-browsers/reminder/dismiss` hides the reminder for the session → `{ "status": "trust-reminder-dismissed" }`. The response sets the trusted-browser cookie, so keep the cookies. `POST /mfa/challenge/recover` never trusts the browser.
 
 The session ID is regenerated on success, so take the new cookie from the response. (Inertia requests get a full page visit to the intended page instead: `409` with `X-Inertia-Location`.) `redirect` is the page the user originally asked for, or `config('mfa.routes.home')` if there was none.
 
@@ -137,6 +143,45 @@ If the app sets `routes.confirm_middleware` to `['password.confirm']`, Laravel's
 - Attempts are limited per account (5 per minute, 20 per day); over the limit gets `429` on `password` with `retry_after`, even for the right password.
 - The URL is also in the settings response, as `urls.confirmPassword`. After an Inertia request is refused by the limit, the settings page's `passwordRetryAfter` holds the wait instead of `retryAfter`, which stays for code sends.
 
+### Enrollment verification
+
+Before an account's first factor is added, an enforced user (or every user, with `enrollment_verification.required_for` set to `everyone`) proves they own the account beyond the password: with a code emailed to the account's address, or an administrator's one-time link (see [configuration.md](configuration.md#enrollment-verification)). It comes after the password confirmation. Until then `POST /mfa/factors` and `POST /mfa/factors/{id}/confirm` answer:
+
+```http
+HTTP/1.1 423 Locked
+
+{
+    "message": "Enter the code we email you to confirm it is you.",
+    "error": "enrollment_verification_required",
+    "email": "j***@example.com",
+    "send_url": "https://app.test/mfa/enrollment-verification/send",
+    "verify_url": "https://app.test/mfa/enrollment-verification"
+}
+```
+
+When email codes can't be used (`enrollment_verification.email` is `false`, or the account has no email address), `email`, `send_url` and `verify_url` are `null` and the message is "Ask an administrator for a setup link to add your first sign-in method.": the user needs a link from `php artisan mfa:enrollment-link` or `Mfa::enrollmentLink()`, opened while signed in. The link is a page visit that redirects to `/mfa/settings`.
+
+`GET /mfa/settings` says the same in advance: `enrollmentVerification` is `{ "email": "j***@example.com" }` (or `{ "email": null }`) while it is needed, `null` otherwise.
+
+#### `POST /mfa/enrollment-verification/send`
+
+No body. → `{ "status": "enrollment-code-sent", "retry_after": 120, "email": "j***@example.com" }`
+
+- The code goes to the account's email, works only in this session, and expires after `factors.email.ttl`.
+- Resending waits like a login code (`429` with `retry_after` during the cooldown) and counts toward the account's send caps (`429` `daily_limit`/`rate_limited`, `503` when an app-wide cap is hit).
+- `422` on `code` when only a link works, or when the email couldn't be sent.
+- When no proof is needed (any more), it sends nothing: `{ "status": "enrollment-verified" }`.
+
+#### `POST /mfa/enrollment-verification`
+
+```json
+{ "code": "123456" }
+```
+→ `{ "status": "enrollment-verified" }`. Then retry the factor request.
+
+- A wrong code gets `422` on `code`; it is burned after `factors.email.max_attempts` wrong guesses (send a new one). Attempts count toward the verify rate limits (`429` with `retry_after`).
+- The proof lasts until logout.
+
 ### `GET /mfa/settings`
 
 ```json
@@ -153,14 +198,18 @@ If the app sets `routes.confirm_middleware` to `['password.confirm']`, Laravel's
     "passwordRetryAfter": null,
     "nudge": { "title": "Protect your account", "body": "Turn on two-factor sign-in now. It takes a minute and will soon be required." },
     "urls": { "store": "…/mfa/factors", "confirm": "…/mfa/factors/__ID__/confirm", "resend": "…/mfa/factors/__ID__/resend",
-              "destroy": "…/mfa/factors/__ID__", "recoveryCodes": "…/mfa/recovery-codes", "confirmPassword": "…/mfa/confirm-password" },
+              "destroy": "…/mfa/factors/__ID__", "recoveryCodes": "…/mfa/recovery-codes", "confirmPassword": "…/mfa/confirm-password",
+              "sendEnrollmentCode": "…/mfa/enrollment-verification/send", "verifyEnrollmentCode": "…/mfa/enrollment-verification",
+              "forgetTrustedBrowser": "…/mfa/trusted-browsers/__ID__", "forgetTrustedBrowsers": "…/mfa/trusted-browsers" },
+    "enrollmentVerification": null,
+    "trustedBrowsers": null,
     "status": null,
     "recoveryCodes": null,
     "retryAfter": null
 }
 ```
 
-`passwordConfirmationRequired` says whether adding or removing a method would answer `423` right now (see [Password confirmation](#password-confirmation)), so a client can ask for the password before starting; the routes still enforce it. `recoveryCodesTotal` is how many a fresh set has (`recovery_codes.count`), for an "8 of 10 left" display. `recoveryCodesFile` is what a downloaded codes file is named after: `app` is the name authenticator apps show (`factors.totp.issuer`, with the environment in brackets outside production unless `factors.totp.issuer_environment` is off), `slug` the same for a file name, and `account` the user's authenticator label (`getMfaLabel()`: the email, else the auth identifier). The bundled dialog names the file `{slug}-recovery-codes-{account}-{YYYY-MM-DD}.txt` with the browser's date. `availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have one. It's `[]` for other users.
+`passwordConfirmationRequired` says whether adding or removing a method would answer `423` right now (see [Password confirmation](#password-confirmation)), so a client can ask for the password before starting; the routes still enforce it. `enrollmentVerification` does the same for the proof of ownership before a first factor (see [Enrollment verification](#enrollment-verification)). `recoveryCodesTotal` is how many a fresh set has (`recovery_codes.count`), for an "8 of 10 left" display. `recoveryCodesFile` is what a downloaded codes file is named after: `app` is the name authenticator apps show (`factors.totp.issuer`, with the environment in brackets outside production unless `factors.totp.issuer_environment` is off), `slug` the same for a file name, and `account` the user's authenticator label (`getMfaLabel()`: the email, else the auth identifier). The bundled dialog names the file `{slug}-recovery-codes-{account}-{YYYY-MM-DD}.txt` with the browser's date. `availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have one. It's `[]` for other users.
 
 `nudge` holds the [nudge](configuration.md#nudge)'s title and body, to show as a notice, for a user with no method who isn't enforced (and while `nudge.enabled` is on); it's `null` otherwise.
 
@@ -210,6 +259,18 @@ Unconfirmed destinations have tight limits, because anyone can trigger them:
 ### `DELETE /mfa/factors/{id}`
 
 → `{ "status": "factor-disabled" }`. Removing the last factor also deletes the user's recovery codes. IDs belonging to other users are ignored.
+
+### `DELETE /mfa/trusted-browsers/{id}` and `DELETE /mfa/trusted-browsers`
+
+Stop trusting one browser, or all of the user's browsers. → `{ "status": "trusted-browsers-forgotten" }`. The URLs are in the settings response as `urls.forgetTrustedBrowser` (with `__ID__`) and `urls.forgetTrustedBrowsers`. An ID that isn't the user's changes nothing.
+
+`GET /mfa/settings` lists them as `trustedBrowsers` (`null` when the feature is off), newest first:
+
+```json
+[ { "id": 3, "label": "Chrome on Mac", "created_at": "2026-10-10T08:30:00+00:00", "last_used_at": null, "expires_at": "2026-11-09T08:30:00+00:00", "current": true } ]
+```
+
+`current` marks the browser making the request; `label` is `null` when the user agent was missing.
 
 ### `POST /mfa/recovery-codes`
 

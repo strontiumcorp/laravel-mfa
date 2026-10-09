@@ -349,6 +349,11 @@ describe('EnrollmentService', function () {
         foreach ([Events\FactorEnrollmentStarted::class, Events\FactorEnabled::class, Events\FactorDisabled::class] as $event) {
             Event::assertDispatched($event, fn ($e) => $e->context === ['factor_id' => $id]);
         }
+        // The first set comes with the first factor.
+        Event::assertDispatched(Events\RecoveryCodesGenerated::class, fn ($e) => $e->context === ['count' => 10, 'initial' => true]);
+        $this->postJson('/mfa/factors', ['type' => 'totp']);
+        $this->createMfaFactor($user);
+        $this->postJson('/mfa/recovery-codes');
         Event::assertDispatched(Events\RecoveryCodesGenerated::class, fn ($e) => $e->context === ['count' => 10]);
     });
 

@@ -77,6 +77,125 @@ describe('MfaFactorSetupDialog', () => {
         });
     });
 
+    describe("confirm it's you", () => {
+        const check = { email: 'j***@example.com' };
+
+        it('offers to email a code to the account, then asks for it', async () => {
+            const onSendEmailCode = vi.fn();
+            const onVerifyEmailCode = vi.fn();
+            const { rerender } = render(<MfaFactorSetupDialog {...totp} verifyEmail={check} onSendEmailCode={onSendEmailCode} onVerifyEmailCode={onVerifyEmailCode} />);
+
+            expect(screen.getByRole('dialog', { name: "Confirm it's you" })).toBeInTheDocument();
+            expect(screen.getByText('Authenticator app · Step 1 of 4')).toBeInTheDocument();
+            expect(dialog()).toHaveTextContent("Before you add your first sign-in method, we'll email a code to j***@example.com to check it's you.");
+            expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+            const send = screen.getByRole('button', { name: 'Email me a code' });
+            expect(send).toHaveFocus();
+            await userEvent.click(send);
+            expect(onSendEmailCode).toHaveBeenCalledOnce();
+
+            rerender(<MfaFactorSetupDialog {...totp} verifyEmail={check} onSendEmailCode={onSendEmailCode} onVerifyEmailCode={onVerifyEmailCode} emailCodeSent />);
+            expect(dialog()).toHaveTextContent('We sent a code to j***@example.com.');
+            const input = screen.getByRole('textbox', { name: 'Code from the email' });
+            expect(input).toHaveFocus();
+            expect(input).toHaveAttribute('inputmode', 'numeric');
+            expect(input).toHaveAttribute('autocomplete', 'one-time-code');
+            expect(screen.getByRole('button', { name: 'Confirm' })).toBeDisabled();
+            await userEvent.type(input, '12a3456{Enter}');
+            expect(onVerifyEmailCode).toHaveBeenCalledWith('123456');
+            expect(onSendEmailCode).toHaveBeenCalledOnce();
+        });
+
+        it('moves on to the setup once checked, keeping the step numbering', () => {
+            const { rerender } = render(<MfaFactorSetupDialog {...totp} verifyEmail={check} emailCodeSent />);
+
+            rerender(<MfaFactorSetupDialog {...totp} verifyEmail={null} emailCodeSent />);
+
+            expect(screen.getByRole('dialog', { name: 'Set up an authenticator app' })).toBeInTheDocument();
+            expect(screen.getByText('Authenticator app · Step 2 of 4')).toBeInTheDocument();
+        });
+
+        it('comes after the password: password, check, number, code, done', () => {
+            const { rerender } = render(<MfaFactorSetupDialog {...sms} askPassword verifyEmail={check} />);
+            expect(screen.getByRole('dialog', { name: 'Confirm your password' })).toBeInTheDocument();
+            expect(screen.getByText('SMS · Step 1 of 5')).toBeInTheDocument();
+
+            rerender(<MfaFactorSetupDialog {...sms} verifyEmail={check} />);
+            expect(screen.getByRole('dialog', { name: "Confirm it's you" })).toBeInTheDocument();
+            expect(screen.getByText('SMS · Step 2 of 5')).toBeInTheDocument();
+
+            rerender(<MfaFactorSetupDialog {...sms} />);
+            expect(screen.getByRole('dialog', { name: 'Add a phone number' })).toBeInTheDocument();
+            expect(screen.getByText('SMS · Step 3 of 5')).toBeInTheDocument();
+        });
+
+        it('comes back when the server asks for it mid-way', () => {
+            const { rerender } = render(<MfaFactorSetupDialog {...sms} sentTo="+*******0100" />);
+            expect(screen.getByText('SMS · Step 2 of 3')).toBeInTheDocument();
+
+            rerender(<MfaFactorSetupDialog {...sms} sentTo="+*******0100" verifyEmail={check} />);
+
+            expect(screen.getByRole('dialog', { name: "Confirm it's you" })).toBeInTheDocument();
+            expect(screen.getByText('SMS · Step 1 of 4')).toBeInTheDocument();
+        });
+
+        it('counts down to a resend, and to another send after a refusal', () => {
+            vi.useFakeTimers({ shouldAdvanceTime: true });
+            const onSendEmailCode = vi.fn();
+            const { rerender } = render(<MfaFactorSetupDialog {...totp} verifyEmail={check} emailCodeSent emailCodeRetryAfter={2} onSendEmailCode={onSendEmailCode} />);
+
+            expect(screen.getByRole('button', { name: 'Resend in 0:02' })).toBeDisabled();
+            act(() => vi.advanceTimersByTime(1000));
+            act(() => vi.advanceTimersByTime(1000));
+            fireEvent.click(screen.getByRole('button', { name: 'Resend code' }));
+            expect(onSendEmailCode).toHaveBeenCalledOnce();
+
+            rerender(<MfaFactorSetupDialog {...totp} verifyEmail={check} emailCodeRetryAfter={65} emailCodeError="Please wait before requesting another code." />);
+            expect(screen.getByRole('alert')).toHaveTextContent('Please wait before requesting another code.');
+            expect(screen.getByRole('button', { name: 'Try again in 1:05' })).toBeDisabled();
+        });
+
+        it('keeps a wrong code, selected, with the error', async () => {
+            const { rerender } = render(<MfaFactorSetupDialog {...totp} verifyEmail={check} emailCodeSent />);
+            await userEvent.type(screen.getByRole('textbox'), '111111');
+
+            rerender(<MfaFactorSetupDialog {...totp} verifyEmail={check} emailCodeSent emailCodeProcessing />);
+            expect(screen.getByRole('button', { name: 'Confirm' })).toBeDisabled();
+            rerender(<MfaFactorSetupDialog {...totp} verifyEmail={check} emailCodeSent emailCodeError="The provided code is invalid." />);
+
+            const input = screen.getByRole('textbox');
+            expect(screen.getByRole('alert')).toHaveTextContent('The provided code is invalid.');
+            expect(input).toHaveValue('111111');
+            expect(input).toHaveFocus();
+            expect(selected(input)).toEqual([0, 6]);
+        });
+
+        it('empties the code when a new one is sent', async () => {
+            const { rerender } = render(<MfaFactorSetupDialog {...totp} verifyEmail={check} emailCodeSent />);
+            await userEvent.type(screen.getByRole('textbox'), '111111');
+
+            rerender(<MfaFactorSetupDialog {...totp} verifyEmail={check} emailCodeSent emailCodeSending />);
+            rerender(<MfaFactorSetupDialog {...totp} verifyEmail={check} emailCodeSent />);
+
+            expect(screen.getByRole('textbox')).toHaveValue('');
+        });
+
+        it('without an email, says to ask an administrator and offers nothing to submit', async () => {
+            const onClose = vi.fn();
+            const onSendEmailCode = vi.fn();
+            render(<MfaFactorSetupDialog {...totp} verifyEmail={{ email: null }} onSendEmailCode={onSendEmailCode} onClose={onClose} />);
+
+            expect(screen.getByRole('dialog', { name: "Confirm it's you" })).toHaveTextContent('Ask an administrator for a setup link to add your first sign-in method.');
+            expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+            expect(within(dialog()).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['Close', 'Cancel']);
+
+            fireEvent.submit(dialog().querySelector('form')!);
+            expect(onSendEmailCode).not.toHaveBeenCalled();
+            await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+            expect(onClose).toHaveBeenCalledOnce();
+        });
+    });
+
     describe('authenticator app', () => {
         it('waits for its key, then shows the QR code, the key with Copy, and on phones a link to the app', async () => {
             const user = userEvent.setup();

@@ -118,6 +118,18 @@ export function MfaIconShieldLock(props: MfaIconProps) {
     );
 }
 
+/** A trusted browser: a browser window. */
+export function MfaIconBrowser(props: MfaIconProps) {
+    return (
+        <Svg {...props}>
+            <rect x="3" y="4" width="18" height="16" rx="2.5" />
+            <path d="M3 9h18" />
+            <path d="M6.5 6.5h.01" />
+            <path d="M9 6.5h.01" />
+        </Svg>
+    );
+}
+
 export function MfaIconCheck(props: MfaIconProps) {
     return (
         <Svg strokeWidth={3} {...props}>

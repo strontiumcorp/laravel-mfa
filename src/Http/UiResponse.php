@@ -152,6 +152,36 @@ final class UiResponse
         throw ValidationException::withMessages(['password_confirmation_required' => $message])->status(423);
     }
 
+    /**
+     * Adding a first factor that needs proof of ownership first
+     * (enrollment_verification). JSON gets 423 with where the code goes
+     * (masked; null = only an administrator's link works) and the URLs to
+     * send and check it; Inertia gets a validation error under
+     * "enrollment_verification_required", so the page can ask inline and retry.
+     *
+     * @param  array{email: string|null}  $details
+     *
+     * @throws ValidationException
+     */
+    public function enrollmentVerificationRequired(array $details): never
+    {
+        $message = $details['email'] === null
+            ? FailureReason::EnrollmentLinkRequired->message()
+            : 'Enter the code we email you to confirm it is you.';
+
+        if ($this->wantsJson()) {
+            throw new HttpResponseException(response()->json([
+                'message' => $message,
+                'error' => 'enrollment_verification_required',
+                'email' => $details['email'],
+                'send_url' => $details['email'] === null ? null : route('mfa.enrollment-verification.send'),
+                'verify_url' => $details['email'] === null ? null : route('mfa.enrollment-verification.verify'),
+            ], 423));
+        }
+
+        throw ValidationException::withMessages(['enrollment_verification_required' => $message])->status(423);
+    }
+
     private function wantsJson(): bool
     {
         return config('mfa.ui.driver') === 'json'

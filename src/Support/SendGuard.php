@@ -3,8 +3,10 @@
 namespace StrontiumCorp\LaravelMfa\Support;
 
 use Illuminate\Cache\RateLimiter;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Cache\Repository as Cache;
 use Illuminate\Contracts\Events\Dispatcher;
+use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Enums\FailureReason;
 use StrontiumCorp\LaravelMfa\Events\SendingCircuitTripped;
 use StrontiumCorp\LaravelMfa\Events\SuspiciousCodeRequests;
@@ -65,35 +67,16 @@ final class SendGuard
         $destination = (string) $factor->destination; // @pest-mutate-ignore: RemoveStringCast
         $undo = [];
 
-        $counters = [];
-        if ($user !== null) {
-            $counters[] = [CacheKey::for('send', CacheKey::user($user)), $this->limit('send_per_hour'), self::HOUR, FailureReason::RateLimited, 'account'];
-
-            // Every code of this type for the account (login and enrollment)
-            // from this network, over the RateLimiter's 24h window from the
-            // first send, like the hourly cap. Not counted at all when off. On
-            // Laravel 11.22 a rollback to 1 re-puts the counter with a fresh
-            // 24h, so that one count can outlive the window: stricter by one,
-            // never looser.
-            $perDay = $this->perDay($factor);
-            if ($perDay > 0) {
-                $subject = CacheKey::user($user).'|'.$factor->type->value.'|'.(self::ipBucket($ip) ?? 'no-ip');
-                $counters[] = [CacheKey::for('send-daily', $subject), $perDay, self::DAY, FailureReason::DailyLimit, 'account_daily'];
-            }
-        }
+        $counters = $user !== null ? $this->accountCounters($user, $factor->type, $ip) : [];
         if (! $confirmed) {
             $counters[] = [CacheKey::for('send-unconfirmed', $destination), $this->limit('unconfirmed_per_destination_per_day'), self::DAY, FailureReason::DestinationLimit, 'destination'];
             $counters[] = [CacheKey::for('send-unconfirmed', '*global*'), $this->limit('unconfirmed_global_per_hour'), self::HOUR, FailureReason::SendingPaused, 'global'];
         } elseif ($this->limit('confirmed_global_per_hour') > 0) {
-            $counters[] = [CacheKey::for('send-confirmed', '*global*'), $this->limit('confirmed_global_per_hour'), self::HOUR, FailureReason::SendingPaused, 'confirmed_global'];
+            $counters[] = $this->confirmedGlobalCounter();
         }
 
-        foreach ($counters as [$key, $limit, $decay, $reason, $scope]) {
-            $undo[] = fn () => $this->limiter->decrement($key, $decay);
-
-            if ($this->limiter->hit($key, $decay) > $limit) {
-                return $this->rollbackAndRefuse($undo, $factor, $key, $reason, $scope);
-            }
+        if (($refused = $this->count($counters, $undo, $factor, $factor->type)) !== null) {
+            return $refused;
         }
 
         // Distinct new destinations (retrying the same one is free).
@@ -121,7 +104,76 @@ final class SendGuard
             };
 
             if ($this->limiter->hit($counter, $decay) > $this->limit($limit)) {
-                return $this->rollbackAndRefuse($undo, $factor, $counter, FailureReason::RateLimited, $scope);
+                return $this->rollbackAndRefuse($undo, $factor, $factor->type, $counter, FailureReason::RateLimited, $scope);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * A code to the account's own address that belongs to no factor (the
+     * email code that proves inbox access before a first factor, see
+     * EnrollmentVerification). Counted like a login code: the account's
+     * hourly cap, its daily cap for the type from this network, and the
+     * app-wide cap on login codes. null = allowed (and counted).
+     */
+    public function attemptAccount(Authenticatable $user, FactorType $type, ?string $ip): ?VerificationResult
+    {
+        $counters = $this->accountCounters($user, $type, $ip);
+
+        if ($this->limit('confirmed_global_per_hour') > 0) {
+            $counters[] = $this->confirmedGlobalCounter();
+        }
+
+        $undo = [];
+
+        return $this->count($counters, $undo, null, $type);
+    }
+
+    /**
+     * The account's hourly cap on every code it is sent, and its daily cap
+     * for this type from this network: every code of the type for the
+     * account (login and enrollment), over the RateLimiter's 24h window from
+     * the first send, like the hourly cap. Not counted at all when off. On
+     * Laravel 11.22 a rollback to 1 re-puts the counter with a fresh 24h, so
+     * that one count can outlive the window: stricter by one, never looser.
+     *
+     * @return list<array{0: string, 1: int, 2: int, 3: FailureReason, 4: string}>
+     */
+    private function accountCounters(Authenticatable $user, FactorType $type, ?string $ip): array
+    {
+        $counters = [[CacheKey::for('send', CacheKey::user($user)), $this->limit('send_per_hour'), self::HOUR, FailureReason::RateLimited, 'account']];
+
+        $perDay = $this->perDay($type);
+        if ($perDay > 0) {
+            $subject = CacheKey::user($user).'|'.$type->value.'|'.(self::ipBucket($ip) ?? 'no-ip');
+            $counters[] = [CacheKey::for('send-daily', $subject), $perDay, self::DAY, FailureReason::DailyLimit, 'account_daily'];
+        }
+
+        return $counters;
+    }
+
+    /** @return array{0: string, 1: int, 2: int, 3: FailureReason, 4: string} */
+    private function confirmedGlobalCounter(): array
+    {
+        return [CacheKey::for('send-confirmed', '*global*'), $this->limit('confirmed_global_per_hour'), self::HOUR, FailureReason::SendingPaused, 'confirmed_global'];
+    }
+
+    /**
+     * Count every counter; on the first refusal, roll back everything counted
+     * so far for this attempt (including $undo from the caller) and refuse.
+     *
+     * @param  list<array{0: string, 1: int, 2: int, 3: FailureReason, 4: string}>  $counters
+     * @param  list<callable(): mixed>  $undo
+     */
+    private function count(array $counters, array &$undo, ?MfaFactor $factor, FactorType $type): ?VerificationResult
+    {
+        foreach ($counters as [$key, $limit, $decay, $reason, $scope]) {
+            $undo[] = fn () => $this->limiter->decrement($key, $decay);
+
+            if ($this->limiter->hit($key, $decay) > $limit) {
+                return $this->rollbackAndRefuse($undo, $factor, $type, $key, $reason, $scope);
             }
         }
 
@@ -149,16 +201,17 @@ final class SendGuard
     }
 
     /** @param list<callable(): mixed> $undo */
-    private function rollbackAndRefuse(array $undo, MfaFactor $factor, string $key, FailureReason $reason, string $scope): VerificationResult
+    private function rollbackAndRefuse(array $undo, ?MfaFactor $factor, FactorType $type, string $key, FailureReason $reason, string $scope): VerificationResult
     {
         foreach ($undo as $revert) {
             $revert();
         }
 
-        return $this->refuse($factor, $key, $reason, $scope);
+        return $this->refuse($factor, $type, $key, $reason, $scope);
     }
 
-    private function refuse(MfaFactor $factor, string $key, FailureReason $reason, string $scope): VerificationResult
+    /** $factor is null for a code that belongs to no factor (see attemptAccount()). */
+    private function refuse(?MfaFactor $factor, FactorType $type, string $key, FailureReason $reason, string $scope): VerificationResult
     {
         $retryAfter = $this->limiter->availableIn($key);
 
@@ -172,10 +225,10 @@ final class SendGuard
 
         // Equivalent mutant: the flag's value is never read, only its presence.
         if ($breaker !== null && $this->cache->add($breaker[0], true, max(1, $retryAfter))) { // @pest-mutate-ignore: TrueToFalse
-            $this->events->dispatch(new SendingCircuitTripped(null, $factor->type, $reason, ['limit' => $this->limit($breaker[1]), 'scope' => $breaker[2]]));
+            $this->events->dispatch(new SendingCircuitTripped(null, $type, $reason, ['limit' => $this->limit($breaker[1]), 'scope' => $breaker[2]]));
         }
 
-        if (in_array($scope, ['account', 'account_daily'], true) && $factor->isConfirmed()) {
+        if (in_array($scope, ['account', 'account_daily'], true) && $factor?->isConfirmed()) {
             $this->warnOnce($factor, 'send_cap_reached');
         }
 
@@ -197,10 +250,10 @@ final class SendGuard
     }
 
     /** factors.{type}.send_per_day; null or 0 = off. */
-    private function perDay(MfaFactor $factor): int
+    private function perDay(FactorType $type): int
     {
         // Equivalent mutant: limits are ints (or numeric strings from env).
-        return (int) config("mfa.factors.{$factor->type->value}.send_per_day"); // @pest-mutate-ignore: RemoveIntegerCast
+        return (int) config("mfa.factors.{$type->value}.send_per_day"); // @pest-mutate-ignore: RemoveIntegerCast
     }
 
     private function limit(string $name): int

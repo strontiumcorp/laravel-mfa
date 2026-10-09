@@ -83,7 +83,7 @@ final class OtpStore
                 'unverified_sends' => $unverified + 1,
                 // When the next resend unlocks: the curve, or code expiry if sooner.
                 // Equivalent mutant: ttl is an int in config.
-                'retry_after' => min(Cooldown::after($cooldown['streak'] + 1, $options['resend_cooldown']), (int) $options['ttl']), // @pest-mutate-ignore: RemoveIntegerCast
+                'retry_after' => Cooldown::capped($cooldown['streak'] + 1, $options['resend_cooldown'], (int) $options['ttl']), // @pest-mutate-ignore: RemoveIntegerCast
             ])];
         });
     }

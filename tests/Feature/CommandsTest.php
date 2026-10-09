@@ -260,3 +260,13 @@ describe('mfa:doctor integration checks', function () {
         $this->artisan('mfa:doctor')->assertSuccessful()->expectsOutputToContain('1 user(s) have a confirmed [sms] factor');
     });
 });
+
+it('warns about a log mailer in production when only security emails go out by mail', function () {
+    $this->app['env'] = 'production';
+    config(['mail.default' => 'log', 'mfa.factors.email.enabled' => false]);
+
+    $this->artisan('mfa:doctor')->expectsOutputToContain('email codes and security notifications will not be delivered');
+
+    config(['mfa.notifications.enabled' => false, 'mfa.enrollment_verification.email' => false]);
+    $this->artisan('mfa:doctor')->doesntExpectOutputToContain('Mailer is "log"');
+});

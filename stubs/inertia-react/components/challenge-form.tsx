@@ -10,8 +10,11 @@
 //     <MfaChallengeForm factors={factors} selectedFactorId={id} onSelectFactor={setId} onSubmit={(code) => verify(code)}>
 //         <MfaSendCodeButton ... />
 //     </MfaChallengeForm>
+//
+// With trustBrowserDays, it also offers "Don't ask again on this browser for N
+// days" above Verify, and onSubmit gets the choice: onSubmit(code, { trustBrowser }).
 import { type ClipboardEvent, type ReactNode, type RefObject, type SyntheticEvent, useEffect, useId, useRef, useState } from 'react';
-import { MfaFactorIcon, MfaIconChevronLeft, MfaIconChevronRight, MfaIconKey, type MfaFactorType } from './icons';
+import { MfaFactorIcon, MfaIconCheck, MfaIconChevronLeft, MfaIconChevronRight, MfaIconKey, type MfaFactorType } from './icons';
 
 export type MfaChallengeFactor = {
     id: number;
@@ -34,8 +37,19 @@ export type MfaChallengeFormProps = {
     factors: MfaChallengeFactor[];
     selectedFactorId: number | null;
     onSelectFactor: (id: number) => void;
-    /** Called with the digits the user entered. */
-    onSubmit: (code: string) => void;
+    /**
+     * Called with the digits the user entered. When the "don't ask again"
+     * box is offered (trustBrowserDays), also with whether it's ticked.
+     */
+    onSubmit: (code: string, options?: { trustBrowser: boolean }) => void;
+    /** Offers "Don't ask again on this browser for N days" above Verify; null or undefined hides it. */
+    trustBrowserDays?: number | null;
+    /** The "don't ask again" box starts ticked, e.g. when verifying early so a trusted browser stays trusted. */
+    trustBrowserDefault?: boolean;
+    /** Shows a quiet button in the footer (cancelLabel) that leaves without verifying, e.g. () => window.history.back(). */
+    onCancel?: () => void;
+    /** The cancel button's text; defaults to "Not now". */
+    cancelLabel?: string;
     processing?: boolean;
     error?: string | null;
     /** Rendered under the code input, e.g. the resend line for email and SMS. */
@@ -58,6 +72,9 @@ export type MfaChallengeFormProps = {
 
 const CARD = 'w-full rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900';
 const PRIMARY = 'min-h-11 w-full rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900';
+// The "don't ask again" box draws itself: a host's form styles (e.g. @tailwindcss/forms) can't recolour it.
+const CHECKBOX =
+    'm-0 size-5 shrink-0 cursor-pointer appearance-none rounded-md border border-gray-400 bg-white bg-none p-0 text-gray-900 shadow-none checked:border-gray-900 checked:bg-gray-900 checked:bg-none focus:outline-none focus:ring-0 focus:ring-offset-0 focus-visible:ring-2 focus-visible:ring-gray-900/30 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100 dark:checked:border-gray-100 dark:checked:bg-gray-100 dark:focus-visible:ring-gray-100/40';
 const QUIET =
     'inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100';
 
@@ -174,8 +191,14 @@ export default function MfaChallengeForm({
     expired = false,
     waiting = false,
     initialView = 'code',
+    trustBrowserDays = null,
+    trustBrowserDefault = false,
+    onCancel,
+    cancelLabel = 'Not now',
 }: MfaChallengeFormProps) {
     const [code, setCode] = useState('');
+    const [trustBrowser, setTrustBrowser] = useState(trustBrowserDefault);
+    const trustId = useId();
     const [edited, setEdited] = useState(false);
     const factor = factors.find((f) => f.id === selectedFactorId) ?? null;
     const [view, setView] = useState<'code' | 'methods'>(factor ? initialView : 'methods');
@@ -213,7 +236,9 @@ export default function MfaChallengeForm({
 
     const submit = (e: { preventDefault(): void }) => {
         e.preventDefault();
-        if (code.length === length && !processing) onSubmit(code);
+        if (code.length !== length || processing) return;
+        if (trustBrowserDays) onSubmit(code, { trustBrowser });
+        else onSubmit(code);
     };
 
     const pick = (id: number) => {
@@ -222,14 +247,21 @@ export default function MfaChallengeForm({
     };
 
     const footer = (left: ReactNode) =>
-        (left || onSignOut) && (
+        (left || onSignOut || onCancel) && (
             <div className="flex items-center justify-between gap-2 border-t border-gray-200 px-4 py-1.5 sm:px-6 dark:border-gray-800">
                 {left || <span />}
-                {onSignOut && (
-                    <button type="button" onClick={onSignOut} className={QUIET}>
-                        Sign out
-                    </button>
-                )}
+                <span className="flex items-center gap-1">
+                    {onCancel && (
+                        <button type="button" onClick={onCancel} className={QUIET}>
+                            {cancelLabel}
+                        </button>
+                    )}
+                    {onSignOut && (
+                        <button type="button" onClick={onSignOut} className={QUIET}>
+                            Sign out
+                        </button>
+                    )}
+                </span>
             </div>
         );
 
@@ -326,6 +358,26 @@ export default function MfaChallengeForm({
                         </p>
                     )}
                     {children}
+                    {trustBrowserDays ? (
+                        <label htmlFor={trustId} className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-gray-700 select-none dark:text-gray-300">
+                            <span className="relative flex size-5 shrink-0 items-center justify-center">
+                                <input
+                                    id={trustId}
+                                    type="checkbox"
+                                    checked={trustBrowser}
+                                    onChange={(e) => setTrustBrowser(e.target.checked)}
+                                    className={CHECKBOX}
+                                />
+                                {trustBrowser && <MfaIconCheck size={14} className="pointer-events-none absolute text-white dark:text-gray-900" />}
+                            </span>
+                            <span>
+                                Don't ask again on this browser for{' '}
+                                <span className="whitespace-nowrap">
+                                    {trustBrowserDays} {trustBrowserDays === 1 ? 'day' : 'days'}
+                                </span>
+                            </span>
+                        </label>
+                    ) : null}
                     <button type="submit" disabled={processing || code.length < length} className={PRIMARY}>
                         Verify
                     </button>
