@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.5.0 - 2026-10-09
+
+_Changes since `v0.4.2`._
+
+### Features
+
+- daily caps on login codes per method (50eb3a5)
+
+### Fixes
+
+- don't mistake a superseded code for a used one (cb5e151)
+- count the daily code caps per network so a password alone can't lock the owner out (4a2738a)
+- **ui:** wait out the cooldown after a used code instead of sending at once (9bcf093)
+- keep the resend cooldown across logins (6777ce6)
+
+### Documentation
+
+- known limitations, starting with the password-only verify lockout (651efa4)
+- **plan:** bring the plan up to date with the released package and artistly's progress (28de05b)
+- **plan:** roadmap with remember-me for MFA (16c00d4)
+
 ## v0.4.2 - 2026-10-09
 
 _Changes since `v0.4.1`._
