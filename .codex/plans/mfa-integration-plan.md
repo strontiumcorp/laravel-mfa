@@ -1,38 +1,27 @@
 # MFA integration plan — `strontiumcorp/laravel-mfa` → artistly, clone-voice, podcast-flow
 
-> **Status:** Phase 1 (package) **feature-complete and verified**: 348 tests, Laravel 11/12/13. All decisions D1–D10 are closed and the second review (§1.4c) is fully resolved. Release (1.5) is next: push, tag. Phases 2–6 (app integration and rollout) not started; artistly goes first.
+> **Status:** Phase 1 (package) **released and in use**: v0.4.2 is the latest tag (v0.5.0 pending: the resend-loop guardrails), 516 Pest + 328 Vitest tests, full matrix green on every tag. Phase 3 (artistly) is **in progress** on branch `SDAP-786`; clone-voice and podcast-flow (Phases 4–5) and the rollout (Phase 6) haven't started.
 > **Last updated:** 2026-10-09
 > **Legend:** `[x]` done · `[~]` in progress / partially done · `[ ]` not started · `[!]` blocked or needs a decision
 
-## Snapshot (end of 2026-10-08) — start here in a new session
+## Snapshot (end of 2026-10-09) — start here in a new session
 
 **Done**
-- **The package is complete:**
-  - TOTP, email and SMS codes; recovery codes; enforcement; impersonation helper
-  - deny-by-default middleware; React/Inertia pages and JSON mode
-  - observability: events, structured logs, audit table, metrics, flow IDs
-  - support commands: `mfa:install`, `mfa:doctor`, `mfa:status`, `mfa:reset`
-- **Security hardened:**
-  - an independent review: 11 findings fixed
-  - a send-limit redesign: exponential cooldown, separate budgets for confirmed and unconfirmed destinations, per-IP and global caps, rollback on refusal
-- **SMS providers:** built in are Twilio, Vonage, Infobip and Amazon SNS (SigV4 signed in-package; works from self-hosted servers), plus the `failover` and `routing` composites. Any app can enable or switch providers through config alone.
-- **Quality:**
-  - 348 tests, passing on Laravel 11, 12 and 13; line coverage ~95%
-  - PHPStan level 6; Pint
-  - a one-off mutation pass reached 99.4% on the security code; mutation testing is now retired
-- **Tooling:** a `Makefile` task runner; parallel tests; a CI workflow (not run on GitHub yet)
-- **Naming:** `strontiumcorp/laravel-mfa`, namespace `StrontiumCorp\LaravelMfa`, with `@itsemon245` as maintainer and code owner
+- **The package is released:** public repo `github.com/strontiumcorp/laravel-mfa`, installed as a VCS repository (not on Packagist); tags v0.1.1 … v0.4.2, each with a green full matrix (PHP 8.2–8.5 × Laravel 11/12/13, lowest and newest deps). `make release` releases straight from `main` (no branch protection since 2026-10-09); `make release-pr` / `make release-tag` stay for a protected `main`.
+- **Features:** TOTP, email and SMS codes; recovery codes; enforcement (roles, policy, required types); impersonation helper; deny-by-default middleware; React/Inertia pages and JSON mode; the "turn on two-factor" nudge; observability (events, logs, audit table, metrics, flow IDs); `mfa:install`, `mfa:doctor`, `mfa:status`, `mfa:reset`.
+- **UI:** the challenge page shows one method at a time (6-box input, auto-send with a server-side countdown); the settings page is one card per method with a setup dialog; the settings card is its own page section; every component sets its own control styles (safe under `@tailwindcss/forms` and global input CSS) and has dark variants, both enforced by `tests/js/host-styles.test.tsx`.
+- **Security and cost:** two independent reviews plus a full audit (2026-10-09), all findings fixed or decided (see §1.4c and the log). Send limits: exponential cooldown that spans logins, per-account hourly cap, per-type daily caps (email 15, SMS 5), separate budgets for unconfirmed destinations, app-wide caps for both, rollback on refusal; no resend or failover after a "maybe delivered" SMS.
 
 **Next steps, in order**
-- **v0.3.0 candidate, done 2026-10-09, awaiting review (not committed):** the settings page confirms the password itself (`routes.password_confirmation`, default on; `confirm_middleware` now defaults to `[]`), and a `settings-card` component for account settings. After release, artistly sets confirmation back on (drop its `confirm_middleware => []` override, which now means "no app middleware" rather than "off") and replaces its hand-written settings link with the card.
-0. **UI restructure (D11), done 2026-10-09, awaiting review:** pages are thin Inertia wrappers, components are plain React in `components/vendor/laravel-mfa/`, with Vitest tests. Review, commit, release as **v0.2.0** (published paths change), then resume artistly, which hasn't published yet and takes the new layout directly.
-1. **Release (1.5):** push to `github.com/strontiumcorp/laravel-mfa`, first green CI run, `make release` (tags `v0.1.0` and writes `CHANGELOG.md`).
-2. **Integrate artistly (Phase 3),** then clone-voice (Phase 4), then podcast-flow (Phase 5). All decisions are closed (see Phase 0).
+1. **Release v0.5.0** (branch `fix/login-code-resend-loop`: the cooldown spans logins, daily caps per method, the challenge page waits out the cooldown, the Roadmap section). Fast-forward `main`, then `make release`.
+2. **Finish artistly (Phase 3):** move to `^0.5` and republish (`mfa:install --force`; layouts live in `app.jsx`, so nothing to restore except `config/mfa.php`); set `enforcement.roles` (D5); commit the integration on a dedicated MFA branch; run the manual QA checklist; staging.
+3. **clone-voice (Phase 4), then podcast-flow (Phase 5).**
+4. **Rollout (Phase 6)**, then the [Roadmap](#roadmap): configurable remember-me.
 
 **Notes for picking up**
-- Run `make` to list tasks. Verify with `make ci`, `make coverage` and `make test-matrix`. **Do not run mutation tests** (user decision).
+- Run `make` to list tasks. Verify with `make ci`, `make test PROCESSES=2`, `make test-laravel VERSION=11 LOWEST=1` and `make typecheck-stubs`. **Do not run mutation tests** (user decision).
 - The `@pest-mutate-ignore` markers in `src/` document proven-equivalent mutants. Leave them in place.
-- Tests must never write into Testbench's `vendor/` skeleton (parallel runs share it).
+- Tests must never write into Testbench's `vendor/` skeleton (parallel runs share it); freeze the clock for exact times.
 - Per-app proxy issues: artistly trusts no proxies; clone-voice and podcast-flow trust `'*'`. See Phases 3–5.
 
 ## Goal
@@ -41,7 +30,7 @@ One installable package that adds MFA (authenticator app, email OTP, SMS OTP, pl
 
 ## Definition of done
 
-- [ ] The package is versioned in a private repo, and CI is green on PHP 8.2–8.5 × Laravel 11/12/13.
+- [x] The package is versioned in a public repo, and CI is green on PHP 8.2–8.5 × Laravel 11/12/13 (full matrix on every tag).
 - [ ] All three apps run the package in production, with no regressions in their existing test suites.
 - [ ] Admins are required to use MFA in every app. Regular users can opt in.
 - [ ] Every app passes `php artisan mfa:doctor` in its deploy pipeline.
@@ -55,7 +44,7 @@ One installable package that adds MFA (authenticator app, email OTP, SMS OTP, pl
 | # | Decision | Status | Recommendation / notes |
 |---|---|---|---|
 | D1 | Package name / namespace | `[x]` | **`strontiumcorp/laravel-mfa`**, namespace **`StrontiumCorp\LaravelMfa`** (company-owned). Mojahidul Islam (`@itsemon245`) is the listed author/maintainer and the `CODEOWNERS` reviewer. Renamed 2026-10-08. |
-| D2 | Where the package is hosted | `[x]` | Private repo **https://github.com/strontiumcorp/laravel-mfa** (created, empty). Apps install it via a `vcs` repository entry; CI and servers need a deploy key or GitHub token (see README *Installation*). |
+| D2 | Where the package is hosted | `[x]` | **https://github.com/strontiumcorp/laravel-mfa**, public since 2026-10-09 (was private). Apps install it via a `vcs` repository entry with the HTTPS URL and no credentials; it isn't on Packagist. |
 | D3 | SMS provider | `[x]` | **Twilio** when SMS is turned on; **SMS stays disabled** at launch (`MFA_SMS_ENABLED=false`, the default). Set `MFA_SMS_DRIVER=twilio` + credentials in each app's env so enabling it later is one switch. Pricing notes (Oct 2026 list): US ~$0.012/SMS everywhere; UK $0.044–0.057; Bangladesh $0.33–0.60 (Infobip cheapest, a `routing` candidate later); India $0.004 on AWS with DLT. |
 | D4 | Which factors to launch with | `[x]` | **TOTP and email.** SMS later (cost, toll-fraud risk). |
 | D5 | Enforcement | `[x]` | Enforce for admins in all three apps via config roles: `'enforcement' => ['roles' => ['admin', 'super_admin', 'support']]` (was `'enforce'` until D12) (matches each app's `isAdmin()`; the trait's `getMfaRoles()` reads the `role` attribute, string in artistly, `UserRole` enum in clone-voice/podcast-flow). Opt-in for everyone else. Code-level rules go through an `enforcement.policy` class (`Mfa::enforceUsing()` was removed in v0.3, user decision 2026-10-09: the policy class covers it and keeps closures off the singleton). Implemented 2026-10-09. |
@@ -205,12 +194,11 @@ Scope: security core, `src/Sms/`, integration ergonomics, docs. `make ci`, `make
 - [x] `mfa:doctor` validates every driver in a chain and lists each problem on its own line
 - [x] 32 new tests; 322 total, passing on Laravel 11/12/13
 
-### 1.5 Release — `[ ]`
+### 1.5 Release — `[x]`
 - [x] Settle D1 (name): `strontiumcorp/laravel-mfa`, `StrontiumCorp\LaravelMfa`
-- [x] Initial commit: done as focused commits on local `main`, not pushed yet (`build/`, `vendor/` and `composer.lock` are gitignored, and `.codex/`, `Makefile`, `scripts/` are excluded from dist via `.gitattributes`)
-- [~] Create the private GitHub repo and push: repo created (`strontiumcorp/laravel-mfa`, private, empty); push pending
-- [ ] Tag `v0.1.0` with `make release` (dry run infers v0.1.0; needs the `origin` remote, which is not set yet)
-- [x] `CHANGELOG.md` tooling: `make release` generates it from the commits (`scripts/release.sh`, `scripts/update-changelog.py`)
+- [x] Push to `github.com/strontiumcorp/laravel-mfa` (public since 2026-10-09)
+- [x] Tags v0.1.1 … v0.4.2 with `make release`; the full matrix publishes each GitHub Release once every combination passes
+- [x] `CHANGELOG.md` tooling: `make release` generates it from the commits (`scripts/release.sh`, `scripts/update-changelog.py`); `make release-pr` / `make release-tag` for a protected `main`
 
 ### 1.6 Package follow-ups (after launch)
 - [ ] Trusted devices ("remember this device for 30 days": hashed token, revocable). Scheduled in the [Roadmap](#roadmap) as configurable remember-me.
@@ -223,7 +211,7 @@ Scope: security core, `src/Sms/`, integration ergonomics, docs. `make ci`, `make
 - [ ] **Per-rule `required_types`** (planned, not part of the nudge change): e.g. admins must use an authenticator app while other enforced users may use any method. Today `enforcement.required_types` applies to every enforced user.
 - [ ] Before enabling SMS in any app, do a real send test per provider and region (`mfa:doctor` only validates config, not provider acceptance), and complete provider-side setup: US 10DLC or toll-free verification, leaving the SNS sandbox, sender-ID registration where required, and extending `allowed_calling_codes`.
 
-**Phase 1 exit criteria:** `v0.1.0` tagged, CI green on GitHub. (The logout URL fix is done.)
+**Phase 1 exit criteria:** met: released and tagged, CI green on GitHub.
 
 ---
 
@@ -234,7 +222,7 @@ The step-by-step guide for developers is [docs/integration.md](../../docs/integr
 Each app gets these steps on its own feature branch. App-specific deviations are in Phases 3–5.
 
 1. **Install**
-   - Add the Composer repository: `vcs` with the public HTTPS URL (`https://github.com/strontiumcorp/laravel-mfa`), no credentials; require `^0.4` (raise it for each new minor below 1.0).
+   - Add the Composer repository: `vcs` with the public HTTPS URL (`https://github.com/strontiumcorp/laravel-mfa`), no credentials; require the current minor, e.g. `^0.5` (below 1.0 a caret only allows patches, so raise it for each new minor).
    - `composer require strontiumcorp/laravel-mfa`
    - `php artisan mfa:install` (publishes `config/mfa.php`, the pages and `mfa-context.ts` into `resources/js/{Pages|pages}/mfa/`, and the components into `resources/js/components/vendor/laravel-mfa/`)
    - `php artisan migrate`
@@ -248,8 +236,8 @@ Each app gets these steps on its own feature branch. App-specific deviations are
 4. **API-key auth:** in `ApiKeyAuth` / `MultiAuth`, change `auth()->login($user)` to `auth()->setUser($user)` (stateless; stops API keys from minting browser sessions).
 5. **Impersonation:** confirm it still works. Login-swap impersonation needs `Mfa::grantForImpersonation()`.
 6. **UI**
-   - Wrap the published pages in the app's layouts.
-   - Add `<MfaSettingsCard {...mfaSettingsCardProps(useMfa())} renderLink={(link) => <Link {...link} />} />` (from `@/components/vendor/laravel-mfa/settings-card`) to the account settings page.
+   - Give the published pages the app's layouts as persistent layouts in the Inertia `resolve` callback (`mfa/settings` → the authenticated layout; `mfa/challenge` needs none, only whatever keeps the app's dark-mode class in sync), so `mfa:install --force` can republish the pages untouched. artistly does this in `app.jsx`.
+   - Add `<MfaSettingsCard {...mfaSettingsCardProps(useMfa())} renderLink={(link) => <Link {...link} />} />` (from `@/components/vendor/laravel-mfa/settings-card`) to the account settings page as its own section (no wrapper); `className` adds to its classes, `!` overrides them.
    - Check that flash/status display works with the app's `HandleInertiaRequests`.
    - Share the context: `'mfa' => fn () => Mfa::context($request)` in `HandleInertiaRequests::share()`.
    - Show `<MfaApiKeyNotice {...mfaApiKeyNoticeProps(useMfa())} />` (from `@/components/vendor/laravel-mfa/api-key-notice` and `@/{Pages|pages}/mfa/mfa-context`) next to the API key settings.
@@ -276,25 +264,27 @@ Each app gets these steps on its own feature branch. App-specific deviations are
 
 ---
 
-## Phase 3 — artistly (Laravel 11, Inertia v2, React 18 / JSX, Kernel-style app) — `[ ]`
+## Phase 3 — artistly (Laravel 11, Inertia v2, React 18 / JSX, Kernel-style app) — `[~]`
 
-Working branch is currently `SDAP-786`; create a dedicated MFA branch.
+Integration is in progress on branch `SDAP-786` (uncommitted as of 2026-10-09); move it to a dedicated MFA branch before committing.
 
-- [x] **Prerequisite:** package fix 1.3 (configurable logout URL). Note (2026-10-09): on branch `SDAP-786` artistly's logout is the standard named `logout` route (`routes/auth.php:68`); `Admin\SettingsController::logout` exists but has no route. Re-check on the MFA branch.
+- [x] **Prerequisite:** package fix 1.3 (configurable logout URL). artistly's logout is the standard named `logout` route.
 - [ ] Laravel 11 is end-of-life and every 11.x has open advisories, so Composer may block installs. Use the separate advisory-triage task, and consider upgrading to Laravel 12 before or after MFA.
-- [ ] **Wait for v0.2.0** (D11): the published file layout changed. artistly hadn't published yet, so it takes the new layout directly.
-- [ ] Steps 1–3 of the Phase 2 checklist (pages go to `resources/js/Pages/mfa/`, `.tsx` resolves through the existing glob; components to `resources/js/components/vendor/laravel-mfa/`, next to the existing lowercase `components/`; imports use the `@/` alias, which artistly's `tsconfig.json` defines)
-- [ ] **Login-swap impersonation:**
-  - `Admin/UserController::switch_user` (swap at line 265 on `SDAP-786`): add `Mfa::grantForImpersonation($admin, $target)` after `Auth::loginUsingId()`. On the current branch this is the only login swap; re-grep for `loginUsingId` on the MFA branch in case others come back.
-  - `routes/web.php` `exit-impersonate`: no change expected (the admin's verified flag survives); verify only
-- [ ] `ApiKeyAuth` already uses `Auth::setUser()`, so no change is needed
-- [ ] `App\Jobs\ProcessBedtimeFlipbookJob` calls `Auth::guard('web')->loginUsingId()` inside a job. Harmless for MFA when queued (no session is persisted); confirm it is never dispatched synchronously from a web request, where it would swap the session's user.
-- [ ] `App\\Http\\Middleware\\TrustProxies` has `$proxies` unset. If production runs behind a load balancer/CDN, configure the proxy IPs, or every user shares one IP for the per-IP limits (`mfa:doctor` warns).
-- [ ] Kernel-style app (`app/Http/Kernel.php`, `app/Console/Kernel.php`): verify the middleware lands in the `web` group (`mfa:doctor`) and that `mfa:prune` appears in `schedule:list`
-- [ ] The settings page is `Pages/Profile/Edit.jsx`: add `MfaSettingsCard` (v0.3)
-- [ ] After v0.3: remove the `confirm_middleware => []` override comment in `config/mfa.php` and keep `password_confirmation => true` (the app's broken `Pages/Auth/ConfirmPassword.jsx` is no longer involved); add `withConfirmedPassword()` to any MFA test that adds/removes factors
-- [ ] Mount `MfaEnableNudge` in the global authenticated layout (`Layouts/AuthenticatedLayout.jsx`); check it against the app's toasts
-- [ ] Steps 6–9 of the checklist; manual QA
+- [x] Steps 1–3 of the Phase 2 checklist: `^0.4.2` installed from the public repo, pages in `resources/js/Pages/mfa/`, components in `resources/js/components/vendor/laravel-mfa/`, `User` implements `MultiFactorAuthenticatable`, `config/mfa.php` published, delivery queued under Horizon (email tested locally through Mailtrap).
+- [ ] Move to `^0.5` after v0.5.0 and republish with `mfa:install --force` (back up `config/mfa.php` first).
+- [ ] **Set `enforcement.roles`** (D5): still `[]` in artistly's `config/mfa.php`.
+- [x] **Login-swap impersonation:** `Admin/UserController::switch_user` calls `Mfa::grantForImpersonation($impersonator, $target)` after the swap.
+- [ ] `exit-impersonate`: no change expected (the admin's verified flag survives); verify in QA.
+- [x] `ApiKeyAuth` already uses `Auth::setUser()`, so no change was needed.
+- [ ] `App\Jobs\ProcessBedtimeFlipbookJob` calls `Auth::guard('web')->loginUsingId()` inside a job. Harmless when queued (no session is persisted); confirm it is never dispatched synchronously from a web request.
+- [ ] `App\Http\Middleware\TrustProxies` has `$proxies` unset. If production runs behind a load balancer/CDN, configure the proxy IPs, or every user shares one IP for the per-IP limits (`mfa:doctor` warns).
+- [ ] Kernel-style app: verify the middleware lands in the `web` group (`mfa:doctor`) and that `mfa:prune` appears in `schedule:list`.
+- [x] Context shared in `HandleInertiaRequests` (`'mfa' => fn () => Mfa::context($request)`).
+- [x] `MfaSettingsCard` on `Pages/Profile/Edit.jsx`; after v0.4.2 pass `className="mx-auto w-[90%] !border-0 !shadow sm:w-full dark:!bg-[#1E1F24]"` (or similar) so it matches the page's other sections.
+- [x] Page layouts set in `app.jsx`'s `resolve`: `mfa/settings` → `AuthenticatedLayout`, `mfa/challenge` → `SyncDarkModeLayout` (calls `useDarkMode()` so the `dark` class follows the cookie).
+- [x] `MfaEnableNudge` mounted in `Layouts/AuthenticatedLayout.jsx` with `disabled={!!original_user}`; check it against the app's toasts.
+- [ ] After v0.3: keep `password_confirmation => true` and drop any `confirm_middleware => []` override; add `withConfirmedPassword()` to MFA tests that add/remove factors.
+- [~] Steps 7–9 of the checklist: `tests/Feature/MfaIntegrationTest.php` exists; `mfa:doctor`, manual QA and the deploy step are still to do.
 
 ## Phase 4 — clone-voice (Laravel 12, Inertia v2, React 19, Octane, Google OAuth) — `[ ]`
 
@@ -364,7 +354,7 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
 | Risk | Mitigation |
 |---|---|
 | A route outside the `web` group serves session-authenticated pages | Audit each app's route groups during integration; add the `mfa` alias wherever needed |
-| SMS toll fraud | Calling-code allowlist, per-user hourly send cap (enrollment sends included), provider spend cap, launching without SMS |
+| SMS toll fraud | Calling-code allowlist; cooldown that spans logins; per-account hourly cap and per-type daily caps (SMS 5/day); app-wide caps for confirmed and unconfirmed sends; no resend after a "maybe delivered" timeout; provider spend cap; launching without SMS |
 | Users locked out | Recovery codes, multiple factors per user, `mfa:reset` runbook |
 | Laravel 11 EOL advisories (artistly) | Separate triage task; plan the L12 upgrade |
 | A boot-order difference drops the middleware | The package appends through the HTTP kernel; `mfa:doctor` checks it in every deploy |
@@ -496,3 +486,4 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
   - Settings card `className` adds again (user report from artistly: `className="max-w-xl"` left the card with no surface at all, since v0.4.1 made `className` replace it). The maintainer chose extending over replacing: overrides use Tailwind's important modifier. Test first; docs and the component comment updated.
   - The repository is public now: the install docs (README quickstart, integration.md step 1) use the HTTPS VCS URL with no credentials and `^0.4`, and the local symlinked path-repository instructions are gone.
   - Resend loop closed (maintainer report: with email or SMS, log in → code → verify → log out → log in sent a new code every round, bounded only by `send_per_hour`, about 240 a day; a cost/spam problem, not a bypass, since it needs the password and the inbox/phone). Three guardrails, tests first: (1) the cooldown curve spans logins: it counts every code sent for the factor in the last hour, and after a code used by a successful verification the next send waits one step lower, from that code's send (`Cooldown::after($streak - 1)`): first re-login free, then 2, 4, 8, 15 minutes; expired and burned codes still allow a send at once; a used code is told from a burned or expired one without a migration (`MfaOtpCode::wasVerified()`: fewer than `max_attempts` wrong guesses, consumed by `expires_at`); the challenge state reports `code_sent: false` with `retry_after`, and the page waits, says "You recently used a code sent to …", and sends once the wait ends (`challenge-form` `waiting`, `send-code-button` "You can get a new code in m:ss", `h:mm:ss` from an hour); the suspicious-requests warning still counts only unverified sends. (2)+(3) per-account daily caps per method, `factors.email.send_per_day` 15 and `factors.sms.send_per_day` 5 (`null`/`0` off and uncounted), login and enrollment, counted apart per type, rolled back with the other counters, new reason `daily_limit` (429) "You've had too many codes today. Try again in 5 hours, or use an authenticator app.", `FailureReason::isLimit()`. Docs: configuration.md, json-mode.md, integration.md (props and an upgrade note), CLAUDE.md; preview scenario "code used moments ago". 516 Pest and 328 Vitest tests; green on Laravel 11 lowest and type-checked in all three apps. Roadmap section added (remember-me).
+  - Plan refreshed (it still described 2026-10-08): Status and Snapshot now reflect the released package (v0.4.2, public repo, green full matrix on every tag, direct releases), D2 (public, no credentials), §1.5 done, Phase 1 exit criteria met, Phase 2's layout step (persistent layouts in `resolve`) and settings-card step (own section, `className` adds), Phase 3 marked in progress with artistly's actual state, and the SMS toll-fraud risk row with today's guardrails.
