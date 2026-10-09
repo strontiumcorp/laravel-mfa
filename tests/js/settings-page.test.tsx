@@ -101,6 +101,11 @@ describe('settings page', () => {
         await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+15555550100{Enter}');
         expect(screen.getByRole('heading', { name: 'Confirm your password' })).toBeInTheDocument();
 
+        // Asked inside the SMS card, where the number stays as typed.
+        const sms = screen.getByRole('heading', { name: 'SMS' }).closest('article') as HTMLElement;
+        expect(within(sms).getByLabelText('Password')).toHaveFocus();
+        expect(within(sms).getByLabelText('Phone number, with country code')).toHaveValue('+15555550100');
+
         await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
 
         expect(inertia.requests).toEqual([
@@ -117,10 +122,14 @@ describe('settings page', () => {
 
         inertia.respondWith(passwordRequired);
         await userEvent.click(screen.getByRole('button', { name: 'Remove Email' }));
+        const emailCard = screen.getByRole('heading', { name: 'Email' }).closest('article') as HTMLElement;
+        expect(within(emailCard).getByLabelText('Password')).toBeInTheDocument();
         await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
 
         inertia.respondWith(passwordRequired);
         await userEvent.click(screen.getByRole('button', { name: 'New codes' }));
+        const recoveryCard = screen.getByRole('heading', { name: 'Recovery codes' }).closest('article') as HTMLElement;
+        expect(within(recoveryCard).getByLabelText('Password')).toBeInTheDocument();
         await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
 
         expect(inertia.requests.map((r) => `${r.method} ${r.url}`)).toEqual([

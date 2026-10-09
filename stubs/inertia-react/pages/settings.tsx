@@ -47,12 +47,13 @@ export default function MfaSettings(props: Props) {
     const [regenerating, setRegenerating] = useState(false);
 
     // Adding or removing a factor and new recovery codes may answer "confirm
-    // your password first" (routes.password_confirmation): ask for it here,
-    // then retry the change.
+    // your password first" (routes.password_confirmation): ask for it inside
+    // the card where the change started, then retry the change.
+    type PromptAt = { factor: number } | { type: MfaFactorType } | 'recovery';
     const passwordForm = useForm<{ password?: string }>({});
-    const [retry, setRetry] = useState<(() => void) | null>(null);
-    const askPasswordFor = (action: () => void) => (errors: Record<string, string>) => {
-        if (errors.password_confirmation_required) setRetry(() => action);
+    const [retry, setRetry] = useState<{ action: () => void; at: PromptAt } | null>(null);
+    const askPasswordFor = (at: PromptAt, action: () => void) => (errors: Record<string, string>) => {
+        if (errors.password_confirmation_required) setRetry({ action, at });
     };
 
     const confirmPassword = (password: string) => {
@@ -67,14 +68,14 @@ export default function MfaSettings(props: Props) {
             onFinish: () => {
                 if (!confirmed) return;
                 setRetry(null);
-                retry?.();
+                retry?.action();
             },
         });
     };
 
     const add = (type: MfaFactorType, destination?: string) => {
         store.transform(() => (destination === undefined ? { type } : { type, destination }));
-        store.post(urls.store, { preserveScroll: true, onError: askPasswordFor(() => add(type, destination)) });
+        store.post(urls.store, { preserveScroll: true, onError: askPasswordFor({ type }, () => add(type, destination)) });
     };
 
     const confirmFactor = (id: number, code: string, onSuccess?: () => void) => {
@@ -117,7 +118,7 @@ export default function MfaSettings(props: Props) {
             preserveScroll: true,
             onStart: () => setRemovingId(factor.id),
             onFinish: () => setRemovingId(null),
-            onError: askPasswordFor(() => remove(factor)),
+            onError: askPasswordFor({ factor: factor.id }, () => remove(factor)),
         });
 
     const regenerate = (): void =>
@@ -125,7 +126,7 @@ export default function MfaSettings(props: Props) {
             preserveScroll: true,
             onStart: () => setRegenerating(true),
             onFinish: () => setRegenerating(false),
-            onError: askPasswordFor(regenerate),
+            onError: askPasswordFor('recovery', regenerate),
         });
 
     // Each setup in progress goes inside its method's card.
@@ -159,6 +160,17 @@ export default function MfaSettings(props: Props) {
             );
     }
 
+    const passwordPrompt = retry && (
+        <MfaPasswordConfirmForm
+            framed={false}
+            onConfirm={confirmPassword}
+            onCancel={() => setRetry(null)}
+            processing={passwordForm.processing}
+            error={passwordForm.errors.password}
+            retryAfter={passwordRetryAfter}
+        />
+    );
+
     // "Required" wins: an enforced user with only other methods is still held here.
     const state = mustEnroll
         ? { text: 'Required', className: 'bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-200' }
@@ -178,20 +190,11 @@ export default function MfaSettings(props: Props) {
                 <span className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium ${state.className}`}>{state.text}</span>
             </header>
 
-            {retry && (
-                <MfaPasswordConfirmForm
-                    onConfirm={confirmPassword}
-                    onCancel={() => setRetry(null)}
-                    processing={passwordForm.processing}
-                    error={passwordForm.errors.password}
-                    retryAfter={passwordRetryAfter}
-                />
-            )}
-
             <MfaFactorCards
                 types={availableTypes}
                 factors={factors}
                 setups={setups}
+                passwordPrompt={retry && retry.at !== 'recovery' ? { at: retry.at, node: passwordPrompt } : null}
                 onAdd={add}
                 onRemove={remove}
                 adding={store.processing}
@@ -229,6 +232,7 @@ export default function MfaSettings(props: Props) {
                         codes={totp || recoveryCodes === shownCodes ? null : recoveryCodes}
                         onRegenerate={regenerate}
                         processing={regenerating}
+                        passwordPrompt={retry?.at === 'recovery' ? passwordPrompt : null}
                     />
                 </section>
             )}

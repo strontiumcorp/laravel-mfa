@@ -71,4 +71,10 @@ describe('MfaRecoveryCodesPanel', () => {
 
         expect(screen.getByRole('button', { name: 'New codes' })).toBeDisabled();
     });
+
+    it('shows a password prompt inside the card', () => {
+        render(<MfaRecoveryCodesPanel remaining={8} total={10} onRegenerate={() => {}} passwordPrompt={<p>password prompt</p>} />);
+
+        expect(screen.getByRole('heading', { name: 'Recovery codes' }).closest('article')).toHaveTextContent('password prompt');
+    });
 });

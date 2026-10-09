@@ -6,7 +6,7 @@
 // imports no other component and knows nothing about Inertia or routes.
 //
 //     <MfaRecoveryCodesPanel remaining={recoveryCodesRemaining} total={recoveryCodesTotal} codes={recoveryCodes} onRegenerate={regenerate} />
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { MfaIconKey } from './icons';
 
 export type MfaRecoveryCodesPanelProps = {
@@ -20,6 +20,8 @@ export type MfaRecoveryCodesPanelProps = {
     processing?: boolean;
     /** Asks before regenerating; defaults to window.confirm(). */
     confirmRegenerate?: () => boolean;
+    /** A password prompt for New codes (e.g. <MfaPasswordConfirmForm framed={false} … />), shown inside this card. */
+    passwordPrompt?: ReactNode;
 };
 
 export default function MfaRecoveryCodesPanel({
@@ -29,6 +31,7 @@ export default function MfaRecoveryCodesPanel({
     onRegenerate,
     processing = false,
     confirmRegenerate = () => window.confirm('Generate new codes? Your old codes will stop working.'),
+    passwordPrompt = null,
 }: MfaRecoveryCodesPanelProps) {
     const [copied, setCopied] = useState(false);
 
@@ -118,6 +121,9 @@ export default function MfaRecoveryCodesPanel({
                 >
                     New codes
                 </button>
+                {passwordPrompt && (
+                    <div className="col-span-full -mx-4 border-t border-gray-100 px-4 pt-4 sm:-mx-6 sm:px-6 sm:pl-[6.25rem] dark:border-gray-800">{passwordPrompt}</div>
+                )}
             </article>
         </section>
     );

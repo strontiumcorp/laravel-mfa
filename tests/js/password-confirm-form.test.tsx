@@ -76,4 +76,11 @@ describe('MfaPasswordConfirmForm', () => {
 
         expect(screen.getByRole('button', { name: 'Try again in 24 h' })).toBeDisabled();
     });
+
+    it('puts Confirm after Cancel (on the right), and drops its box inside a card', () => {
+        render(<MfaPasswordConfirmForm onConfirm={() => {}} onCancel={() => {}} framed={false} />);
+
+        expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Cancel', 'Confirm']);
+        expect(screen.getByRole('region', { name: 'Confirm your password' })).not.toHaveClass('border');
+    });
 });

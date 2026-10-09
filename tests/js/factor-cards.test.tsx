@@ -95,18 +95,35 @@ describe('MfaFactorCards', () => {
         expect(screen.queryByRole('button', { name: 'Send code' })).not.toBeInTheDocument();
     });
 
-    it('closes the destination form after a send succeeds, and keeps it with the error after one fails', async () => {
+    it('keeps the destination form, with what was typed, until the code went out', async () => {
         const { rerender } = render(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} />);
         await userEvent.click(screen.getByRole('button', { name: 'Set up SMS' }));
+        await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+15555550100');
 
         rerender(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} adding />);
         expect(screen.getByRole('button', { name: 'Send code' })).toBeDisabled();
+        // Refused (an error, or a password prompt): still open, number kept.
         rerender(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} error="We can't send verification codes to this destination." />);
         expect(within(card('SMS')).getByRole('alert')).toHaveTextContent("We can't send verification codes to this destination.");
-
-        rerender(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} adding />);
         rerender(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} />);
+        expect(screen.getByLabelText('Phone number, with country code')).toHaveValue('+15555550100');
+
+        // Sent: the setup arrives and takes the form's place.
+        rerender(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} setups={{ sms: <p>code entry</p> }} />);
         expect(screen.queryByRole('button', { name: 'Send code' })).not.toBeInTheDocument();
+        rerender(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} />);
+        expect(screen.queryByLabelText('Phone number, with country code')).not.toBeInTheDocument();
+    });
+
+    it('shows a password prompt inside the card where the change started', () => {
+        const prompt = <p>password prompt</p>;
+        const { rerender } = render(<MfaFactorCards types={types} factors={[email]} onAdd={noop} onRemove={noop} passwordPrompt={{ at: { factor: 7 }, node: prompt }} />);
+        expect(within(card('Email')).getByText('password prompt')).toBeInTheDocument();
+        expect(screen.getAllByText('password prompt')).toHaveLength(1);
+
+        rerender(<MfaFactorCards types={types} factors={[email]} onAdd={noop} onRemove={noop} passwordPrompt={{ at: { type: 'sms' }, node: prompt }} />);
+        expect(within(card('SMS')).getByText('password prompt')).toBeInTheDocument();
+        expect(within(card('Email')).queryByText('password prompt')).not.toBeInTheDocument();
     });
 
     it('shows an error from adding an authenticator app under the list', () => {
@@ -158,5 +175,20 @@ describe('MfaFactorCards', () => {
         render(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} adding />);
 
         expect(screen.getByRole('button', { name: 'Set up Authenticator app' })).toBeDisabled();
+    });
+
+    it('makes the password the only next step while it is asked in a card', async () => {
+        const { rerender } = render(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} />);
+        await userEvent.click(screen.getByRole('button', { name: 'Set up SMS' }));
+        await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+15555550100');
+
+        rerender(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} passwordPrompt={{ at: { type: 'sms' }, node: <p>password prompt</p> }} />);
+
+        expect(screen.getByRole('button', { name: 'Send code' })).toBeDisabled();
+        expect(within(card('SMS')).queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+
+        rerender(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} />);
+        expect(screen.getByRole('button', { name: 'Send code' })).toBeEnabled();
+        expect(within(card('SMS')).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     });
 });

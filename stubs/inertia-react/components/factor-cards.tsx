@@ -15,7 +15,7 @@
 //         required={mustEnroll}
 //         requiredTypes={requiredTypes.map((t) => t.type)}
 //     />
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { MfaFactorIcon, MfaIconCheck, MfaIconShieldAlert, type MfaFactorType } from './icons';
 
 export type { MfaFactorType };
@@ -45,6 +45,12 @@ export type MfaFactorCardsProps<F extends MfaCardFactor = MfaCardFactor> = {
     onRemove: (factor: F) => void;
     /** A setup in progress per type (QR code, code entry), shown inside that type's card. */
     setups?: Partial<Record<MfaFactorType, ReactNode>>;
+    /**
+     * A password prompt (e.g. <MfaPasswordConfirmForm framed={false} … />), shown
+     * inside the card where the change started: a method's card (`factor`, for
+     * Remove) or a type's card (`type`, for Set up). The user's focus stays put.
+     */
+    passwordPrompt?: { at: { factor: number } | { type: MfaFactorType }; node: ReactNode } | null;
     /** Adding is in flight. */
     adding?: boolean;
     /** From adding, e.g. an invalid phone number. */
@@ -110,6 +116,7 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
     onAdd,
     onRemove,
     setups = {},
+    passwordPrompt = null,
     adding = false,
     error = null,
     removingId = null,
@@ -126,12 +133,20 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
         setDestination('');
     };
 
-    // Close the destination form once a submission finishes without an error.
-    const wasAdding = useRef(adding);
+    // Close the destination form once its code went out: the setup for that
+    // type has arrived. (A failure or a password prompt keeps it, with what was typed.)
+    const sentSetup = entering ? setups[entering] : null;
     useEffect(() => {
-        if (wasAdding.current && !adding && !error) close();
-        wasAdding.current = adding;
-    }, [adding, error]);
+        if (sentSetup) close();
+    }, [sentSetup]);
+
+    const promptIn = (at: { factor: number } | { type: MfaFactorType }) => {
+        if (!passwordPrompt) return null;
+        const p = passwordPrompt.at;
+        const here = 'factor' in at ? 'factor' in p && p.factor === at.factor : 'type' in p && p.type === at.type;
+
+        return here ? <div className="border-t border-gray-100 px-4 py-4 sm:px-6 sm:py-5 sm:pl-[6.25rem] dark:border-gray-800">{passwordPrompt.node}</div> : null;
+    };
 
     const start = (type: MfaFactorType) => {
         if (type === 'totp') return onAdd('totp');
@@ -199,6 +214,7 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
                         <dd className="text-gray-900 dark:text-gray-100">{f.last_used_at ? formatDate(f.last_used_at) : 'Never'}</dd>
                     </div>
                 </dl>
+                {promptIn({ factor: f.id })}
             </article>
         );
     };
@@ -206,6 +222,8 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
     const availableCard = (type: MfaFactorType, label: string, recommended: boolean) => {
         const setup = setups[type];
         const open = !!setup || entering === type;
+        // While the password is asked here, it's the card's only next step.
+        const prompting = !!passwordPrompt && 'type' in passwordPrompt.at && passwordPrompt.at.type === type;
         const delivered = type !== 'totp';
         const highlight = open || suggested(type, recommended);
 
@@ -254,7 +272,7 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
                             Set up
                         </button>
                     )}
-                    {entering === type && !setup && (
+                    {entering === type && !setup && !prompting && (
                         <button type="button" onClick={close} className={`${ACTION} min-h-11 shrink-0 px-3 text-sm font-medium text-gray-600 dark:text-gray-400`}>
                             Cancel
                         </button>
@@ -307,7 +325,7 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
                                         autoFocus
                                         className="min-h-11 w-full max-w-xs rounded-lg border border-gray-300 px-3 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
                                     />
-                                    <button type="submit" disabled={adding || (type === 'sms' && destination.trim() === '')} className={PRIMARY}>
+                                    <button type="submit" disabled={adding || prompting || (type === 'sms' && destination.trim() === '')} className={PRIMARY}>
                                         Send code
                                     </button>
                                 </div>
@@ -320,6 +338,7 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
                         )}
                     </div>
                 )}
+                {promptIn({ type })}
             </article>
         );
     };
