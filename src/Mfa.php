@@ -123,25 +123,30 @@ class Mfa
     |--------------------------------------------------------------------------
     */
 
+    /**
+     * Whether this user has a confirmed factor of an enabled type. The cache
+     * holds the user's confirmed types (all of them), and the enabled types
+     * are applied on every read, so turning a type off or on in config takes
+     * effect at once, with no stale "has MFA" in either direction.
+     */
     public function hasConfirmedFactors(MultiFactorAuthenticatable $user): bool
     {
         $key = $this->cacheKey($user->getAuthIdentifier());
         $cached = $this->cacheStore()->get($key);
 
-        if ($cached !== null) {
-            // Equivalent mutant(s): the bool return type coerces.
-            return (bool) $cached; // @pest-mutate-ignore: RemoveBooleanCast
+        if (is_string($cached)) {
+            return $this->anyEnabled($cached);
         }
 
-        $has = $this->queryHasConfirmedFactors($user->getAuthIdentifier());
+        $types = $this->queryConfirmedTypes($user->getAuthIdentifier());
 
         // add(), not put(): if a factor changed while we were querying, its
         // model event has already written the fresh answer — never let this
         // possibly-stale read overwrite it.
-        // Equivalent mutant(s): ints (not bools) keep stores that return false for a miss unambiguous, which the array store can't show; ttl is an int.
-        $this->cacheStore()->add($key, (int) $has, (int) $this->config->get('mfa.cache.ttl')); // @pest-mutate-ignore: RemoveIntegerCast
+        // Equivalent mutant(s): ttl is an int.
+        $this->cacheStore()->add($key, $types, (int) $this->config->get('mfa.cache.ttl')); // @pest-mutate-ignore: RemoveIntegerCast
 
-        return $has;
+        return $this->anyEnabled($types);
     }
 
     public function forgetCachedState(MultiFactorAuthenticatable $user): void
@@ -158,20 +163,40 @@ class Mfa
     {
         $this->cacheStore()->put(
             $this->cacheKey($userId),
-            // Equivalent mutant(s): see add() above.
-            (int) $this->queryHasConfirmedFactors($userId), // @pest-mutate-ignore: RemoveIntegerCast
+            $this->queryConfirmedTypes($userId),
             (int) $this->config->get('mfa.cache.ttl'),
         );
     }
 
-    private function queryHasConfirmedFactors(int|string $userId): bool
+    /**
+     * The user's confirmed factor types, enabled or not, as "|email|totp|"
+     * ("|" for none): a non-empty string, so it is never confused with a
+     * store's false or null for a miss.
+     */
+    private function queryConfirmedTypes(int|string $userId): string
     {
-        return MfaFactor::query()
+        $types = MfaFactor::query()
             ->where('user_id', $userId)
             ->whereNotNull('confirmed_at')
-            // Equivalent mutant(s): Eloquent binds backed enums by value.
-            ->whereIn('type', array_map(fn (FactorType $t) => $t->value, $this->enabledTypes())) // @pest-mutate-ignore: UnwrapArrayMap
-            ->exists();
+            ->distinct()
+            ->pluck('type')
+            ->map(fn (FactorType|string $type) => $type instanceof FactorType ? $type->value : $type)
+            ->sort()
+            ->implode('|');
+
+        return '|'.$types.($types === '' ? '' : '|');
+    }
+
+    /** Whether any enabled type is in a queryConfirmedTypes() string. */
+    private function anyEnabled(string $types): bool
+    {
+        foreach ($this->enabledTypes() as $type) {
+            if (str_contains($types, '|'.$type->value.'|')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -711,7 +736,8 @@ class Mfa
 
     private function cacheKey(int|string $userId): string
     {
-        return $this->config->get('mfa.cache.prefix').':has-factors:'.$userId;
+        // "factor-types", not v0.x's "has-factors" (0/1): old entries are never read.
+        return $this->config->get('mfa.cache.prefix').':factor-types:'.$userId;
     }
 
     private function cacheStore(): Cache

@@ -140,7 +140,7 @@ it('[#1] caps verification attempts per day, not just per minute', function () {
 
 it('[#5] a stale "no MFA" read cannot overwrite the answer written when a factor is confirmed', function () {
     $user = $this->makeUser();
-    $key = 'mfa:has-factors:'.$user->id;
+    $key = 'mfa:factor-types:'.$user->id;
 
     // Request A starts its fill and reads "no factors"...
     $staleRead = Mfa::hasConfirmedFactors($user); // fills the cache with 0
@@ -149,12 +149,37 @@ it('[#5] a stale "no MFA" read cannot overwrite the answer written when a factor
 
     // ...meanwhile the user confirms a factor (model event writes through)...
     $this->createMfaFactor($user);
-    expect(cache()->get($key))->toBe(1);
+    expect(cache()->get($key))->toBe('|totp|');
 
     // ...then A's late write arrives. add() must not clobber the fresh value.
-    cache()->add($key, 0, 3600);
+    cache()->add($key, '|', 3600);
 
     expect(Mfa::hasConfirmedFactors($user))->toBeTrue();
+});
+
+it('applies a factor type being turned off or on at once, without forgetting the cache', function () {
+    $this->freshGuards();
+    [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+    expect(Mfa::hasConfirmedFactors($user))->toBeTrue(); // cached
+
+    // Off: an SMS-only user isn't challenged by it any more (D10), so they
+    // must not be held at a challenge with nothing to choose from.
+    config(['mfa.factors.sms.enabled' => false]);
+    expect(Mfa::hasConfirmedFactors($user))->toBeFalse();
+    $this->loginWithSession($user)->get('/dashboard')->assertOk();
+
+    // On again: challenged at once, not after cache.ttl.
+    config(['mfa.factors.sms.enabled' => true]);
+    expect(Mfa::hasConfirmedFactors($user))->toBeTrue();
+    $this->freshGuards()->loginWithSession($user)->get('/dashboard')->assertRedirect(route('mfa.challenge'));
+
+    // And a factor added while the type was off is seen when it comes back.
+    config(['mfa.factors.sms.enabled' => false]);
+    $other = $this->makeUser();
+    expect(Mfa::hasConfirmedFactors($other))->toBeFalse();
+    $this->createMfaFactor($other, FactorType::Sms);
+    config(['mfa.factors.sms.enabled' => true]);
+    expect(Mfa::hasConfirmedFactors($other))->toBeTrue();
 });
 
 it('[#9] keeps raw transport errors (which can contain the address) out of the MFA log and audit table', function () {
