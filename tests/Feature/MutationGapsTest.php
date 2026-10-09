@@ -128,7 +128,7 @@ describe('SendGuard', function () {
         addSms('+15555550103', '198.51.100.2')->assertOk();          // global 2 of 2
         $this->freshGuards()->loginWithSession($this->makeUser());
         addSms('+15555550104', '198.51.100.3')->assertStatus(503);   // first breaker refusal
-        Event::assertDispatched(Events\SendingCircuitTripped::class, fn ($e) => $e->context === ['limit' => 2]);
+        Event::assertDispatched(Events\SendingCircuitTripped::class, fn ($e) => $e->context === ['limit' => 2, 'scope' => 'unconfirmed']);
     });
 
     it('reports retry_after on refusals, and the scope in the audit log', function () {

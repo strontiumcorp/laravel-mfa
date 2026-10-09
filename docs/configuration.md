@@ -142,7 +142,7 @@ Two separate budgets, so the protection against message bombing can't be used to
 
 | Sending to | Limits (defaults) |
 |---|---|
-| A confirmed destination (login codes) | Per-factor cooldown of 2 → 4 → 8 → 15 minutes, reset by a successful login or an hour of quiet. 10 sends per account per hour. No per-IP limit, so shared networks are fine. |
+| A confirmed destination (login codes) | Per-factor cooldown of 2 → 4 → 8 → 15 minutes, reset by a successful login or an hour of quiet. 10 sends per account per hour. 1000 per hour app-wide (`rate_limit.confirmed_global_per_hour`; `null` or `0` turns it off), then login codes pause for everyone until the hour's window frees up. No per-IP limit, so shared networks are fine. |
 | A new destination (enrollment) | 2 messages per destination per day across all accounts. 3 new destinations per account per day. 10 new destinations per IP per hour (IPv6 grouped per /64). 500 per hour app-wide, then sending pauses. |
 
 A refused request doesn't use up any quota. Responses include `retry_after`, and the pages show a countdown.
@@ -153,7 +153,9 @@ SMS numbers must also match `factors.sms.allowed_calling_codes` and not `factors
 
 Events to act on:
 - `SuspiciousCodeRequests`: repeated login codes without a successful login, which usually means the password leaked. Notify the owner.
-- `SendingCircuitTripped` (critical): the app-wide limit was hit. Alert on it.
+- `SendingCircuitTripped` (critical): an app-wide limit was hit, once per hour for each: `scope` is `unconfirmed` (enrollments paused) or `confirmed` (login codes paused; authenticator apps and recovery codes still work). Alert on it.
+
+**Choosing `confirmed_global_per_hour`.** It stops SMS pumping through many accounts that each stay under the per-account cap (each account's number was confirmed once, so the enrollment limits no longer apply). It counts every email and SMS login code. The default, 1000 an hour (about 17 a minute, sustained, and twice the enrollment breaker), is far above what a login flow of a few thousand daily users sends, since a code goes out only for a new session of a user with an email or SMS method. Set it to about three times your busiest hour of login codes (the `challenge_sent` metric or audit rows); a refused send costs no quota.
 
 ## SMS providers
 

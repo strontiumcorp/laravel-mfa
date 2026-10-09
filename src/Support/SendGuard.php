@@ -22,8 +22,9 @@ use StrontiumCorp\LaravelMfa\Models\MfaFactor;
  *    account and per IP (IPv6 per /64), and an app-wide circuit breaker.
  *  - Confirmed destinations (login) — only an account that proved ownership
  *    can use these, so a stranger can never drain them. Per-account hourly
- *    cap only (plus the per-factor cooldown curve in OtpStore). No per-IP cap,
- *    so many users behind one NAT are fine.
+ *    cap (plus the per-factor cooldown curve in OtpStore) and an app-wide
+ *    hourly cap against pumping through many accounts (off with null/0).
+ *    No per-IP cap, so many users behind one NAT are fine.
  *
  * Called only when a code will really be sent (after the cooldown check), so
  * rejected requests never consume budget.
@@ -63,6 +64,8 @@ final class SendGuard
         if (! $confirmed) {
             $counters[] = [CacheKey::for('send-unconfirmed', $destination), 'unconfirmed_per_destination_per_day', self::DAY, FailureReason::DestinationLimit, 'destination'];
             $counters[] = [CacheKey::for('send-unconfirmed', '*global*'), 'unconfirmed_global_per_hour', self::HOUR, FailureReason::SendingPaused, 'global'];
+        } elseif ($this->limit('confirmed_global_per_hour') > 0) {
+            $counters[] = [CacheKey::for('send-confirmed', '*global*'), 'confirmed_global_per_hour', self::HOUR, FailureReason::SendingPaused, 'confirmed_global'];
         }
 
         foreach ($counters as [$key, $limit, $decay, $reason, $scope]) {
@@ -137,9 +140,16 @@ final class SendGuard
 
     private function refuse(MfaFactor $factor, string $key, FailureReason $reason, string $scope): VerificationResult
     {
+        // An app-wide cap: alert once per hour for each.
+        $breaker = match ($scope) {
+            'global' => ['mfa:circuit-tripped', 'unconfirmed_global_per_hour', 'unconfirmed'],
+            'confirmed_global' => ['mfa:circuit-tripped:confirmed', 'confirmed_global_per_hour', 'confirmed'],
+            default => null,
+        };
+
         // Equivalent mutant: the flag's value is never read, only its presence.
-        if ($scope === 'global' && $this->cache->add('mfa:circuit-tripped', true, self::HOUR)) { // @pest-mutate-ignore: TrueToFalse
-            $this->events->dispatch(new SendingCircuitTripped(null, $factor->type, $reason, ['limit' => $this->limit('unconfirmed_global_per_hour')]));
+        if ($breaker !== null && $this->cache->add($breaker[0], true, self::HOUR)) { // @pest-mutate-ignore: TrueToFalse
+            $this->events->dispatch(new SendingCircuitTripped(null, $factor->type, $reason, ['limit' => $this->limit($breaker[1]), 'scope' => $breaker[2]]));
         }
 
         if ($scope === 'account' && $factor->isConfirmed()) {

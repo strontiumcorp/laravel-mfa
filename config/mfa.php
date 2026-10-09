@@ -268,6 +268,13 @@ return [
         'new_destinations_per_ip_per_hour' => 10,     // distinct destinations; IPv6 per /64
         'unconfirmed_global_per_hour' => 500,         // app-wide circuit breaker
 
+        // App-wide cap on login codes (confirmed destinations), against SMS
+        // pumping through many accounts that each stay under send_per_hour.
+        // When hit, codes pause for everyone until the hour's window frees
+        // up (SendingCircuitTripped, critical). Set it well above your peak:
+        // 1000 an hour is about 17 a minute, sustained; null or 0 = no cap.
+        'confirmed_global_per_hour' => 1000,
+
         // Fire SuspiciousCodeRequests after this many login-code sends with
         // no successful verification (0 = never). Someone may have the
         // password: listen to the event and warn the owner.

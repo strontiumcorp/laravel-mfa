@@ -56,6 +56,17 @@ it('error shapes: 422 invalid, 429 throttled, 403 from the middleware', function
         ->assertStatus(429)->assertExactJsonStructure(['message', 'errors' => ['code'], 'retry_after']);
 });
 
+it('error shape: 503 when an app-wide send cap is hit', function () {
+    config(['mfa.rate_limit.confirmed_global_per_hour' => 1]);
+    Mfa::fakeSms();
+    [$first, $factor] = $this->userWithFactor(FactorType::Sms);
+    $this->loginWithSession($first)->postJson('/mfa/challenge/send', ['factor_id' => $factor->id])->assertOk();
+
+    [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+    $this->freshGuards()->loginWithSession($user)->postJson('/mfa/challenge/send', ['factor_id' => $factor->id])
+        ->assertStatus(503)->assertExactJsonStructure(['message', 'errors' => ['code'], 'retry_after']);
+});
+
 it('GET /mfa/settings says how many recovery codes a fresh set has', function () {
     config(['mfa.recovery_codes.count' => 8]);
     $this->loginWithSession($this->makeUser());

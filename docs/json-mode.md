@@ -47,7 +47,7 @@ axios.interceptors.response.use(null, (error) => {
 |---|---|---|
 | `422` | Wrong, expired or reused code; invalid destination; unknown factor | `{ "message": "...", "errors": { "code": ["..."] } }`. Enrollment errors use the `destination` or `type` key instead of `code`. |
 | `429` | Rate limited; resend during the cooldown; too many codes to one destination today (`destination_limit`) | Same shape, plus `"retry_after": <seconds>` when known |
-| `503` | The app-wide send breaker is open (likely an attack). Logins with confirmed factors are unaffected. | Same shape |
+| `503` | An app-wide send cap was hit (likely an attack): new destinations (`unconfirmed_global_per_hour`), or login codes (`confirmed_global_per_hour`; authenticator apps and recovery codes still work) | Same shape, plus `"retry_after": <seconds>` until sending resumes |
 | `403` | Not verified yet (see above), or settings opened while a challenge is pending | `{ "error": "mfa_required", ... }` |
 | `423` | A factor change needs the password first (see [Password confirmation](#password-confirmation)) | `{ "message": "...", "error": "password_confirmation_required", "confirm_url": "…/mfa/confirm-password" }` |
 

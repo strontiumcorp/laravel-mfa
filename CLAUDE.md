@@ -86,7 +86,7 @@ Don't break these. Each one is covered by tests; read them before changing the a
 **Concurrency and cost**
 - OTP issue/verify run under a row lock on the factor (`OtpStore`); only the latest code is valid, burned after `max_attempts`. TOTP replay protection is a compare-and-set on `last_totp_timestep`. Recovery codes are consumed with an atomic conditional update.
 - Rate limits count **before** checking (atomic increment), so parallel bursts can't slip through.
-- Sends (`SendGuard`) have two budgets: confirmed destinations (cooldown curve + per-account hourly cap, no per-IP cap) and unconfirmed ones (per-destination daily cap across all accounts, distinct new destinations per account and per IP with IPv6 grouped per /64, global circuit breaker). The cooldown is checked first; every counter is rolled back if any limit refuses.
+- Sends (`SendGuard`) have two budgets: confirmed destinations (cooldown curve + per-account hourly cap + app-wide hourly cap, no per-IP cap) and unconfirmed ones (per-destination daily cap across all accounts, distinct new destinations per account and per IP with IPv6 grouped per /64, global circuit breaker). The cooldown is checked first; every counter is rolled back if any limit refuses.
 - A verified session costs zero MFA queries. "Has MFA" is cached; factor model events write through, and fills use `add()` so a stale read can't win.
 - Octane: singletons hold no per-request state. Resolve the request and auth from the live container (`Container::getInstance()`), never from the container captured at boot.
 
