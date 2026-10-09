@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.6.0 - 2026-10-10
+
+_Changes since `v0.5.2`._
+
+### Breaking changes
+
+- enrollment verification, owner security emails and trusted browsers (19135f7)
+
+### Fixes
+
+- **middleware:** answer blocked non-GET requests with 303, remember only page loads (ef5b26a)
+
+### Documentation
+
+- **plan:** log the artistly audit fixes, trusted browsers and both reviews (10a3f2a)
+
+### Other
+
+- docs (e9b840b)
+
 ## v0.5.2 - 2026-10-10
 
 _Changes since `v0.5.1`._
