@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.5.1 - 2026-10-10
+
+_Changes since `v0.5.0`._
+
+### Features
+
+- name the recovery codes file after the app, account and date (2ddaba9)
+
+### Fixes
+
+- start the challenge on the authenticator app when the user has one (506677d)
+- ask for one recovery code instead of a raw length error (d67c1e8)
+- **ui:** keep only the first recovery code when several are pasted (b02b45e)
+
+### Documentation
+
+- **plan:** log the challenge and recovery-code fixes (21bad0c)
+
 ## v0.5.0 - 2026-10-09
 
 _Changes since `v0.4.2`._
