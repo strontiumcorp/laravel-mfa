@@ -62,11 +62,12 @@ final class UiResponse
 
     /**
      * Success for an action taken from one of the app's own pages (e.g. the
-     * nudge): JSON, or back to that page (303) without an MFA status flash.
+     * nudge): JSON as success() returns it, or back to that page (303) with
+     * nothing flashed, so the app's page shows no MFA status message.
      *
      * @param  array<string, mixed>  $data  returned as JSON
      */
-    public function back(string $status, array $data = []): Response
+    public function backQuietly(string $status, array $data = []): Response
     {
         if ($this->wantsJson()) {
             return response()->json(['status' => $status, ...$data]);

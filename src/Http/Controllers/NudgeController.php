@@ -23,6 +23,6 @@ class NudgeController extends Controller
 
         event(new NudgeDismissed($user, null, null, ['until' => $until]));
 
-        return $ui->back('nudge-dismissed', ['until' => $until]);
+        return $ui->backQuietly('nudge-dismissed', ['until' => $until]);
     }
 }
