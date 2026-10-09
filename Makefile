@@ -59,8 +59,11 @@ typecheck-stubs: ## Type-check the React stubs against host apps, e.g. make type
 	@test -n "$(APPS)" || (echo 'Usage: make typecheck-stubs APPS="../app-one ../app-two"' && exit 1)
 	scripts/typecheck-stubs.sh $(APPS)
 
-release: ## Open the release pull request (CHANGELOG.md), e.g. make release ARGS="--dry-run" (see scripts/release.sh --help)
+release: ## Release from main: changelog commit and tag, pushed together, e.g. make release ARGS="--dry-run" (see scripts/release.sh --help)
 	scripts/release.sh $(ARGS)
+
+release-pr: ## For a protected main: open the release pull request instead (then make release-tag)
+	scripts/release.sh --pr $(ARGS)
 
 release-tag: ## Tag the merged release pull request and push the tag, e.g. make release-tag ARGS="--dry-run"
 	scripts/release.sh --tag $(ARGS)

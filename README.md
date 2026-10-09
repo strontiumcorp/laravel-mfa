@@ -110,11 +110,12 @@ make preview               # live preview of the pages and components, fake back
 make coverage              # with coverage; fails under 85%
 make test-matrix           # Laravel 11, 12 and 13, newest and lowest dependencies
 make typecheck-stubs APPS="../artistly ../clone-voice ../podcast-flow"
-make release               # open the release pull request; ARGS="--dry-run" to preview
-make release-tag           # after it's merged: tag it and push the tag
+make release               # release from main; ARGS="--dry-run" to preview
+make release-pr            # if main is protected: open a release pull request,
+make release-tag           #   then tag it once it's merged
 ```
 
-`main` only takes reviewed pull requests, so a release takes two steps. `make release` infers the version from the commit messages and opens a `chore: release vX.Y.Z` pull request that updates `CHANGELOG.md`. Once it's merged (any merge method; keep the title if you squash), `make release-tag` tags the merged release commit and pushes the tag. CI then runs the full matrix on the tag and publishes the GitHub Release.
+`make release` infers the version from the commit messages, updates `CHANGELOG.md`, and pushes `main` and an annotated tag after you confirm. If `main` is protected, `make release-pr` opens a `chore: release vX.Y.Z` pull request instead; once it's merged (any merge method; keep the title if you squash), `make release-tag` tags the merged release commit and pushes the tag. CI then runs the full matrix on the tag and publishes the GitHub Release.
 
 CI runs static analysis, the React component tests and 7 key combinations on every push. The full matrix (22 jobs) runs on release tags, nightly when `main` changed, and on demand.
 
