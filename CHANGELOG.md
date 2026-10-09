@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.4.0 - 2026-10-09
+
+_Changes since `v0.3.6`._
+
+### Features
+
+- a disabled nudge for impersonated sessions (fa2fc99)
+- treat a challenge code as gone once it expires (3fef507)
+- tell the challenge page when the code out expires (045f2a9)
+- say when sending resumes after an app-wide send cap (28828eb)
+- **sms:** cap login-code sends app-wide against SMS pumping (58a2aaa)
+- nudge users without two-factor to turn it on (e674956)
+- redesign the sign-in challenge around one method at a time (cb6c97c)
+- tell the challenge page how many digits each code has (880ef5b)
+- send the code when the challenge page opens (38356b8)
+
+### Fixes
+
+- show the countdown, not an error, when a code is already out (c9126dc)
+- keep the challenge countdown right after switching methods (cad41c2)
+- **sms:** never resend a code that may have been delivered (e1733a6)
+- run the MFA gate before route model binding (07cb42e)
+- cap a cooldown refusal's retry_after at the code's expiry (39b8f97)
+- apply a factor type being turned off or on at once (e271365)
+- **audit:** one row per limit window for refused requests (bbc6b68)
+- alert on a tripped send breaker once per window, not per fixed hour (fcd37e5)
+- **nudge:** record a dismissal only when it hides the nudge (c55794a)
+- forget the confirmed password on logout (6dcf697)
+- **octane:** resolve policies and the nudge from the live container (4ee78d2)
+- keep the resend cooldown on the challenge page after a refresh (553eb80)
+
+### Performance
+
+- read the "has MFA" cache once per request (db8cd2a)
+
+### Refactoring
+
+- one delivered check on the challenge page (256eab5)
+- **nudge:** one rule for who the nudge is for (e20a9e1)
+- name UiResponse::backQuietly() for what it skips (f779bd3)
+- carry the challenge send state as a value object (39e570d)
+
+### Documentation
+
+- **plan:** challenge countdown, cooldown and nudge fixes (131dbd9)
+- the challenge countdown across methods and refused resends (dbfd1b1)
+- log the 2026-10-09 audit follow-ups in the plan (2ad339c)
+- the nudge to turn on two-factor (332ee28)
+
+### Other
+
+- release through a pull request now that main is protected (4db5fe4)
+
 ## v0.3.6 - 2026-10-09
 
 _Changes since `v0.3.5`._
