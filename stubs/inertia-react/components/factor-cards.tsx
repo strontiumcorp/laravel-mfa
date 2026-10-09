@@ -16,7 +16,7 @@
 //         requiredTypes={requiredTypes.map((t) => t.type)}
 //     />
 import { useEffect, useState, type ReactNode } from 'react';
-import { MfaFactorIcon, MfaIconCheck, MfaIconShieldAlert, type MfaFactorType } from './icons';
+import { MfaFactorIcon, MfaIconCheck, MfaIconShieldAlert, MfaIconShieldLock, type MfaFactorType } from './icons';
 
 export type { MfaFactorType };
 
@@ -69,6 +69,11 @@ export type MfaFactorCardsProps<F extends MfaCardFactor = MfaCardFactor> = {
     requiredTypes?: MfaFactorType[];
     /** Asks before removing; defaults to window.confirm(). */
     confirmRemove?: (factor: F) => boolean;
+    /**
+     * A note above the methods for a user who has none yet and isn't
+     * required to (the settings page's `nudge`); not shown while `required`.
+     */
+    notice?: { title: string; body: string } | null;
 };
 
 // Phones get the short copy, so cards stay compact; from `sm` up, the full one.
@@ -130,6 +135,7 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
     required = false,
     requiredTypes = [],
     confirmRemove = () => window.confirm('Remove this method?'),
+    notice = null,
 }: MfaFactorCardsProps<F>) {
     // Which email/SMS card is asking for its destination.
     const [entering, setEntering] = useState<Exclude<MfaFactorType, 'totp'> | null>(null);
@@ -371,6 +377,16 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
                             {requiredLabels.length === 0 ? 'Your account needs two-factor authentication' : `Your account needs: ${requiredLabels.join(' or ')}`}
                         </p>
                         <p className="text-sm text-amber-800 dark:text-amber-200">Set it up to keep using the app. It takes about a minute.</p>
+                    </div>
+                </div>
+            )}
+
+            {!required && notice && (
+                <div role="note" className="flex gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 dark:border-indigo-900 dark:bg-indigo-950/40">
+                    <MfaIconShieldLock size={20} className="mt-0.5 shrink-0 text-indigo-700 dark:text-indigo-300" />
+                    <div className="space-y-0.5">
+                        <p className="text-sm font-semibold text-indigo-950 dark:text-indigo-100">{notice.title}</p>
+                        <p className="text-sm text-indigo-900 dark:text-indigo-200">{notice.body}</p>
                     </div>
                 </div>
             )}

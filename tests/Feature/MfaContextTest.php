@@ -14,7 +14,24 @@ it('describes a guest', function () {
         'passwordConfirmation' => false,
         'user' => null,
         'urls' => ['settings' => route('mfa.settings'), 'challenge' => route('mfa.challenge')],
+        'nudge' => [
+            'show' => false,
+            'title' => 'Protect your account',
+            'body' => 'Turn on two-factor sign-in now. It takes a minute and will soon be required.',
+            'button' => 'Turn on',
+            'dismissLabel' => 'Not today',
+            'dismissUrl' => route('mfa.nudge.dismiss'),
+        ],
     ]);
+});
+
+it('offers the nudge to a session user without MFA (tests/Feature/NudgeTest.php)', function () {
+    $this->loginWithSession($this->makeUser());
+
+    expect(Mfa::context(request()->setLaravelSession(session()->driver()))->nudge)->toMatchArray(['show' => true]);
+
+    config(['mfa.routes.enabled' => false]);
+    expect(Mfa::context(request()->setLaravelSession(session()->driver()))->nudge)->toMatchArray(['show' => false, 'dismissUrl' => null]);
 });
 
 it('describes the session user', function () {

@@ -32,6 +32,9 @@ class SettingsController extends Controller
         $user = $this->sessionUser($request, $this->mfa);
         $factors = $user->mfaFactors()->orderBy('id')->get();
 
+        $confirmed = $factors->filter(fn (MfaFactor $f) => $f->isConfirmed())->values();
+        $mustEnroll = $this->mfa->mustEnroll($user);
+
         $pending = $factors
             ->reject(fn (MfaFactor $f) => $f->isConfirmed())
             ->filter(fn (MfaFactor $f) => $this->mfa->isTypeEnabled($f->type)
@@ -42,13 +45,13 @@ class SettingsController extends Controller
             ->values();
 
         return $this->ui->page('settings', [
-            'factors' => $factors->filter(fn (MfaFactor $f) => $f->isConfirmed())->map(fn (MfaFactor $f) => $f->toPublicArray())->values(),
+            'factors' => $confirmed->map(fn (MfaFactor $f) => $f->toPublicArray()),
             'pending' => $pending,
             'availableTypes' => $this->availableTypes(),
             'recoveryCodesRemaining' => $recoveryCodes->remaining($user),
             // How many a fresh set has (recovery_codes.count), for the "8 of 10 left" meter.
             'recoveryCodesTotal' => (int) config('mfa.recovery_codes.count'),
-            'mustEnroll' => $this->mfa->mustEnroll($user),
+            'mustEnroll' => $mustEnroll,
             // What an enforced user must set up (enforcement.required_types); [] = any type.
             'requiredTypes' => $this->mfa->isEnforced($user)
                 ? array_map(fn (FactorType $t) => ['type' => $t->value, 'label' => $t->label()], $this->mfa->requiredTypes())
@@ -68,6 +71,11 @@ class SettingsController extends Controller
                 && ! $this->mfa->passwordRecentlyConfirmed($request->session()),
             // Seconds until the password prompt may be tried again (its own countdown).
             'passwordRetryAfter' => $request->session()->get(UiResponse::PASSWORD_RETRY_AFTER),
+            // The nudge's title and body, shown as a notice to a user with no
+            // method who isn't enforced (config mfa.nudge); null otherwise.
+            'nudge' => config('mfa.nudge.enabled') && $confirmed->isEmpty() && ! $mustEnroll
+                ? array_intersect_key($this->mfa->nudgeCopy(), ['title' => true, 'body' => true])
+                : null,
         ]);
     }
 

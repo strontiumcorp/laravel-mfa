@@ -4,6 +4,7 @@ namespace StrontiumCorp\LaravelMfa\Listeners;
 
 use Illuminate\Auth\Events\Logout;
 use Illuminate\Session\SessionManager;
+use StrontiumCorp\LaravelMfa\Support\Nudge;
 
 /**
  * Clears MFA verification when a user logs out.
@@ -11,7 +12,8 @@ use Illuminate\Session\SessionManager;
  * Laravel's Auth::logout() leaves the rest of the session intact unless the
  * app also calls session()->invalidate() (artistly's admin logout doesn't),
  * which would otherwise let the next password login in the same browser skip
- * the challenge.
+ * the challenge. The nudge's session mirror goes too: the next login asks
+ * the cache, which holds the dismissal per user.
  */
 final class ForgetMfaStateOnLogout
 {
@@ -21,6 +23,6 @@ final class ForgetMfaStateOnLogout
     {
         $store = $this->session->driver();
 
-        $store->forget(['mfa.verified', 'mfa.enroll', 'mfa.pending', 'mfa.flow_id', 'mfa.recovery_codes']);
+        $store->forget(['mfa.verified', 'mfa.enroll', 'mfa.pending', 'mfa.flow_id', 'mfa.recovery_codes', Nudge::SESSION_PREFIX]);
     }
 }

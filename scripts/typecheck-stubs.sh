@@ -21,9 +21,10 @@ for app in "$@"; do
   # The integration snippets from docs/integration.md step 6, as an app writes them.
   cat > "$work/pages/integration-examples.tsx" <<'TSX'
 import MfaApiKeyNotice from '@/components/vendor/laravel-mfa/api-key-notice';
+import MfaEnableNudge from '@/components/vendor/laravel-mfa/enable-nudge';
 import MfaSettingsCard from '@/components/vendor/laravel-mfa/settings-card';
-import { mfaApiKeyNoticeProps, mfaSettingsCardProps, useMfa } from '@/pages/mfa/mfa-context';
-import { Link } from '@inertiajs/react';
+import { mfaApiKeyNoticeProps, mfaNudgeProps, mfaSettingsCardProps, useMfa, useMfaNudge } from '@/pages/mfa/mfa-context';
+import { Link, router } from '@inertiajs/react';
 
 export default function AccountSettings() {
     const mfa = useMfa();
@@ -33,6 +34,23 @@ export default function AccountSettings() {
             <MfaSettingsCard {...mfaSettingsCardProps(mfa)} renderLink={(link) => <Link {...link} />} />
             <MfaSettingsCard {...mfaSettingsCardProps(mfa)} />
             <MfaApiKeyNotice {...mfaApiKeyNoticeProps(mfa)} />
+        </>
+    );
+}
+
+// The global layout: the nudge, as one line or wired by hand.
+export function Layout() {
+    const nudge = mfaNudgeProps(useMfa());
+
+    return (
+        <>
+            <MfaEnableNudge {...useMfaNudge()} />
+            <MfaEnableNudge {...useMfaNudge()} position="top-center" offset={[24, '5rem']} className="z-40" />
+            <MfaEnableNudge
+                {...nudge}
+                onDismiss={(timezone) => nudge.dismissUrl && router.post(nudge.dismissUrl, { timezone }, { preserveScroll: true, preserveState: true })}
+                renderLink={(link) => <Link {...link} />}
+            />
         </>
     );
 }

@@ -23,6 +23,7 @@ final class MfaContext implements Arrayable, JsonSerializable
      * @param  list<string>  $factors  enabled factor types
      * @param  array{hasMfa: bool, verified: bool, mustEnroll: bool}|null  $user  null for guests
      * @param  array{settings: string|null, challenge: string|null}  $urls  null when MFA routes are off
+     * @param  array{show: bool, title: string, body: string, button: string, dismissLabel: string, dismissUrl: string|null}  $nudge  the turn-on-two-factor nudge (config mfa.nudge)
      */
     public function __construct(
         public readonly bool $enabled,
@@ -30,10 +31,11 @@ final class MfaContext implements Arrayable, JsonSerializable
         public readonly bool $passwordConfirmation,
         public readonly ?array $user,
         public readonly array $urls,
+        public readonly array $nudge,
     ) {}
 
     /**
-     * @return array{enabled: bool, factors: list<string>, passwordConfirmation: bool, user: array{hasMfa: bool, verified: bool, mustEnroll: bool}|null, urls: array{settings: string|null, challenge: string|null}}
+     * @return array{enabled: bool, factors: list<string>, passwordConfirmation: bool, user: array{hasMfa: bool, verified: bool, mustEnroll: bool}|null, urls: array{settings: string|null, challenge: string|null}, nudge: array{show: bool, title: string, body: string, button: string, dismissLabel: string, dismissUrl: string|null}}
      */
     public function toArray(): array
     {
@@ -43,6 +45,7 @@ final class MfaContext implements Arrayable, JsonSerializable
             'passwordConfirmation' => $this->passwordConfirmation,
             'user' => $this->user,
             'urls' => $this->urls,
+            'nudge' => $this->nudge,
         ];
     }
 

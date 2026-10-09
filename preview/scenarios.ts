@@ -2,7 +2,7 @@
 // backend (backend.ts) takes it from there as you click through.
 import { factor, initialState, pendingTotp, type State } from './backend';
 
-export type Page = 'settings' | 'challenge' | 'account';
+export type Page = 'settings' | 'challenge' | 'account' | 'app';
 
 export type Scenario = { id: string; page: Page; title: string; state: () => State };
 
@@ -57,5 +57,6 @@ export const scenarios: Scenario[] = [
     },
     { id: 'challenge-email', page: 'challenge', title: 'Challenge · email only', state: () => initialState({ factors: [email()], recoveryCodesRemaining: 8 }) },
     { id: 'challenge-totp', page: 'challenge', title: 'Challenge · authenticator app only, no recovery codes', state: () => initialState({ factors: [totp()] }) },
+    { id: 'nudge', page: 'app', title: 'App page · nudge to turn two-factor on (no method yet)', state: () => initialState() },
     { id: 'account', page: 'account', title: 'Account settings · card and API-key notice', state: () => initialState({ factors: [totp()], recoveryCodesRemaining: 8 }) },
 ];

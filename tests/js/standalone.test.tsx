@@ -21,6 +21,7 @@ describe('published components', () => {
             'api-key-notice.tsx',
             'challenge-form.tsx',
             'destination-setup.tsx',
+            'enable-nudge.tsx',
             'factor-cards.tsx',
             'factor-list.tsx',
             'factor-setup-dialog.tsx',

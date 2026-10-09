@@ -165,6 +165,21 @@ describe('MfaFactorCards', () => {
         expect(screen.queryByText(/Doesn't meet/)).not.toBeInTheDocument();
     });
 
+    it('shows the nudge notice to a user who isn\'t required to set one up', () => {
+        const notice = { title: 'Protect your account', body: 'Turn on two-factor sign-in now.' };
+        const { rerender } = render(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} notice={notice} />);
+
+        expect(screen.getByRole('note')).toHaveTextContent('Protect your account');
+        expect(screen.getByRole('note')).toHaveTextContent('Turn on two-factor sign-in now.');
+        expect(within(screen.getByRole('note')).queryByRole('link')).not.toBeInTheDocument();
+        expect(within(screen.getByRole('note')).queryByRole('button')).not.toBeInTheDocument();
+
+        // The requirement's own note wins.
+        rerender(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} notice={notice} required />);
+        expect(screen.getByRole('note')).toHaveTextContent('Your account needs two-factor authentication');
+        expect(screen.getByRole('note')).not.toHaveTextContent('Protect your account');
+    });
+
     it('keeps methods of a type that is no longer offered, so they can be removed', () => {
         render(<MfaFactorCards types={types.filter((t) => t.type !== 'email')} factors={[email]} onAdd={noop} onRemove={noop} />);
 

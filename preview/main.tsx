@@ -4,11 +4,12 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import MfaApiKeyNotice from '../stubs/inertia-react/components/api-key-notice';
+import MfaEnableNudge, { type MfaEnableNudgePosition } from '../stubs/inertia-react/components/enable-nudge';
 import MfaSettingsCard from '../stubs/inertia-react/components/settings-card';
 import MfaChallenge from '../stubs/inertia-react/pages/challenge';
-import { mfaApiKeyNoticeProps, mfaSettingsCardProps, type MfaContext } from '../stubs/inertia-react/pages/mfa-context';
+import { mfaApiKeyNoticeProps, mfaSettingsCardProps, useMfaNudge, type MfaContext } from '../stubs/inertia-react/pages/mfa-context';
 import MfaSettings from '../stubs/inertia-react/pages/settings';
-import { CODE, PASSWORD, RECOVERY_CODE, challengeProps, settingsProps, type State } from './backend';
+import { CODE, NUDGE, PASSWORD, RECOVERY_CODE, challengeProps, settingsProps, urls, type State } from './backend';
 import { boot, Link, toasts, useBackendState } from './inertia';
 import { scenarios } from './scenarios';
 
@@ -30,7 +31,30 @@ function contextFor(s: State): MfaContext {
         passwordConfirmation: s.requirePassword,
         user: { hasMfa: s.factors.length > 0, verified: true, mustEnroll: s.mustEnroll },
         urls: { settings: '/mfa/settings', challenge: '/mfa/challenge' },
+        // As Mfa::context() decides it, for an app page (never shown on the MFA pages).
+        nudge: { show: s.factors.length === 0 && !s.mustEnroll && !s.nudgeDismissed, ...NUDGE, dismissUrl: urls.nudgeDismiss },
     };
+}
+
+const POSITIONS: MfaEnableNudgePosition[] = ['bottom-right', 'bottom-center', 'bottom-left', 'top-right', 'top-center', 'top-left'];
+
+/** Some app page under the nudge, as in an app's global layout. */
+function AppPage({ position }: { position: MfaEnableNudgePosition }) {
+    return (
+        <>
+            <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
+                <strong className="text-sm text-gray-900 dark:text-gray-100">Acme</strong>
+                <span className="text-sm text-gray-500 dark:text-gray-400">jane@example.com</span>
+            </header>
+            <div className="mx-auto max-w-3xl space-y-4 px-4 py-10">
+                <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Dashboard</h1>
+                {[1, 2, 3, 4].map((n) => (
+                    <div key={n} className="h-28 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900" />
+                ))}
+            </div>
+            <MfaEnableNudge {...useMfaNudge()} position={position} />
+        </>
+    );
 }
 
 /** What one frame renders: the page, driven by the fake backend. */
@@ -48,7 +72,9 @@ function Frame({ page }: { page: string }) {
     }, []);
 
     let content: ReactNode;
-    if (page === 'challenge') {
+    if (page === 'app') {
+        content = <AppPage position={(params.get('position') as MfaEnableNudgePosition) ?? 'bottom-right'} />;
+    } else if (page === 'challenge') {
         content = <MfaChallenge {...challengeProps(s)} />;
     } else if (page === 'account') {
         const mfa = contextFor(s);
@@ -79,15 +105,17 @@ function Shell() {
     const [scenario, setScenario] = useState(params.get('scenario') ?? scenarios[0].id);
     const [device, setDevice] = useState<Device>((params.get('device') as Device) ?? 'all');
     const [theme, setTheme] = useState<Theme>((params.get('theme') as Theme) ?? 'system');
+    const [position, setPosition] = useState<MfaEnableNudgePosition>((params.get('position') as MfaEnableNudgePosition) ?? 'bottom-right');
+    const isApp = scenarios.find((s) => s.id === scenario)?.page === 'app';
     const [reset, setReset] = useState(0);
 
     useEffect(() => {
         applyTheme(theme);
-        history.replaceState(null, '', `?scenario=${scenario}&device=${device}&theme=${theme}`);
-    }, [scenario, device, theme]);
+        history.replaceState(null, '', `?scenario=${scenario}&device=${device}&theme=${theme}&position=${position}`);
+    }, [scenario, device, theme, position]);
 
     const widths = device === 'all' ? Object.entries(DEVICES) : [[device, DEVICES[device]] as const];
-    const src = `?frame=1&scenario=${scenario}&theme=${theme}`;
+    const src = `?frame=1&scenario=${scenario}&theme=${theme}&position=${position}`;
     const select = 'rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900';
 
     return (
@@ -112,6 +140,15 @@ function Shell() {
                     <option value="light">Light</option>
                     <option value="dark">Dark</option>
                 </select>
+                {isApp && (
+                    <select aria-label="Position" value={position} onChange={(e) => setPosition(e.target.value as MfaEnableNudgePosition)} className={select}>
+                        {POSITIONS.map((p) => (
+                            <option key={p} value={p}>
+                                {p}
+                            </option>
+                        ))}
+                    </select>
+                )}
                 <button type="button" onClick={() => setReset((r) => r + 1)} className={select}>
                     Reset
                 </button>
@@ -139,7 +176,7 @@ if (params.has('frame')) {
     const found = scenarios.find((s) => s.id === params.get('scenario')) ?? scenarios[0];
     const theme = (params.get('theme') as Theme) ?? 'system';
     applyTheme(theme);
-    boot(found.state(), { mfa: contextFor(found.state()) });
+    boot(found.state(), (s) => ({ mfa: contextFor(s) }));
     root.render(<Frame page={found.page} />);
 } else {
     root.render(<Shell />);

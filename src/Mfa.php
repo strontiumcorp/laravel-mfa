@@ -30,6 +30,7 @@ use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForRoles;
 use StrontiumCorp\LaravelMfa\Sms\SmsManager;
 use StrontiumCorp\LaravelMfa\Support\MfaContext;
+use StrontiumCorp\LaravelMfa\Support\Nudge;
 use StrontiumCorp\LaravelMfa\Support\RequestContext;
 use StrontiumCorp\LaravelMfa\Support\SessionIdentity;
 use StrontiumCorp\LaravelMfa\Testing\FakeSmsSender;
@@ -526,7 +527,48 @@ class Mfa
                 'settings' => $routes ? route('mfa.settings') : null,
                 'challenge' => $routes ? route('mfa.challenge') : null,
             ],
+            nudge: [
+                'show' => $routes && $user !== null && $model instanceof MultiFactorAuthenticatable && $this->showsNudge($request, $model, $user),
+                ...$this->nudgeCopy(),
+                'dismissUrl' => $routes ? route('mfa.nudge.dismiss') : null,
+            ],
         );
+    }
+
+    /**
+     * Whether the turn-on-two-factor nudge (config mfa.nudge) is for this
+     * session user: no factor, not enforced (they're sent to enroll anyway),
+     * not on MFA's own pages, and not dismissed. Checked in that order, so a
+     * user with MFA costs nothing more and the others at most one cache read.
+     *
+     * @param  array{hasMfa: bool, verified: bool, mustEnroll: bool}  $state
+     */
+    private function showsNudge(Request $request, MultiFactorAuthenticatable $user, array $state): bool
+    {
+        return ! $state['hasMfa']
+            && ! $state['mustEnroll']
+            && $this->config->get('mfa.nudge.enabled')
+            && ! ($request->route() !== null && $request->routeIs('mfa.*'))
+            && ! $this->app->make(Nudge::class)->isDismissed($request->session(), $user);
+    }
+
+    /**
+     * The nudge's copy from config('mfa.nudge'), through the translator, so
+     * a lang/{locale}.json entry can translate it. The settings page shows
+     * the title and body as a notice.
+     *
+     * @return array{title: string, body: string, button: string, dismissLabel: string}
+     */
+    public function nudgeCopy(): array
+    {
+        $text = fn (string $key): string => (string) __((string) $this->config->get("mfa.nudge.{$key}"));
+
+        return [
+            'title' => $text('title'),
+            'body' => $text('body'),
+            'button' => $text('button'),
+            'dismissLabel' => $text('dismiss_label'),
+        ];
     }
 
     /*

@@ -107,6 +107,17 @@ export function MfaIconShieldCheck(props: MfaIconProps) {
     );
 }
 
+/** Turning two-factor on: a shield with a padlock. */
+export function MfaIconShieldLock(props: MfaIconProps) {
+    return (
+        <Svg strokeWidth={2} {...props}>
+            <path d="M12 3 5 6v5.5c0 4.3 3 8 7 9.5 4-1.5 7-5.2 7-9.5V6l-7-3Z" />
+            <rect x="9" y="11" width="6" height="4.5" rx="1" />
+            <path d="M10.5 11V9.75a1.5 1.5 0 0 1 3 0V11" />
+        </Svg>
+    );
+}
+
 export function MfaIconCheck(props: MfaIconProps) {
     return (
         <Svg strokeWidth={3} {...props}>

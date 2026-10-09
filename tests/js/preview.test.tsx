@@ -9,7 +9,7 @@ vi.mock('@inertiajs/react', async () => (await import('./inertia-mock')).inertia
 // `make preview` must keep working as the pages change: every scenario renders,
 // and the fake backend follows the package's rules.
 describe('UI preview', () => {
-    it.each(scenarios.filter((s) => s.page !== 'account'))('renders the "$title" scenario', ({ page, state }) => {
+    it.each(scenarios.filter((s) => s.page === 'settings' || s.page === 'challenge'))('renders the "$title" scenario', ({ page, state }) => {
         const s = state();
         render(page === 'challenge' ? <MfaChallenge {...challengeProps(s)} /> : <MfaSettings {...settingsProps(s)} />);
 
@@ -28,6 +28,15 @@ describe('UI preview', () => {
         expect(handle(s, 'post', `/mfa/factors/${pending.id}/confirm`, { code: CODE })).toEqual({});
         expect(s.factors.map((f) => f.type)).toEqual(['totp']);
         expect(settingsProps(s).recoveryCodes).toHaveLength(10);
+    });
+
+    it('takes "Not today" on the nudge, and offers the settings notice to users without a method', () => {
+        const s = initialState();
+        expect(settingsProps(s).nudge).toMatchObject({ title: 'Protect your account' });
+
+        expect(handle(s, 'post', '/mfa/nudge/dismiss', { timezone: 'Asia/Dhaka' }).errors).toBeUndefined();
+        expect(s.nudgeDismissed).toBe(true);
+        expect(settingsProps(initialState({ mustEnroll: true })).nudge).toBeNull();
     });
 
     it('asks for the password first when the scenario says so', () => {

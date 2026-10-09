@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use StrontiumCorp\LaravelMfa\Http\Controllers\ChallengeController;
+use StrontiumCorp\LaravelMfa\Http\Controllers\NudgeController;
 use StrontiumCorp\LaravelMfa\Http\Controllers\SettingsController;
 use StrontiumCorp\LaravelMfa\Http\Middleware\BindMfaContext;
 use StrontiumCorp\LaravelMfa\Http\Middleware\EnsureMfaVerified;
@@ -29,4 +30,7 @@ Route::prefix(config('mfa.routes.prefix'))
         Route::post('factors/{factor}/resend', [SettingsController::class, 'resend'])->name('factors.resend');
         Route::delete('factors/{factor}', [SettingsController::class, 'destroy'])->middleware($confirm)->name('factors.destroy');
         Route::post('recovery-codes', [SettingsController::class, 'regenerateRecoveryCodes'])->middleware($confirm)->name('recovery-codes.store');
+
+        // "Not today" on the turn-on-two-factor nudge (users without factors pass the gate).
+        Route::post('nudge/dismiss', [NudgeController::class, 'dismiss'])->name('nudge.dismiss');
     });

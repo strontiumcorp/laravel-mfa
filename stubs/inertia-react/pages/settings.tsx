@@ -26,6 +26,8 @@ type Props = {
     mustEnroll: boolean;
     /** What an enforced user must set up; [] = any method. */
     requiredTypes: { type: MfaFactorType; label: string }[];
+    /** The nudge's title and body, as a notice for a user with no method who isn't enforced (config mfa.nudge); null otherwise. */
+    nudge: { title: string; body: string } | null;
     status: string | null;
     urls: { store: string; confirm: string; resend: string; destroy: string; recoveryCodes: string; confirmPassword: string };
 };
@@ -46,6 +48,7 @@ export default function MfaSettings(props: Props) {
         retryAfter,
         passwordRetryAfter,
         passwordConfirmationRequired,
+        nudge,
         urls,
     } = props;
 
@@ -245,6 +248,7 @@ export default function MfaSettings(props: Props) {
                 removingId={removingId}
                 required={mustEnroll}
                 requiredTypes={requiredTypes.map((t) => t.type)}
+                notice={nudge}
             />
 
             {dialogType && (

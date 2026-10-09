@@ -1,5 +1,6 @@
 <?php
 
+use Carbon\CarbonImmutable;
 use PragmaRX\Google2FA\Google2FA;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
@@ -68,7 +69,7 @@ it('GET /mfa/settings and the enrollment endpoints', function () {
 
     $this->getJson('/mfa/settings')->assertOk()->assertExactJsonStructure([
         'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label', 'recommended']], 'recoveryCodesRemaining', 'recoveryCodesTotal', 'mustEnroll', 'requiredTypes',
-        'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'confirmPassword'], 'passwordConfirmationRequired', 'passwordRetryAfter', 'status', 'recoveryCodes', 'retryAfter',
+        'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'confirmPassword'], 'passwordConfirmationRequired', 'passwordRetryAfter', 'nudge' => ['title', 'body'], 'status', 'recoveryCodes', 'retryAfter',
     ]);
 
     $created = $this->postJson('/mfa/factors', ['type' => 'totp'])->assertOk()->assertExactJsonStructure([
@@ -116,6 +117,15 @@ it('POST /mfa/confirm-password', function () {
         'errors' => ['password' => ['The provided password is incorrect.']],
     ]);
     $this->postJson('/mfa/confirm-password', ['password' => 'password'])->assertExactJson(['status' => 'password-confirmed']);
+});
+
+it('POST /mfa/nudge/dismiss', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-10-09T20:00:00Z'));
+    $this->loginWithSession($this->makeUser());
+
+    $this->postJson('/mfa/nudge/dismiss', ['timezone' => 'Asia/Dhaka'])
+        ->assertOk()
+        ->assertExactJson(['status' => 'nudge-dismissed', 'until' => '2026-10-10T18:00:00+00:00']);
 });
 
 it('POST /mfa/confirm-password over the attempt limit', function () {

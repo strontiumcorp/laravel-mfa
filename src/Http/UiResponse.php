@@ -61,6 +61,21 @@ final class UiResponse
     }
 
     /**
+     * Success for an action taken from one of the app's own pages (e.g. the
+     * nudge): JSON, or back to that page (303) without an MFA status flash.
+     *
+     * @param  array<string, mixed>  $data  returned as JSON
+     */
+    public function back(string $status, array $data = []): Response
+    {
+        if ($this->wantsJson()) {
+            return response()->json(['status' => $status, ...$data]);
+        }
+
+        return redirect()->back(303, [], (string) config('mfa.routes.home'));
+    }
+
+    /**
      * Success that leaves the MFA screens for the app (after a challenge).
      * Inertia gets a full page visit (409 + X-Inertia-Location): the target
      * may not be an Inertia page, and a fresh load also picks up the

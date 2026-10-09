@@ -30,6 +30,8 @@ export type State = {
     requirePassword: boolean;
     passwordConfirmed: boolean;
     passwordAttempts: number;
+    /** "Not today" on the nudge was clicked (until the frame reloads). */
+    nudgeDismissed: boolean;
     /** Challenge: when each email/SMS factor's code went out (ms), for its send state. */
     codeSentAt: Record<number, number>;
     // One-request flashes, as the package's session flashes.
@@ -57,6 +59,14 @@ export const urls = {
         confirmPassword: '/mfa/confirm-password',
     },
     challenge: { send: '/mfa/challenge/send', verify: '/mfa/challenge', recover: '/mfa/challenge/recover', logout: '/logout' },
+    nudgeDismiss: '/mfa/nudge/dismiss',
+};
+
+export const NUDGE = {
+    title: 'Protect your account',
+    body: 'Turn on two-factor sign-in now. It takes a minute and will soon be required.',
+    button: 'Turn on',
+    dismissLabel: 'Not today',
 };
 
 let nextId = 100;
@@ -99,6 +109,7 @@ export function initialState(overrides: Partial<State> = {}): State {
         passwordConfirmed: false,
         passwordAttempts: 0,
         codeSentAt: {},
+        nudgeDismissed: false,
         status: null,
         retryAfter: null,
         passwordRetryAfter: null,
@@ -215,6 +226,11 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
 
     if (method === 'post' && url === urls.challenge.logout) return { toast: 'Signed out (preview).' };
 
+    if (method === 'post' && url === urls.nudgeDismiss) {
+        s.nudgeDismissed = true;
+        return { toast: `Hidden until midnight in ${String(data.timezone ?? 'the app timezone')} (preview).` };
+    }
+
     return { toast: `No preview handler for ${method.toUpperCase()} ${url}` };
 }
 
@@ -232,6 +248,7 @@ export function settingsProps(s: State) {
         requiredTypes: s.mustEnroll || s.requiredTypes.length > 0 ? s.requiredTypes.map((type) => ({ type, label: LABELS[type] })) : [],
         passwordRetryAfter: s.passwordRetryAfter,
         passwordConfirmationRequired: s.requirePassword && !s.passwordConfirmed,
+        nudge: s.factors.length === 0 && !s.mustEnroll ? { title: NUDGE.title, body: NUDGE.body } : null,
         status: s.status,
         recoveryCodes: s.recoveryCodes,
         retryAfter: s.retryAfter,
