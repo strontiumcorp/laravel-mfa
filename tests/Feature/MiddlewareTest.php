@@ -244,3 +244,105 @@ describe('enforcement (D5)', function () {
         expect(Mfa::mustEnroll($user))->toBeFalse();
     });
 });
+
+describe('denials of non-GET and background requests', function () {
+    beforeEach(function () {
+        Route::middleware(['web', 'auth'])->match(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], '/things/{id}', fn () => 'thing');
+    });
+
+    it('answers a blocked PUT, PATCH, DELETE or POST with 303, so the browser follows it with a GET', function (string $method) {
+        [$user] = $this->userWithFactor();
+        $this->loginWithSession($user);
+
+        // A stale tab's router.put(). The gate runs before HandleInertiaRequests,
+        // and inertia-laravel 2.x (artistly) has no global 302 → 303 middleware.
+        $this->call($method, '/things/1', [], [], [], ['HTTP_X_INERTIA' => 'true', 'HTTP_X_REQUESTED_WITH' => 'XMLHttpRequest'])
+            ->assertStatus(303)
+            ->assertRedirect(route('mfa.challenge'));
+        $this->call($method, '/things/1')->assertStatus(303);
+    })->with(['PUT', 'PATCH', 'DELETE', 'POST']);
+
+    it('keeps 302 for GET and HEAD', function (string $method) {
+        [$user] = $this->userWithFactor();
+
+        $this->loginWithSession($user)->call($method, '/things/1')->assertStatus(302)->assertRedirect(route('mfa.challenge'));
+    })->with(['GET', 'HEAD']);
+
+    it('answers 303 when an enforced user who must enroll sends a non-GET request', function () {
+        config(['mfa.enforcement.policy' => EnforceForEveryone::class]);
+
+        $this->loginWithSession($this->makeUser())
+            ->delete('/things/1', [], ['X-Inertia' => 'true'])
+            ->assertStatus(303)
+            ->assertRedirect(route('mfa.settings'));
+    });
+
+    it("answers a script's fetch() (Fetch Metadata, not a navigation) with the JSON 403 and keeps the intended URL", function (string $mode) {
+        [$user] = $this->userWithFactor();
+        $this->loginWithSession($user)->get('/dashboard?tab=2');
+
+        // A background poll in a stale tab: fetch() sends Accept: */* and no X-Requested-With.
+        $this->get('/things/1?poll=1', ['Accept' => '*/*', 'Sec-Fetch-Mode' => $mode, 'Sec-Fetch-Dest' => 'empty'])
+            ->assertForbidden()
+            ->assertExactJson(['message' => 'Multi-factor authentication required.', 'error' => 'mfa_required', 'redirect' => route('mfa.challenge')]);
+
+        expect(session('url.intended'))->toEndWith('/dashboard?tab=2');
+    })->with(['cors', 'same-origin', 'no-cors']);
+
+    it('gives enforced users the enrollment JSON 403 for a fetch()', function () {
+        config(['mfa.enforcement.policy' => EnforceForEveryone::class]);
+
+        $this->loginWithSession($this->makeUser())
+            ->get('/things/1', ['Accept' => '*/*', 'Sec-Fetch-Mode' => 'cors'])
+            ->assertForbidden()
+            ->assertJson(['error' => 'mfa_enrollment_required', 'redirect' => route('mfa.settings')]);
+    });
+
+    it('remembers the intended URL for a top-level navigation', function () {
+        [$user] = $this->userWithFactor();
+
+        $this->loginWithSession($user)
+            ->get('/things/1?tab=2', ['Accept' => 'text/html,*/*;q=0.8', 'Sec-Fetch-Mode' => 'navigate', 'Sec-Fetch-Dest' => 'document'])
+            ->assertRedirect(route('mfa.challenge'));
+
+        expect(session('url.intended'))->toEndWith('/things/1?tab=2');
+    });
+
+    it('redirects, without remembering it, a navigation that is not the page itself', function (array $headers) {
+        [$user] = $this->userWithFactor();
+
+        $this->loginWithSession($user)
+            ->get('/things/1', ['Accept' => 'text/html,*/*;q=0.8', 'Sec-Fetch-Mode' => 'navigate', ...$headers])
+            ->assertRedirect(route('mfa.challenge'));
+
+        expect(session('url.intended'))->toBeNull();
+    })->with([
+        'an iframe' => [['Sec-Fetch-Dest' => 'iframe']],
+        'a prefetch' => [['Sec-Fetch-Dest' => 'document', 'Sec-Purpose' => 'prefetch']],
+        'a prerender' => [['Sec-Fetch-Dest' => 'document', 'Sec-Purpose' => 'prefetch;prerender']],
+        'a legacy prefetch' => [['Sec-Fetch-Dest' => 'document', 'Purpose' => 'prefetch']],
+    ]);
+
+    it('without Fetch Metadata, remembers the URL only for requests that ask for HTML', function () {
+        [$user] = $this->userWithFactor();
+        $this->loginWithSession($user);
+
+        // An old browser's fetch(): Accept: */*. Redirected as before, but not remembered.
+        $this->get('/things/1?poll=1', ['Accept' => '*/*'])->assertRedirect(route('mfa.challenge'));
+        expect(session('url.intended'))->toBeNull();
+
+        $this->get('/things/1?page=1', ['Accept' => 'text/html,application/xhtml+xml,*/*;q=0.8'])->assertRedirect(route('mfa.challenge'));
+        expect(session('url.intended'))->toEndWith('/things/1?page=1');
+    });
+
+    it('still redirects Inertia visits, which send Fetch Metadata too', function () {
+        [$user] = $this->userWithFactor();
+
+        $this->loginWithSession($user)
+            ->get('/things/1', ['X-Inertia' => 'true', 'X-Requested-With' => 'XMLHttpRequest', 'Accept' => 'text/html, application/xhtml+xml', 'Sec-Fetch-Mode' => 'cors'])
+            ->assertStatus(302)
+            ->assertRedirect(route('mfa.challenge'));
+
+        expect(session('url.intended'))->toBeNull();
+    });
+});

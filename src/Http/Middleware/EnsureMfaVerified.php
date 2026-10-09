@@ -101,15 +101,62 @@ class EnsureMfaVerified
     {
         $url = route($route);
 
-        if ($request->expectsJson() && ! $request->header('X-Inertia')) {
+        if ($this->wantsJson($request)) {
             return response()->json(['message' => $message, 'error' => $error, 'redirect' => $url], 403);
         }
 
-        if ($request->isMethod('GET') && ! $request->ajax() && ! $request->header('X-Inertia')) {
+        if ($this->isPageNavigation($request)) {
             $request->session()->put('url.intended', $request->fullUrl());
         }
 
-        return redirect()->to($url);
+        // 303 makes the browser follow a blocked PUT/PATCH/DELETE/POST (e.g. a
+        // stale tab's router.put()) with a GET. This gate runs before
+        // HandleInertiaRequests, and inertia-laravel 2.x has no global
+        // middleware that would turn the 302 into a 303.
+        return redirect()->to($url, in_array($request->getMethod(), ['GET', 'HEAD'], true) ? 302 : 303);
+    }
+
+    /**
+     * JSON for API calls and for a script's fetch()/XHR, which Fetch Metadata
+     * marks as not a navigation (a background poll must not get, and parse,
+     * the challenge page). Never for Inertia visits: they follow redirects.
+     */
+    private function wantsJson(Request $request): bool
+    {
+        if ($request->header('X-Inertia')) {
+            return false;
+        }
+
+        $mode = $request->headers->get('Sec-Fetch-Mode');
+
+        return $request->expectsJson() || ($mode !== null && $mode !== 'navigate');
+    }
+
+    /**
+     * Whether the user is opening this page in the browser, so it is where
+     * they should land after verifying (url.intended). With Fetch Metadata:
+     * a top-level navigation that isn't a prefetch or prerender. Without it
+     * (older browsers): a GET that asks for HTML by name, so a fetch(),
+     * which accepts anything, never overwrites the page the user was going to.
+     */
+    private function isPageNavigation(Request $request): bool
+    {
+        if (! $request->isMethod('GET') || $request->ajax() || $request->header('X-Inertia')) {
+            return false;
+        }
+
+        $purpose = $request->headers->get('Sec-Purpose') ?? $request->headers->get('Purpose') ?? '';
+
+        if (str_contains($purpose, 'prefetch')) {
+            return false;
+        }
+
+        if ($request->headers->has('Sec-Fetch-Mode')) {
+            return $request->headers->get('Sec-Fetch-Mode') === 'navigate'
+                && in_array($request->headers->get('Sec-Fetch-Dest', 'document'), ['document', ''], true);
+        }
+
+        return in_array('text/html', $request->getAcceptableContentTypes(), true);
     }
 
     private function isExcluded(Request $request): bool
