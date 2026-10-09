@@ -91,6 +91,29 @@ describe('MfaEnableNudge', () => {
         expect(card()).toBeInTheDocument();
     });
 
+    describe('disabled (e.g. while impersonating)', () => {
+        it('still shows, with its link', () => {
+            render(<MfaEnableNudge {...props} disabled />);
+
+            expect(card()).toBeInTheDocument();
+            expect(screen.getByRole('link', { name: 'Turn on' })).toHaveAttribute('href', '/mfa/settings');
+        });
+
+        it.each(['Not today', 'Dismiss for today'])('"%s" hides it for this page view only, without onDismiss', async (name) => {
+            const onDismiss = vi.fn();
+            const { unmount } = render(<MfaEnableNudge {...props} onDismiss={onDismiss} disabled />);
+
+            await userEvent.click(screen.getByRole('button', { name }));
+
+            expect(screen.queryByRole('region')).not.toBeInTheDocument();
+            expect(onDismiss).not.toHaveBeenCalled();
+            // The next page (a fresh mount) shows it again.
+            unmount();
+            render(<MfaEnableNudge {...props} onDismiss={onDismiss} disabled />);
+            expect(card()).toBeInTheDocument();
+        });
+    });
+
     describe('position and offset', () => {
         const style = () => card().style;
         const x = () => style().getPropertyValue('--mfa-nudge-x');

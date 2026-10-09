@@ -105,6 +105,20 @@ describe('useMfaNudge', () => {
         expect(screen.queryByRole('region')).not.toBeInTheDocument();
     });
 
+    it('takes disabled next to it (impersonation): hides on dismiss, sends nothing', async () => {
+        inertia.pageProps.mfa = context();
+        function ImpersonatedLayout() {
+            return <MfaEnableNudge {...useMfaNudge()} disabled />;
+        }
+        render(<ImpersonatedLayout />);
+
+        expect(screen.getByRole('link', { name: 'Turn on' })).toHaveAttribute('data-inertia-link');
+        await userEvent.click(screen.getByRole('button', { name: 'Not today' }));
+
+        expect(screen.queryByRole('region')).not.toBeInTheDocument();
+        expect(inertia.requests).toEqual([]);
+    });
+
     it('renders nothing without a shared context', () => {
         const { container } = render(<Layout />);
 

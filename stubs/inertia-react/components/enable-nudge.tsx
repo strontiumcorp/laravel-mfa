@@ -12,6 +12,10 @@
 //     import { useMfaNudge } from '@/pages/mfa/mfa-context';
 //
 //     <MfaEnableNudge {...useMfaNudge()} />
+//
+// While an admin impersonates the user, pass disabled (the app's own
+// "is impersonating" state): dismissing then hides it for this page view only
+// and saves nothing, so the admin can't hide the user's nudge.
 import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react';
 import { MfaIconClose, MfaIconShieldLock } from './icons';
 
@@ -46,6 +50,11 @@ export type MfaEnableNudgeProps = {
     className?: string;
     /** Renders the link, e.g. (link) => <Link {...link} />. Defaults to a plain <a>. */
     renderLink?: (link: MfaEnableNudgeLink) => ReactNode;
+    /**
+     * Still shows, but "Not today" and × only hide it for this page view and
+     * never call onDismiss, e.g. while an admin impersonates the user.
+     */
+    disabled?: boolean;
 };
 
 const defaultLink = ({ href, className, children }: MfaEnableNudgeLink) => (
@@ -84,6 +93,7 @@ export default function MfaEnableNudge({
     offset = 24,
     className = '',
     renderLink = defaultLink,
+    disabled = false,
 }: MfaEnableNudgeProps) {
     const id = useId();
     const [dismissed, setDismissed] = useState(false);
@@ -101,7 +111,7 @@ export default function MfaEnableNudge({
 
     const dismiss = () => {
         setDismissed(true);
-        onDismiss(browserTimezone());
+        if (!disabled) onDismiss(browserTimezone());
     };
 
     return (
