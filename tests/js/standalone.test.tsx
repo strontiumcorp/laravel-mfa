@@ -23,13 +23,13 @@ describe('published components', () => {
             'destination-setup.tsx',
             'factor-cards.tsx',
             'factor-list.tsx',
+            'factor-setup-dialog.tsx',
             'icons.tsx',
             'password-confirm-form.tsx',
             'recovery-code-form.tsx',
             'recovery-codes-panel.tsx',
             'send-code-button.tsx',
             'settings-card.tsx',
-            'totp-setup-dialog.tsx',
             'totp-setup.tsx',
         ]);
     });

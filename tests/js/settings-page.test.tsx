@@ -27,6 +27,7 @@ const props = {
     recoveryCodes: null,
     retryAfter: null,
     passwordRetryAfter: null,
+    passwordConfirmationRequired: false,
     mustEnroll: false,
     requiredTypes: [],
     status: null,
@@ -49,19 +50,16 @@ describe('settings page', () => {
         ]);
     });
 
-    it('confirms and resends pending setups at their own URLs', async () => {
-        const pendingTotp = { ...email, id: 8, type: 'totp' as const, type_label: 'Authenticator app', destination: null, secret: 'JBSWY3DP', qr_svg: '<svg/>' };
+    it('picks up a pending setup in the dialog: resends and confirms at its own URLs', async () => {
         const pendingSms = { ...email, id: 9, type: 'sms' as const, type_label: 'SMS', destination: '+*******0100' };
-        render(<MfaSettings {...props} pending={[pendingTotp, pendingSms]} />);
+        render(<MfaSettings {...props} pending={[pendingSms]} />);
 
-        // The authenticator app goes through its dialog: scan, then the code.
-        await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Next' }));
-        await userEvent.type(screen.getByRole('textbox', { name: 'Code from your authenticator app' }), '111111{Enter}');
-        await userEvent.click(screen.getByRole('button', { name: 'Resend' }));
-        await userEvent.type(screen.getByRole('textbox', { name: 'Verification code' }), '222222{Enter}');
+        const dialog = screen.getByRole('dialog', { name: 'Enter the code' });
+        expect(dialog).toHaveTextContent('We sent a code to +*******0100.');
+        await userEvent.click(within(dialog).getByRole('button', { name: 'Resend code' }));
+        await userEvent.type(within(dialog).getByRole('textbox', { name: 'Verification code' }), '222222{Enter}');
 
         expect(inertia.requests).toEqual([
-            { method: 'post', url: '/mfa/factors/8/confirm', data: { code: '111111' } },
             { method: 'post', url: '/mfa/factors/9/resend', data: {} },
             { method: 'post', url: '/mfa/factors/9/confirm', data: { code: '222222' } },
         ]);
@@ -93,19 +91,30 @@ describe('settings page', () => {
         expect(screen.getByRole('listitem')).toHaveTextContent('aaaaa-11111');
     });
 
-    it('asks for the password when adding a method needs it, then retries the same request', async () => {
+    it('asks for the password first in the dialog when a change needs it', async () => {
+        render(<MfaSettings {...props} passwordConfirmationRequired />);
+
+        await userEvent.click(screen.getByRole('button', { name: 'Set up SMS' }));
+        const dialog = screen.getByRole('dialog', { name: 'Confirm your password' });
+        expect(within(dialog).getByText('SMS · Step 1 of 4')).toBeInTheDocument();
+        await userEvent.type(within(dialog).getByLabelText('Password'), 'secret{Enter}');
+
+        expect(screen.getByRole('dialog', { name: 'Add a phone number' })).toBeInTheDocument();
+        await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+15555550100{Enter}');
+
+        expect(inertia.requests).toEqual([
+            { method: 'post', url: urls.confirmPassword, data: { password: 'secret' } },
+            { method: 'post', url: urls.store, data: { type: 'sms', destination: '+15555550100' } },
+        ]);
+    });
+
+    it('asks for the password mid-way when the server does (it expired), then retries the same number', async () => {
         inertia.respondWith(passwordRequired);
         render(<MfaSettings {...props} />);
 
         await userEvent.click(screen.getByRole('button', { name: 'Set up SMS' }));
         await userEvent.type(screen.getByLabelText('Phone number, with country code'), '+15555550100{Enter}');
-        expect(screen.getByRole('heading', { name: 'Confirm your password' })).toBeInTheDocument();
-
-        // Asked inside the SMS card, where the number stays as typed.
-        const sms = screen.getByRole('heading', { name: 'SMS' }).closest('article') as HTMLElement;
-        expect(within(sms).getByLabelText('Password')).toHaveFocus();
-        expect(within(sms).getByLabelText('Phone number, with country code')).toHaveValue('+15555550100');
-
+        expect(screen.getByRole('dialog', { name: 'Confirm your password' })).toBeInTheDocument();
         await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
 
         expect(inertia.requests).toEqual([
@@ -113,7 +122,24 @@ describe('settings page', () => {
             { method: 'post', url: urls.confirmPassword, data: { password: 'secret' } },
             { method: 'post', url: urls.store, data: { type: 'sms', destination: '+15555550100' } },
         ]);
-        expect(screen.queryByRole('heading', { name: 'Confirm your password' })).not.toBeInTheDocument();
+    });
+
+    it('gets an authenticator app its key right away, or after the password', async () => {
+        const { unmount } = render(<MfaSettings {...props} />);
+        await userEvent.click(screen.getByRole('button', { name: 'Set up Authenticator app' }));
+        expect(inertia.requests).toEqual([{ method: 'post', url: urls.store, data: { type: 'totp' } }]);
+        expect(screen.getByRole('dialog', { name: 'Set up an authenticator app' })).toHaveTextContent('Getting your setup key');
+        unmount();
+
+        inertia.reset();
+        render(<MfaSettings {...props} passwordConfirmationRequired />);
+        await userEvent.click(screen.getByRole('button', { name: 'Set up Authenticator app' }));
+        expect(inertia.requests).toEqual([]);
+        await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
+        expect(inertia.requests).toEqual([
+            { method: 'post', url: urls.confirmPassword, data: { password: 'secret' } },
+            { method: 'post', url: urls.store, data: { type: 'totp' } },
+        ]);
     });
 
     it('retries removing a factor and regenerating codes after the password, without asking "are you sure" again', async () => {
@@ -167,15 +193,17 @@ describe('settings page', () => {
         expect(screen.queryByRole('heading', { name: 'Confirm your password' })).not.toBeInTheDocument();
     });
 
-    it('gives the password prompt the password countdown, and the code setups only theirs', async () => {
+    it('gives the password prompt the password countdown, and the code setup only its own', async () => {
         const pendingSms = { ...email, id: 9, type: 'sms' as const, type_label: 'SMS', destination: '+*******0100' };
-        inertia.respondWith(passwordRequired);
         render(<MfaSettings {...props} pending={[pendingSms]} passwordRetryAfter={60} />);
 
-        await userEvent.click(screen.getByRole('button', { name: 'Set up Authenticator app' }));
+        expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Resend code' })).toBeEnabled();
+        await userEvent.click(screen.getByRole('button', { name: 'Close' }));
 
+        inertia.respondWith(passwordRequired);
+        vi.spyOn(window, 'confirm').mockReturnValue(true);
+        await userEvent.click(screen.getByRole('button', { name: 'Remove Email' }));
         expect(screen.getByRole('button', { name: 'Try again in 1:00' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Resend' })).toBeEnabled();
     });
 
     it('sets up an authenticator app in a dialog, and leaves "Continue setup" in its card when closed', async () => {

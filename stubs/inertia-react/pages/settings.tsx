@@ -1,11 +1,10 @@
 // Published by strontiumcorp/laravel-mfa. This file is yours — render it inside
 // your app's settings layout. It only wires Inertia to the components in
 // components/vendor/laravel-mfa/, which hold the UI.
-import MfaDestinationSetup from '@/components/vendor/laravel-mfa/destination-setup';
 import MfaFactorCards, { type MfaCardFactor, type MfaFactorType } from '@/components/vendor/laravel-mfa/factor-cards';
+import MfaFactorSetupDialog from '@/components/vendor/laravel-mfa/factor-setup-dialog';
 import MfaPasswordConfirmForm from '@/components/vendor/laravel-mfa/password-confirm-form';
 import MfaRecoveryCodesPanel from '@/components/vendor/laravel-mfa/recovery-codes-panel';
-import MfaTotpSetupDialog from '@/components/vendor/laravel-mfa/totp-setup-dialog';
 import { Head, router, useForm } from '@inertiajs/react';
 import { type ReactNode, useState } from 'react';
 
@@ -22,6 +21,8 @@ type Props = {
     retryAfter: number | null;
     /** Seconds until the password prompt may be tried again. */
     passwordRetryAfter: number | null;
+    /** Adding or removing a method would ask for the password right now. */
+    passwordConfirmationRequired: boolean;
     mustEnroll: boolean;
     /** What an enforced user must set up; [] = any method. */
     requiredTypes: { type: MfaFactorType; label: string }[];
@@ -32,12 +33,25 @@ type Props = {
 const withId = (url: string, id: number) => url.replace('__ID__', String(id));
 
 export default function MfaSettings(props: Props) {
-    const { factors, pending, availableTypes, recoveryCodesRemaining, recoveryCodesTotal, recoveryCodes, mustEnroll, requiredTypes, status, retryAfter, passwordRetryAfter, urls } =
-        props;
+    const {
+        factors,
+        pending,
+        availableTypes,
+        recoveryCodesRemaining,
+        recoveryCodesTotal,
+        recoveryCodes,
+        mustEnroll,
+        requiredTypes,
+        status,
+        retryAfter,
+        passwordRetryAfter,
+        passwordConfirmationRequired,
+        urls,
+    } = props;
 
     // The components hold the inputs; transform() adds them when posting.
     // Failures come back under "code" (confirm, resend) or "destination"/"type" (store).
-    const store = useForm<{ type?: string; destination?: string }>({});
+    const storeForm = useForm<{ type?: string; destination?: string }>({});
     const confirmForm = useForm<{ code?: string }>({});
     const resend = useForm<{ code?: string }>({});
     // Which pending factor the last confirm/resend was for, so its error shows there.
@@ -46,17 +60,17 @@ export default function MfaSettings(props: Props) {
     const [removingId, setRemovingId] = useState<number | null>(null);
     const [regenerating, setRegenerating] = useState(false);
 
-    // Adding or removing a factor and new recovery codes may answer "confirm
-    // your password first" (routes.password_confirmation): ask for it inside
-    // the card where the change started, then retry the change.
-    type PromptAt = { factor: number } | { type: MfaFactorType } | 'recovery';
+    // Removing a method and new recovery codes may answer "confirm your
+    // password first" (routes.password_confirmation): ask for it inside the
+    // card where the change started, then retry the change.
+    type PromptAt = { factor: number } | 'recovery';
     const passwordForm = useForm<{ password?: string }>({});
     const [retry, setRetry] = useState<{ action: () => void; at: PromptAt } | null>(null);
     const askPasswordFor = (at: PromptAt, action: () => void) => (errors: Record<string, string>) => {
         if (errors.password_confirmation_required) setRetry({ action, at });
     };
 
-    const confirmPassword = (password: string) => {
+    const confirmPassword = (password: string, then: () => void) => {
         let confirmed = false;
         passwordForm.transform(() => ({ password }));
         passwordForm.post(urls.confirmPassword, {
@@ -64,47 +78,76 @@ export default function MfaSettings(props: Props) {
             onSuccess: () => {
                 confirmed = true;
             },
-            // Retry once this visit is over, so the retry doesn't interrupt it.
+            // Go on once this visit is over, so the next request doesn't interrupt it.
             onFinish: () => {
-                if (!confirmed) return;
-                setRetry(null);
-                retry?.action();
+                if (confirmed) then();
             },
         });
     };
 
-    const add = (type: MfaFactorType, destination?: string) => {
-        store.transform(() => (destination === undefined ? { type } : { type, destination }));
-        store.post(urls.store, { preserveScroll: true, onError: askPasswordFor({ type }, () => add(type, destination)) });
-    };
-
-    const confirmFactor = (id: number, code: string, onSuccess?: () => void) => {
-        setConfirmingId(id);
-        confirmForm.transform(() => ({ code }));
-        confirmForm.post(withId(urls.confirm, id), { preserveScroll: true, onSuccess });
-    };
-
-    // An authenticator app is set up in a dialog: scan, enter the code, save the
-    // recovery codes. It opens for a pending one unless the user closed it; it
-    // keeps a copy of the pending setup, because confirming removes it from the props.
-    const pendingTotp = pending.find((p) => p.type === 'totp') ?? null;
-    const [dialog, setDialog] = useState<Pending | null>(null);
-    const [closedId, setClosedId] = useState<number | null>(null);
-    const [totpConfirmed, setTotpConfirmed] = useState(false);
+    // Adding a method runs in one dialog for every type: password (when
+    // needed), then the QR code or the address/number, then the code, then the
+    // recovery codes. A setup left pending (e.g. after a reload) reopens it,
+    // unless the user closed it ("Continue setup" in its card).
+    const [setupType, setSetupType] = useState<MfaFactorType | null>(null);
+    const [closedIds, setClosedIds] = useState<number[]>([]);
+    // The pending setup being confirmed: confirming removes it from the props.
+    const [confirming, setConfirming] = useState<Pending | null>(null);
+    const [confirmed, setConfirmed] = useState(false);
+    // Password: confirmed in this dialog, or asked again by the server mid-way (it expired).
+    const [passwordDone, setPasswordDone] = useState(false);
+    const [passwordAgain, setPasswordAgain] = useState(false);
+    // The address or number last sent, to retry it after the password.
+    const [lastDestination, setLastDestination] = useState<string | undefined>(undefined);
     // Codes the dialog already showed, so the panel doesn't show them again.
     const [shownCodes, setShownCodes] = useState<string[] | null>(null);
-    const totp = dialog ?? (pendingTotp && pendingTotp.id !== closedId ? pendingTotp : null);
 
-    const closeDialog = () => {
-        if (totp) setClosedId(totp.id);
-        setDialog(null);
+    const resumable = pending.find((p) => !closedIds.includes(p.id)) ?? null;
+    const dialogType = setupType ?? confirming?.type ?? resumable?.type ?? null;
+    const current = confirming ?? (dialogType ? (pending.find((p) => p.type === dialogType) ?? null) : null);
+    const needsPassword = (passwordConfirmationRequired && !passwordDone) || passwordAgain;
+
+    const store = (type: MfaFactorType, destination?: string) => {
+        setLastDestination(destination);
+        storeForm.transform(() => (destination === undefined ? { type } : { type, destination }));
+        storeForm.post(urls.store, {
+            preserveScroll: true,
+            onError: (errors) => {
+                if (errors.password_confirmation_required) setPasswordAgain(true);
+            },
+        });
     };
 
-    const completeDialog = () => {
-        if (totp) setClosedId(totp.id);
-        setShownCodes(recoveryCodes);
-        setDialog(null);
-        setTotpConfirmed(false);
+    const startSetup = (type: MfaFactorType) => {
+        setSetupType(type);
+        setClosedIds((ids) => ids.filter((id) => !pending.some((p) => p.id === id && p.type === type)));
+        // An authenticator app has nothing to ask first: get its key right away.
+        if (type === 'totp' && !needsPassword && !pending.some((p) => p.type === 'totp')) store('totp');
+    };
+
+    const afterPassword = () => {
+        setPasswordDone(true);
+        setPasswordAgain(false);
+        if (!dialogType || current) return;
+        if (dialogType === 'totp') store('totp');
+        else if (lastDestination !== undefined) store(dialogType, lastDestination);
+    };
+
+    const endSetup = (complete: boolean) => {
+        if (current) setClosedIds((ids) => [...ids, current.id]);
+        if (complete) setShownCodes(recoveryCodes);
+        setSetupType(null);
+        setConfirming(null);
+        setConfirmed(false);
+        setPasswordAgain(false);
+        setLastDestination(undefined);
+    };
+
+    const confirmFactor = (p: Pending, code: string) => {
+        setConfirming(p);
+        setConfirmingId(p.id);
+        confirmForm.transform(() => ({ code }));
+        confirmForm.post(withId(urls.confirm, p.id), { preserveScroll: true, onSuccess: () => setConfirmed(true) });
     };
 
     const resendCode = (id: number) => {
@@ -129,41 +172,32 @@ export default function MfaSettings(props: Props) {
             onError: askPasswordFor('recovery', regenerate),
         });
 
-    // Each setup in progress goes inside its method's card.
+    // A setup the user closed stays in its card, to pick up again.
     const setups: Partial<Record<MfaFactorType, ReactNode>> = {};
     for (const p of pending) {
-        setups[p.type] =
-            p.type === 'totp' ? (
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Finish adding it in the setup window.</p>
-                    <button
-                        type="button"
-                        onClick={() => setClosedId(null)}
-                        className="min-h-11 w-full rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white sm:w-auto dark:bg-gray-100 dark:text-gray-900"
-                    >
-                        Continue setup
-                    </button>
-                </div>
-            ) : (
-                <MfaDestinationSetup
-                    framed={false}
-                    label={p.type_label}
-                    destination={p.destination}
-                    onConfirm={(code) => confirmFactor(p.id, code)}
-                    onResend={() => resendCode(p.id)}
-                    processing={confirmForm.processing && confirmingId === p.id}
-                    resending={resend.processing && resendingId === p.id}
-                    retryAfter={retryAfter}
-                    sent={status === 'code-sent' && resendingId === p.id}
-                    error={(confirmingId === p.id ? confirmForm.errors.code : null) ?? (resendingId === p.id ? resend.errors.code : null)}
-                />
-            );
+        setups[p.type] = (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-gray-600 dark:text-gray-400">Finish adding it in the setup window.</p>
+                <button
+                    type="button"
+                    onClick={() => startSetup(p.type)}
+                    className="min-h-11 w-full rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white sm:w-auto dark:bg-gray-100 dark:text-gray-900"
+                >
+                    Continue setup
+                </button>
+            </div>
+        );
     }
 
     const passwordPrompt = retry && (
         <MfaPasswordConfirmForm
             framed={false}
-            onConfirm={confirmPassword}
+            onConfirm={(password) =>
+                confirmPassword(password, () => {
+                    setRetry(null);
+                    retry.action();
+                })
+            }
             onCancel={() => setRetry(null)}
             processing={passwordForm.processing}
             error={passwordForm.errors.password}
@@ -195,31 +229,42 @@ export default function MfaSettings(props: Props) {
                 factors={factors}
                 setups={setups}
                 passwordPrompt={retry && retry.at !== 'recovery' ? { at: retry.at, node: passwordPrompt } : null}
-                onAdd={add}
+                onAdd={store}
+                onStart={startSetup}
                 onRemove={remove}
-                adding={store.processing}
-                error={store.errors.destination ?? store.errors.type}
+                adding={storeForm.processing}
                 removingId={removingId}
                 required={mustEnroll}
                 requiredTypes={requiredTypes.map((t) => t.type)}
             />
 
-            {totp && (
-                <MfaTotpSetupDialog
+            {dialogType && (
+                <MfaFactorSetupDialog
                     open
-                    secret={totp.secret ?? ''}
-                    qrSvg={totp.qr_svg}
-                    otpauthUrl={totp.otpauth_url}
-                    onConfirm={(code) => {
-                        setDialog(totp);
-                        confirmFactor(totp.id, code, () => setTotpConfirmed(true));
-                    }}
-                    processing={confirmForm.processing && confirmingId === totp.id}
-                    error={confirmingId === totp.id ? confirmForm.errors.code : null}
-                    confirmed={totpConfirmed}
-                    recoveryCodes={totpConfirmed ? recoveryCodes : null}
-                    onClose={closeDialog}
-                    onComplete={completeDialog}
+                    type={dialogType}
+                    label={availableTypes.find((t) => t.type === dialogType)?.label ?? current?.type_label ?? ''}
+                    askPassword={needsPassword && !current}
+                    onConfirmPassword={(password) => confirmPassword(password, afterPassword)}
+                    passwordProcessing={passwordForm.processing}
+                    passwordError={passwordForm.errors.password}
+                    passwordRetryAfter={passwordRetryAfter}
+                    onSubmitDestination={(destination) => store(dialogType, destination)}
+                    destinationProcessing={storeForm.processing}
+                    destinationError={storeForm.errors.destination ?? storeForm.errors.type}
+                    secret={current?.secret}
+                    qrSvg={current?.qr_svg}
+                    otpauthUrl={current?.otpauth_url}
+                    sentTo={dialogType === 'totp' ? null : current?.destination}
+                    onResend={() => current && resendCode(current.id)}
+                    resending={resend.processing}
+                    retryAfter={retryAfter}
+                    onConfirm={(code) => current && confirmFactor(current, code)}
+                    processing={confirmForm.processing}
+                    error={(current && confirmingId === current.id ? confirmForm.errors.code : null) ?? (current && resendingId === current.id ? resend.errors.code : null)}
+                    confirmed={confirmed}
+                    recoveryCodes={confirmed ? recoveryCodes : null}
+                    onClose={() => endSetup(false)}
+                    onComplete={() => endSetup(true)}
                 />
             )}
 
@@ -229,7 +274,7 @@ export default function MfaSettings(props: Props) {
                     <MfaRecoveryCodesPanel
                         remaining={recoveryCodesRemaining}
                         total={recoveryCodesTotal}
-                        codes={totp || recoveryCodes === shownCodes ? null : recoveryCodes}
+                        codes={dialogType || recoveryCodes === shownCodes ? null : recoveryCodes}
                         onRegenerate={regenerate}
                         processing={regenerating}
                         passwordPrompt={retry?.at === 'recovery' ? passwordPrompt : null}

@@ -68,7 +68,7 @@ it('GET /mfa/settings and the enrollment endpoints', function () {
 
     $this->getJson('/mfa/settings')->assertOk()->assertExactJsonStructure([
         'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label', 'recommended']], 'recoveryCodesRemaining', 'recoveryCodesTotal', 'mustEnroll', 'requiredTypes',
-        'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'confirmPassword'], 'passwordRetryAfter', 'status', 'recoveryCodes', 'retryAfter',
+        'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'confirmPassword'], 'passwordConfirmationRequired', 'passwordRetryAfter', 'status', 'recoveryCodes', 'retryAfter',
     ]);
 
     $created = $this->postJson('/mfa/factors', ['type' => 'totp'])->assertOk()->assertExactJsonStructure([

@@ -61,6 +61,11 @@ class SettingsController extends Controller
                 'recoveryCodes' => route('mfa.recovery-codes.store'),
                 'confirmPassword' => route('mfa.password.confirm'),
             ],
+            // Whether adding or removing a factor would ask for the password right
+            // now, so the setup dialog can show that step from the start. The
+            // factor routes still enforce it (RequirePasswordConfirmation).
+            'passwordConfirmationRequired' => $this->mfa->requiresPasswordConfirmation($user)
+                && ! $this->mfa->passwordRecentlyConfirmed($request->session()),
             // Seconds until the password prompt may be tried again (its own countdown).
             'passwordRetryAfter' => $request->session()->get(UiResponse::PASSWORD_RETRY_AFTER),
         ]);

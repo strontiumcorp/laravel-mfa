@@ -41,6 +41,12 @@ export type MfaFactorCardsProps<F extends MfaCardFactor = MfaCardFactor> = {
      * empty email destination means "use the account email".
      */
     onAdd: (type: MfaFactorType, destination?: string) => void;
+    /**
+     * When given, "Set up" calls this for every type instead of asking for an
+     * email/SMS destination inline: the page runs the setup itself, e.g. in
+     * MfaFactorSetupDialog. onAdd is then not called.
+     */
+    onStart?: (type: MfaFactorType) => void;
     /** Called after the user confirms the removal. */
     onRemove: (factor: F) => void;
     /** A setup in progress per type (QR code, code entry), shown inside that type's card. */
@@ -114,6 +120,7 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
     types,
     factors,
     onAdd,
+    onStart,
     onRemove,
     setups = {},
     passwordPrompt = null,
@@ -149,6 +156,7 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
     };
 
     const start = (type: MfaFactorType) => {
+        if (onStart) return onStart(type);
         if (type === 'totp') return onAdd('totp');
         setEntering(type);
         setDestination('');

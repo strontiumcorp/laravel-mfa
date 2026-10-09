@@ -286,3 +286,20 @@ it('tells the frontend that factor changes may ask for the password', function (
     config(['mfa.routes.confirm_middleware' => ['password.confirm']]);
     expect(Mfa::context()->passwordConfirmation)->toBeTrue();
 });
+
+it('tells the settings page whether a change would ask for the password now', function () {
+    $this->freezeSecond();
+    config(['auth.password_timeout' => 600]);
+    $this->loginWithSession($this->makeUser());
+
+    $this->getJson(route('mfa.settings'))->assertJsonPath('passwordConfirmationRequired', true);
+
+    $this->postJson(route('mfa.password.confirm'), ['password' => 'password'])->assertOk();
+    $this->getJson(route('mfa.settings'))->assertJsonPath('passwordConfirmationRequired', false);
+
+    $this->travel(601)->seconds();
+    $this->getJson(route('mfa.settings'))->assertJsonPath('passwordConfirmationRequired', true);
+
+    config(['mfa.routes.password_confirmation' => false]);
+    $this->getJson(route('mfa.settings'))->assertJsonPath('passwordConfirmationRequired', false);
+});

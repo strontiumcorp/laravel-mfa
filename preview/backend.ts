@@ -227,6 +227,7 @@ export function settingsProps(s: State) {
         mustEnroll: s.mustEnroll,
         requiredTypes: s.mustEnroll || s.requiredTypes.length > 0 ? s.requiredTypes.map((type) => ({ type, label: LABELS[type] })) : [],
         passwordRetryAfter: s.passwordRetryAfter,
+        passwordConfirmationRequired: s.requirePassword && !s.passwordConfirmed,
         status: s.status,
         recoveryCodes: s.recoveryCodes,
         retryAfter: s.retryAfter,
