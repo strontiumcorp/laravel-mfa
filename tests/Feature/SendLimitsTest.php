@@ -8,13 +8,17 @@
  *    app-wide breaker on unconfirmed sends.
  *  - confirmed destinations (login): cooldown curve + per-account hourly cap
  *    only. Strangers can never consume this budget.
+ * And on 2026-10-09: per-account daily caps per method, across both budgets
+ * (factors.email.send_per_day 15, factors.sms.send_per_day 5).
  */
 
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Notification;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Events\SendingCircuitTripped;
 use StrontiumCorp\LaravelMfa\Events\SuspiciousCodeRequests;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
+use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 
 const VICTIM = '+15555550199';
@@ -314,6 +318,201 @@ describe('app-wide cap on confirmed sends (SMS pumping)', function () {
 
     it('defaults to 1000 an hour', function () {
         expect(config('mfa.rate_limit.confirmed_global_per_hour'))->toBe(1000);
+    });
+});
+
+describe('daily caps per method (factors.{type}.send_per_day)', function () {
+    beforeEach(function () {
+        $this->freezeSecond(); // exact waits
+        // Only the daily caps: no cooldown, and the hourly cap out of the way.
+        config(['mfa.factors.email.resend_cooldown' => 0, 'mfa.factors.sms.resend_cooldown' => 0, 'mfa.rate_limit.send_per_hour' => 100]);
+        Notification::fake();
+        Mfa::fakeSms();
+    });
+
+    $send = fn ($factor) => test()->postJson('/mfa/challenge/send', ['factor_id' => $factor->id]);
+
+    it('defaults to 15 email and 5 SMS codes a day', function () {
+        expect(config('mfa.factors.email.send_per_day'))->toBe(15)
+            ->and(config('mfa.factors.sms.send_per_day'))->toBe(5);
+    });
+
+    it('refuses the 16th email code in a day, saying when to try again in hours', function () use ($send) {
+        [$user, $factor] = $this->userWithFactor(FactorType::Email);
+        $this->loginWithSession($user);
+
+        $send($factor)->assertOk();          // the window opens
+        $this->travel(19)->hours();
+        foreach (range(2, 15) as $_) {
+            $send($factor)->assertOk();
+        }
+
+        $send($factor)->assertStatus(429)
+            ->assertJsonPath('retry_after', 5 * 3600)
+            ->assertJsonPath('message', "You've had too many codes today. Try again in 5 hours, or use an authenticator app.");
+
+        $this->travel(4 * 3600 + 1)->seconds(); // 59:59 left
+        $send($factor)->assertStatus(429)
+            ->assertJsonPath('retry_after', 3599)
+            ->assertJsonPath('errors.code.0', "You've had too many codes today. Try again in an hour, or use an authenticator app.");
+
+        $this->travel(3599 - 18 * 60)->seconds(); // 18 minutes left: minutes below an hour
+        $send($factor)->assertStatus(429)
+            ->assertJsonPath('errors.code.0', "You've had too many codes today. Try again in 18 minutes, or use an authenticator app.");
+
+        $this->travel(18 * 60)->seconds();
+        $send($factor)->assertOk();
+    });
+
+    it('rounds a wait over an hour up to whole hours', function () use ($send) {
+        config(['mfa.factors.sms.send_per_day' => 1]);
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+        $send($factor)->assertOk();
+
+        $this->travel(86400 - 3601)->seconds(); // an hour and a second left
+        $send($factor)->assertStatus(429)->assertJsonPath('message', "You've had too many codes today. Try again in 2 hours, or use an authenticator app.");
+
+        $this->travel(1)->seconds();            // exactly an hour
+        $send($factor)->assertStatus(429)->assertJsonPath('message', "You've had too many codes today. Try again in an hour, or use an authenticator app.");
+
+        $this->travel(3599)->seconds();         // a second
+        $send($factor)->assertStatus(429)->assertJsonPath('message', "You've had too many codes today. Try again in a minute, or use an authenticator app.");
+    });
+
+    it('refuses the 6th SMS code in a day', function () use ($send) {
+        $sms = Mfa::fakeSms();
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        foreach (range(1, 5) as $_) {
+            $send($factor)->assertOk();
+        }
+        $send($factor)->assertStatus(429)->assertJsonPath('retry_after', 86400);
+
+        $sms->assertSentTo('+15555550100', 5);
+    });
+
+    it('counts email and SMS apart', function () use ($send) {
+        $user = $this->makeUser();
+        $sms = $this->createMfaFactor($user, FactorType::Sms);
+        $email = $this->createMfaFactor($user, FactorType::Email);
+        $this->loginWithSession($user);
+
+        foreach (range(1, 5) as $_) {
+            $send($sms)->assertOk();
+        }
+        $send($sms)->assertStatus(429);
+
+        foreach (range(1, 15) as $_) {
+            $send($email)->assertOk();
+        }
+        $send($email)->assertStatus(429);
+    });
+
+    it('counts per account', function () use ($send) {
+        config(['mfa.factors.sms.send_per_day' => 1]);
+        [$first, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($first);
+        $send($factor)->assertOk();
+        $send($factor)->assertStatus(429);
+
+        [$second, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->freshGuards()->loginWithSession($second);
+        $send($factor)->assertOk();
+    });
+
+    it('counts enrollment sends too, and leaves no pending factor when it refuses', function () {
+        config(['mfa.factors.sms.send_per_day' => 1]);
+        $this->actingAsMfaVerified($user = $this->makeUser());
+
+        $this->postJson('/mfa/factors', ['type' => 'sms', 'destination' => '+15555550101'])->assertOk();
+        $this->postJson('/mfa/factors', ['type' => 'sms', 'destination' => '+15555550102'])->assertStatus(429)
+            ->assertJsonPath('errors.destination.0', "You've had too many codes today. Try again in 24 hours, or use an authenticator app.");
+
+        // The first pending SMS was replaced by the second, which was refused and removed.
+        expect($user->mfaFactors()->count())->toBe(0);
+    });
+
+    it('rolls back the other counters when it refuses', function () use ($send) {
+        config(['mfa.rate_limit.send_per_hour' => 2, 'mfa.factors.sms.send_per_day' => 1]);
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        $send($factor)->assertOk();                            // 1 of 2 this hour
+        $send($factor)->assertStatus(429)->assertJsonPath('retry_after', 86400);
+
+        config(['mfa.factors.sms.send_per_day' => 10]);
+        $send($factor)->assertOk();                            // the refused one did not use the 2nd
+        $send($factor)->assertStatus(429)->assertJsonPath('retry_after', 3600);
+    });
+
+    it('is not charged for a send another limit refuses', function () use ($send) {
+        config(['mfa.rate_limit.send_per_hour' => 1, 'mfa.factors.sms.send_per_day' => 2]);
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        $send($factor)->assertOk();
+        $send($factor)->assertStatus(429)->assertJsonPath('retry_after', 3600); // the hourly cap
+        $this->travel(1)->hours();
+
+        $send($factor)->assertOk(); // the 2nd of the day is still there
+    });
+
+    it('can be turned off with null or 0, and then counts nothing', function ($limit) use ($send) {
+        config(['mfa.factors.sms.send_per_day' => $limit]);
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        foreach (range(1, 7) as $_) {
+            $send($factor)->assertOk();
+        }
+
+        config(['mfa.factors.sms.send_per_day' => 1]);
+        $send($factor)->assertOk(); // none of the 7 was counted
+        $send($factor)->assertStatus(429);
+    })->with([null, 0]);
+
+    it('leaves the authenticator app and recovery codes working', function () use ($send) {
+        config(['mfa.factors.email.send_per_day' => 1]);
+        $user = $this->makeUser();
+        $email = $this->createMfaFactor($user, FactorType::Email);
+        $totp = $this->createMfaFactor($user, FactorType::Totp);
+        $this->loginWithSession($user);
+
+        $send($email)->assertOk();
+        $send($email)->assertStatus(429);
+
+        expect(collect($this->getJson('/mfa/challenge')->assertOk()->json('factors'))->pluck('type')->sort()->values()->all())->toBe(['email', 'totp']);
+        $this->postJson('/mfa/challenge', ['factor_id' => $totp->id, 'code' => $this->currentTotpCode($totp)])->assertOk();
+    });
+
+    it('warns the app once', function () use ($send) {
+        Event::fake([SuspiciousCodeRequests::class]);
+        config(['mfa.factors.sms.send_per_day' => 1]);
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        $send($factor)->assertOk();
+        foreach (range(1, 3) as $_) {
+            $send($factor)->assertStatus(429);
+        }
+
+        Event::assertDispatchedTimes(SuspiciousCodeRequests::class, 1);
+        Event::assertDispatched(SuspiciousCodeRequests::class, fn ($e) => $e->context['reason'] === 'send_cap_reached');
+    });
+
+    it('writes one audit row per window', function () use ($send) {
+        config(['mfa.factors.sms.send_per_day' => 1]);
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($user);
+
+        $send($factor)->assertOk();
+        foreach (range(1, 3) as $_) {
+            $send($factor)->assertStatus(429);
+        }
+
+        expect(MfaAuditLog::where('reason', 'daily_limit')->count())->toBe(1);
     });
 });
 

@@ -4,6 +4,7 @@ use Carbon\CarbonImmutable;
 use PragmaRX\Google2FA\Google2FA;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
+use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
 
 /*
@@ -65,6 +66,18 @@ it('error shape: 503 when an app-wide send cap is hit', function () {
     [$user, $factor] = $this->userWithFactor(FactorType::Sms);
     $this->freshGuards()->loginWithSession($user)->postJson('/mfa/challenge/send', ['factor_id' => $factor->id])
         ->assertStatus(503)->assertExactJsonStructure(['message', 'errors' => ['code'], 'retry_after']);
+});
+
+it('error shape: 429 daily_limit when a method\'s daily cap is hit', function () {
+    config(['mfa.factors.sms.send_per_day' => 1]);
+    Mfa::fakeSms();
+    [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+    $this->loginWithSession($user)->postJson('/mfa/challenge/send', ['factor_id' => $factor->id])->assertOk();
+    $this->travel(601)->seconds(); // past the code's expiry: no cooldown
+
+    $this->postJson('/mfa/challenge/send', ['factor_id' => $factor->id])
+        ->assertStatus(429)->assertExactJsonStructure(['message', 'errors' => ['code'], 'retry_after']);
+    expect(MfaAuditLog::query()->where('reason', 'daily_limit')->count())->toBe(1);
 });
 
 it('GET /mfa/settings says how many recovery codes a fresh set has', function () {

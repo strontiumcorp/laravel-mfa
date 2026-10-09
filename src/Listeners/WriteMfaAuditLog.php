@@ -5,7 +5,6 @@ namespace StrontiumCorp\LaravelMfa\Listeners;
 use Illuminate\Contracts\Cache\Factory as CacheFactory;
 use Illuminate\Support\Arr;
 use StrontiumCorp\LaravelMfa\Contracts\MfaActivity;
-use StrontiumCorp\LaravelMfa\Enums\FailureReason;
 use StrontiumCorp\LaravelMfa\Events\MfaEvent;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
@@ -14,9 +13,6 @@ use Throwable;
 
 final class WriteMfaAuditLog
 {
-    /** Refusals by a limit: one row per user, kind and window (see repeatsRefusal()). */
-    private const LIMIT_REASONS = [FailureReason::RateLimited, FailureReason::DestinationLimit, FailureReason::SendingPaused];
-
     public function __construct(private readonly CacheFactory $cache) {}
 
     public function handle(MfaActivity $event): void
@@ -60,7 +56,7 @@ final class WriteMfaAuditLog
      */
     private function repeatsRefusal(MfaEvent $event): bool
     {
-        if ($event->user === null || ! in_array($event->reason, self::LIMIT_REASONS, true)) {
+        if ($event->user === null || $event->reason?->isLimit() !== true) {
             return false;
         }
 

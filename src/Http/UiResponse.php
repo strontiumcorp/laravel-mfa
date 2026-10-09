@@ -108,7 +108,7 @@ final class UiResponse
         $retryAfter = $failure instanceof VerificationResult ? ($failure->context['retry_after'] ?? null) : null; // @pest-mutate-ignore: InstanceOfToTrue
 
         $status = match ($reason) {
-            FailureReason::RateLimited, FailureReason::Cooldown, FailureReason::DestinationLimit => 429,
+            FailureReason::RateLimited, FailureReason::Cooldown, FailureReason::DestinationLimit, FailureReason::DailyLimit => 429,
             FailureReason::SendingPaused => 503,
             default => 422,
         };

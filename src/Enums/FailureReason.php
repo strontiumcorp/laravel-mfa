@@ -16,6 +16,7 @@ enum FailureReason: string
     case RateLimited = 'rate_limited';
     case Cooldown = 'cooldown';
     case DestinationLimit = 'destination_limit';
+    case DailyLimit = 'daily_limit';
     case SendingPaused = 'sending_paused';
     case FactorNotFound = 'factor_not_found';
     case FactorDisabled = 'factor_disabled';
@@ -26,7 +27,7 @@ enum FailureReason: string
 
     /**
      * The end-user message. $retryAfter (seconds), when known, says when to
-     * try again where that helps (an app-wide send cap).
+     * try again where that helps (an app-wide send cap, a daily cap).
      */
     public function message(?int $retryAfter = null): string
     {
@@ -39,12 +40,29 @@ enum FailureReason: string
             self::Cooldown => 'Please wait before requesting another code.',
             self::DestinationLimit => 'Too many codes were sent to this destination today. Try again tomorrow, or use an authenticator app.',
             self::SendingPaused => 'Too many codes are being sent right now. Try again '.self::inMinutes($retryAfter).', or use an authenticator app.',
+            self::DailyLimit => "You've had too many codes today. Try again ".self::inHours($retryAfter).', or use an authenticator app.',
             self::FactorNotFound => 'This verification method is not available.',
             self::FactorDisabled => 'This verification method is currently disabled.',
             self::DestinationNotAllowed => "We can't send verification codes to this destination.",
             self::DeliveryFailed => 'We could not send your code. Please try again.',
             self::InvalidPassword => 'The provided password is incorrect.',
         };
+    }
+
+    /** Refused by a limit on sending codes or on attempts (written to the audit table once per window). */
+    public function isLimit(): bool
+    {
+        return in_array($this, [self::RateLimited, self::DestinationLimit, self::DailyLimit, self::SendingPaused], true);
+    }
+
+    /** "in 5 hours" over an hour (rounded up), "in an hour", or as inMinutes() below that. */
+    private static function inHours(?int $seconds): string
+    {
+        if ($seconds === null || $seconds <= 3540) {
+            return self::inMinutes($seconds);
+        }
+
+        return $seconds <= 3600 ? 'in an hour' : 'in '.intdiv($seconds + 3599, 3600).' hours';
     }
 
     /** "in a minute", "in 18 minutes" (rounded up), or "later" when unknown. */

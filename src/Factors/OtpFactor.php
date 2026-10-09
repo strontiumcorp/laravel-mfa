@@ -66,7 +66,7 @@ abstract class OtpFactor implements Factor
         $sent = $this->challenge($factor);
 
         // Refused by a send limit: don't leave a pending factor behind.
-        if (in_array($sent->reason, [FailureReason::RateLimited, FailureReason::DestinationLimit, FailureReason::SendingPaused], true)) {
+        if ($sent->reason?->isLimit()) {
             $factor->delete();
 
             throw new EnrollmentFailed($sent->reason, $sent->context);
