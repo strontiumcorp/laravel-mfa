@@ -10,6 +10,7 @@ use StrontiumCorp\LaravelMfa\Events\VerificationFailed;
 use StrontiumCorp\LaravelMfa\Events\VerificationSucceeded;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\Notifications\OtpCodeNotification;
+use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
 
 it('lists the user\'s factors without leaking secrets', function () {
@@ -21,6 +22,52 @@ it('lists the user\'s factors without leaking secrets', function () {
         ->assertJsonPath('defaultFactorId', $factor->id);
 
     expect($response->getContent())->not->toContain('+15555550100');
+});
+
+it('starts on the authenticator app even when another method was used last', function () {
+    [$user, $totp] = $this->userWithFactor();
+    $email = $this->createMfaFactor($user, FactorType::Email);
+    $sms = $this->createMfaFactor($user, FactorType::Sms);
+    // Set up but never used to sign in yet.
+    $email->forceFill(['last_used_at' => now()->subDay()])->save();
+    $sms->forceFill(['last_used_at' => now()->subDays(2)])->save();
+
+    $this->loginWithSession($user)->getJson(route('mfa.challenge'))->assertOk()
+        ->assertJsonPath('defaultFactorId', $totp->id)
+        // The authenticator app first, then the rest by last use.
+        ->assertJsonPath('factors.*.id', [$totp->id, $email->id, $sms->id]);
+});
+
+it('starts on the most recently used method when there is no authenticator app', function () {
+    [$user, $email] = $this->userWithFactor(FactorType::Email);
+    $sms = $this->createMfaFactor($user, FactorType::Sms);
+    $email->forceFill(['last_used_at' => now()->subDays(2)])->save();
+    $sms->forceFill(['last_used_at' => now()->subDay()])->save();
+
+    $this->loginWithSession($user)->getJson(route('mfa.challenge'))->assertOk()
+        ->assertJsonPath('defaultFactorId', $sms->id)
+        ->assertJsonPath('factors.*.id', [$sms->id, $email->id]);
+});
+
+it('starts on the authenticator app only when it is one of the methods the challenge accepts', function () {
+    config(['mfa.enforcement.policy' => EnforceForAdmins::class]);
+    [$admin, $totp] = $this->userWithFactor(FactorType::Totp, ['is_admin' => true]);
+    $email = $this->createMfaFactor($admin, FactorType::Email);
+    $email->forceFill(['last_used_at' => now()])->save();
+
+    // Required type totp (the default): only the authenticator app is offered.
+    $this->loginWithSession($admin)->getJson(route('mfa.challenge'))->assertOk()
+        ->assertJsonPath('defaultFactorId', $totp->id)
+        ->assertJsonPath('factors.*.id', [$totp->id]);
+
+    // Required types email and SMS: the authenticator app isn't offered, so it isn't the default.
+    $sms = $this->createMfaFactor($admin, FactorType::Sms);
+    $sms->forceFill(['last_used_at' => now()->subDay()])->save();
+    config(['mfa.enforcement.required_types' => ['sms', 'email']]);
+
+    $this->getJson(route('mfa.challenge'))->assertOk()
+        ->assertJsonPath('defaultFactorId', $email->id)
+        ->assertJsonPath('factors.*.id', [$email->id, $sms->id]);
 });
 
 it('points "Sign out" at the app\'s named logout route, wherever it lives', function () {

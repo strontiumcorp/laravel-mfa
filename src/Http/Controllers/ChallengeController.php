@@ -4,6 +4,7 @@ namespace StrontiumCorp\LaravelMfa\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Factors\OtpFactor;
 use StrontiumCorp\LaravelMfa\Factors\TotpFactor;
 use StrontiumCorp\LaravelMfa\Http\UiResponse;
@@ -38,6 +39,8 @@ class ChallengeController extends Controller
             // Enforced users see only their required types (enforcement.required_types).
             // Equivalent mutant(s): Eloquent binds backed enums by value.
             ->whereIn('type', array_map(fn ($t) => $t->value, $this->mfa->challengeTypes($user))) // @pest-mutate-ignore: UnwrapArrayMap
+            // The authenticator app first (nothing is sent for it), then the rest by last use.
+            ->orderByRaw('case when type = ? then 0 else 1 end', [FactorType::Totp->value])
             ->orderByDesc('last_used_at')
             ->get();
 
