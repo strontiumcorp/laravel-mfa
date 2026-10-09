@@ -1,10 +1,10 @@
 # MFA integration plan — `strontiumcorp/laravel-mfa` → artistly, clone-voice, podcast-flow
 
-> **Status:** Phase 1 (package) **released and in use**: v0.4.2 is the latest tag (v0.5.0 pending: the resend-loop guardrails), 516 Pest + 328 Vitest tests, full matrix green on every tag. Phase 3 (artistly) is **in progress** on branch `SDAP-786`; clone-voice and podcast-flow (Phases 4–5) and the rollout (Phase 6) haven't started.
-> **Last updated:** 2026-10-09
+> **Status:** Phase 1 (package) **released and in use**: v0.5.2 is the latest tag. On branch `claude/quizzical-wright-00a388`, uncommitted and waiting for the maintainer's review (suggested v0.6.0): the artistly-audit fixes (§1.7: enrollment verification, owner notifications, 303/fetch handling in the gate, session docs), trusted browsers with the reminder before trust ends (§1.8), and the fixes from the review of both. Phase 3 (artistly) is **in progress** on branch `SDAP-786`; clone-voice and podcast-flow (Phases 4–5) and the rollout (Phase 6) haven't started.
+> **Last updated:** 2026-10-10
 > **Legend:** `[x]` done · `[~]` in progress / partially done · `[ ]` not started · `[!]` blocked or needs a decision
 
-## Snapshot (end of 2026-10-09) — start here in a new session
+## Snapshot (2026-10-10) — start here in a new session
 
 **Done**
 - **The package is released:** public repo `github.com/strontiumcorp/laravel-mfa`, installed as a VCS repository (not on Packagist); tags v0.1.1 … v0.4.2, each with a green full matrix (PHP 8.2–8.5 × Laravel 11/12/13, lowest and newest deps). `make release` releases straight from `main` (no branch protection since 2026-10-09); `make release-pr` / `make release-tag` stay for a protected `main`.
@@ -13,10 +13,10 @@
 - **Security and cost:** two independent reviews plus a full audit (2026-10-09), all findings fixed or decided (see §1.4c and the log). Send limits: exponential cooldown that spans logins, per-account hourly cap, per-type daily caps (email 15, SMS 5), separate budgets for unconfirmed destinations, app-wide caps for both, rollback on refusal; no resend or failover after a "maybe delivered" SMS.
 
 **Next steps, in order**
-1. **Release v0.5.0** (branch `fix/login-code-resend-loop`: the cooldown spans logins, daily caps per method, the challenge page waits out the cooldown, the Roadmap section). Fast-forward `main`, then `make release`.
-2. **Finish artistly (Phase 3):** move to `^0.5` and republish (`mfa:install --force`; layouts live in `app.jsx`, so nothing to restore except `config/mfa.php`); set `enforcement.roles` (D5); commit the integration on a dedicated MFA branch; run the manual QA checklist; staging.
+1. **Review and release the artistly-audit fixes** (§1.7, this branch): the maintainer reviews the uncommitted diff, then focused commits, `make ci`, `make test-matrix`, `make typecheck-stubs`, and a v0.6.0 release (minor: on-by-default behaviour changes, see §1.7's upgrade notes).
+2. **Finish artistly (Phase 3):** move to `^0.6`, run `migrate`, and republish the challenge and settings pages with their components (`mfa:install --force`; layouts live in `app.jsx`, so nothing to restore except `config/mfa.php`); add the fetch/axios interceptor (integration step 6, "Background requests"); set `enforcement.roles` (D5); confirm the mailer works for the new security emails; commit the integration on a dedicated MFA branch; run the manual QA checklist; staging.
 3. **clone-voice (Phase 4), then podcast-flow (Phase 5).**
-4. **Rollout (Phase 6)**, then the [Roadmap](#roadmap): configurable remember-me.
+4. **Rollout (Phase 6)**, then the [Roadmap](#roadmap): per-network `verify_per_day`.
 
 **Notes for picking up**
 - Run `make` to list tasks. Verify with `make ci`, `make test PROCESSES=2`, `make test-laravel VERSION=11 LOWEST=1` and `make typecheck-stubs`. **Do not run mutation tests** (user decision).
@@ -201,15 +201,48 @@ Scope: security core, `src/Sms/`, integration ergonomics, docs. `make ci`, `make
 - [x] `CHANGELOG.md` tooling: `make release` generates it from the commits (`scripts/release.sh`, `scripts/update-changelog.py`); `make release-pr` / `make release-tag` for a protected `main`
 
 ### 1.6 Package follow-ups (after launch)
-- [ ] Trusted devices ("remember this device for 30 days": hashed token, revocable). Scheduled in the [Roadmap](#roadmap) as configurable remember-me.
+- [x] Trusted devices ("remember this device for 30 days": hashed token, revocable): built as trusted browsers, §1.8.
 - [ ] Grace period for enforced users (`enforce_grace_days`)
 - [ ] Passkeys factor (WebAuthn) through `Mfa::extend()`
 - [ ] Laravel Pulse card for MFA metrics
-- [ ] Email the user when a factor is added or removed, or a recovery code is used (listen to `FactorEnabled`, `FactorDisabled`, `RecoveryCodeUsed`). Also email them after repeated failed attempts or a daily-cap lockout (security review #1).
+- [~] Email the user when a factor is added or removed, or a recovery code is used: done in §1.7 (plus new recovery codes and `SuspiciousCodeRequests`, which covers the daily/hourly send caps). Still open: an email after repeated failed verification attempts (`verify_per_day` lockout, security review #1).
 - [ ] Region-accurate SMS allowlist using libphonenumber, instead of calling-code prefixes (security review #4)
 - [ ] **India DLT support in the SNS driver** (only if Indian traffic matters): optional `entity_id` / `template_id` config sent as `AWS.MM.SMS.EntityId` / `AWS.MM.SMS.TemplateId`. `factors.sms.message` must then match the DLT-registered template exactly. This unlocks AWS's $0.004/SMS domestic route (vs $0.071).
 - [ ] **Per-rule `required_types`** (planned, not part of the nudge change): e.g. admins must use an authenticator app while other enforced users may use any method. Today `enforcement.required_types` applies to every enforced user.
 - [ ] Before enabling SMS in any app, do a real send test per provider and region (`mfa:doctor` only validates config, not provider acceptance), and complete provider-side setup: US 10DLC or toll-free verification, leaving the SNS sandbox, sender-ID registration where required, and extending `allowed_calling_codes`.
+
+### 1.7 artistly audit fixes — `[x]` (2026-10-10, uncommitted on `claude/quizzical-wright-00a388`, awaiting review)
+An audit of the artistly integration found five gaps. Decisions and status:
+- [x] **Enrollment verification (security).** A user who must enroll and had no factor could reach `/mfa/settings` with only the password and add the attacker's authenticator (artistly had just had a support account's password leak). Chosen: before an account's **first** factor, the session proves ownership beyond the password — **a code emailed to the account address** (default, cheap, self-service), or **an administrator's one-time link** (`mfa:enrollment-link`, `Mfa::enrollmentLink()`) for users without email or for apps whose mailboxes can't be trusted (`email => false`). Config `enrollment_verification` (`required_for`: `enforced` default | `everyone` | null; `email`; `link_ttl` 1440; `notification`). Asked after the password prompt, on `factors.store` and `factors.confirm` (`RequireEnrollmentVerification`); JSON `423 enrollment_verification_required` with `email`/`send_url`/`verify_url`, Inertia a validation error of that name; routes `mfa.enrollment-verification.{send,verify,link}` (reachable while enrolling). The code reuses `factors.email` settings, is bound to the session (HMAC in the session, attempts counted atomically in the cache), waits on the email cooldown curve across sessions, and counts toward the account's send caps (`SendGuard::attemptAccount()`). Links: signed, one use, only in the user's own session, revoked by a password change. Proof lasts until logout. Events `EnrollmentVerificationRequired/Sent`, `EnrollmentVerified` (method), `EnrollmentLinkIssued`; failures `VerificationFailed` (`enrollment_verification`, `enrollment_link` with new reason `invalid_link`); new reason `enrollment_link_required`. `mfa:doctor` warns when enforcement is on and this is off. Rejected: admin links only (support load for every admin onboarding); doing nothing for opt-in users is the default (`everyone` is one switch). Known limit: password + mailbox stolen together still enroll (docs "Known limitations"; mitigation `email => false`).
+- [x] **Owner notifications.** `notifications` config (on by default; per-event switches; `notification` class, default `SecurityAlertNotification`, queued on the delivery queue): `factor_enabled`, `factor_disabled` (says "an administrator" after `mfa:reset`), `recovery_codes_generated` (not the first set: `RecoveryCodesGenerated` context gains `initial`), `recovery_code_used` (with remaining), `suspicious_code_requests`. No codes or secrets; what, when, IP. The first-enrollment proof isn't a separate alert: its code email already warns the owner. Listener `NotifyAccountOwner`; a failing send is reported, never blocks.
+- [x] **303 for blocked non-GET requests** in `EnsureMfaVerified::deny()` (inertia-laravel 2.x has no global `EnsureGetOnRedirect`; v3 does, which is why only artistly saw the 405).
+- [x] **Intended URL only for real navigations**: `Sec-Fetch-Mode: navigate` to a document (not prefetch/prerender/iframe), else a `GET` whose Accept names `text/html`. A script's `fetch()` (`Sec-Fetch-Mode` `cors`/`same-origin`/`no-cors`) now gets the JSON 403 instead of the challenge HTML. Interceptor for axios and `fetch` documented (integration step 6).
+- [x] **Re-challenge after the session expires**: documented (configuration.md "Sessions, remember-me and re-challenges") as intended; recommendation then: accept it for enforced admins or raise `SESSION_LIFETIME`; the maintainer then asked for trusted browsers, built in §1.8.
+- [x] Frontend for enrollment verification: a "Confirm it's you" step in `factor-setup-dialog` (`verifyEmail`, `onSendEmailCode`, `emailCodeSending`, `emailCodeSent`, `emailCodeRetryAfter`, `onVerifyEmailCode`, `emailCodeProcessing`, `emailCodeError`), wired in `settings.tsx` (423 `enrollment_verification_required` from store/confirm brings it back; "code sent" is kept while the page is open), 16 new Vitest tests, two preview scenarios. Type-checked against all three apps.
+
+### 1.9 Review fixes — `[x]` (2026-10-10, same branch)
+A two-axis review (standards, spec) of §1.7–1.8 found no security bug; the maintainer asked for every finding to be fixed, extras kept. Tests first (each checked to fail without its fix):
+- [x] Security emails follow the code delivery rule (`DeliveryQueue::send()`: delivery queue when set, else inline), keeping a replacement class's own connection/queue; at most one `suspicious_code_requests` email per account per hour; a new `enrollment_link_issued` email (spec: "possibly the first-enrollment event").
+- [x] Trusted browsers end at once on a password change (`PasswordReset`, and `eloquent.updated` of the MFA user model with a changed password); the settings list hides browsers trusted under an older password; cookie names keyed through `CodeHasher` so `APP_PREVIOUS_KEYS` keeps them working; the reminder reads the session before asking the enforcement rules (no per-page policy call).
+- [x] "initial" recovery codes mean the account's first method, so a new set after all codes were used is emailed.
+- [x] Refactors: `EnrollmentLinks` split from `EnrollmentVerification`; enums `TrustedBrowserRevocation` and `EnrollmentLinkProblem` (link failures carry `problem`); `by_administrator` in event context instead of matching `console:`; `via` default `app`; `Cooldown::capped()` shared with `OtpStore`; `Mfa::guardFor()` made public; phpstan type aliases for the context shapes; the stale plan lines.
+
+### 1.10 Verification review fixes — `[x]` (2026-10-10, same branch)
+A second review confirmed the §1.9 fixes (11/13 standards, 5/5 spec) and found small new issues, all fixed, tests first:
+- [x] `ForgetTrustedBrowsers` does nothing (no query) while trusted browsers are off, and reports instead of throwing, since it runs inside the app's own save, enrollment or reset.
+- [x] The hourly limit on the suspicious-requests email is claimed inside the error handling (a cache outage can't break the request) and released when the email fails.
+- [x] Stale text (§1.7 line, a test name, a comment); `Mfa::guardFor()` public instead of the `guardOf()` wrapper; the dead cookie-name fallback (`CodeHasher` keys are typed non-empty).
+- [x] Docs: Laravel's rehash-on-login also ends trusted browsers; the password-change listener needs the exact `user_model` class.
+
+### 1.8 Trusted browsers — `[x]` (2026-10-10, uncommitted on the same branch, awaiting review)
+Maintainer asked for "don't ask for verification for N days" (the MFA step only; the password login stays). Defaults chosen as proposed (the maintainer didn't pick otherwise): off (`MFA_TRUSTED_BROWSERS`), 30 days, not for enforced users unless `allow_enforced`, never after a recovery code.
+- [x] Table `mfa_trusted_browsers` (new migration; keyed hashes of the cookie token and of the password hash, label from the user agent, expires/last used; pruned daily; cascades with the user). `Support\TrustedBrowsers` (issue, check, list, forget), `Models\MfaTrustedBrowser`.
+- [x] Gate: only for an unverified user with factors whose browser sends that user's cookie (one query), it marks the session verified (`VerificationSucceeded`, `via: trusted_browser`); an enforced user still missing a required type is still held on settings. Cookie per guard and user (HMAC name), http-only, session cookie settings.
+- [x] Ends on: expiry, password change, a factor added/removed (`mfa:reset` too), a recovery code used (`ForgetTrustedBrowsers` listener), settings (one or all: `DELETE mfa/trusted-browsers[/{id}]`), feature off. Not on logout.
+- [x] Props: challenge `trustBrowser` (`{days}` or null), verify accepts `remember`; settings `trustedBrowsers` and two URLs. Events `BrowserTrusted`, `TrustedBrowsersForgotten`. `mfa:status` shows the count. 24 Pest tests + JSON contract.
+- [x] Frontend: challenge checkbox (`challenge-form` `trustBrowserDays`, `onSubmit(code, { trustBrowser })`), `trusted-browsers-panel` component (+ `MfaIconBrowser`), page wiring, Vitest, preview scenarios. Type-checked in all three apps.
+- [x] Reminder before trust ends (maintainer request: no unannounced challenge mid-task): in the last `trusted_browsers.reminder.hours` (12) the nudge card shows "Two-factor check coming up … again in 5 hours" with **Verify now** / **Later** (the maintainer rejected "Renew now": it reads like a payment). Context key `trustReminder` (from the session, no query); `/mfa/challenge?renew=1` (page prop `renew`) verifies early, re-trusts the browser (the old row is replaced) and returns to the page; `POST mfa/trusted-browsers/reminder/dismiss` hides it for the session. `?renew=1` does nothing for a session not on a trusted browser.
+- [x] Frontend for the reminder: `trustReminder` in `mfa-context.ts` (`mfaTrustReminderWhen()`, rounded down so it never promises more time than is left), `mfaNudgeProps()`/`useMfaNudge()` show it in the nudge card (`kind`, `closeLabel`; `enable-nudge` gains `closeLabel`), the challenge's verify-early mode (box ticked, "Not now" goes back, or to `/` in a new tab). 420 Vitest; type-checked in all three apps.
 
 **Phase 1 exit criteria:** met: released and tagged, CI green on GitHub.
 
@@ -233,6 +266,8 @@ Each app gets these steps on its own feature branch. App-specific deviations are
    - `routes.home`; password confirmation (D6): keep `routes.password_confirmation` on; for social-login users with an unknown password set `routes.password_confirmation_policy` to a class (clone-voice: ask only when `google_id === null`?) or set it to `false`
    - `MFA_DELIVERY_QUEUE=mfa` (or the app's queue) and a worker that serves it (D8)
    - `MFA_LOG_CHANNEL`
+   - keep `enrollment_verification` at its default (email code before an enforced user's first method); decide whether any role needs `email => false` (admin links only)
+   - security notifications are on by default: check the mailer in every environment, and turn off any the app already sends
 4. **API-key auth:** in `ApiKeyAuth` / `MultiAuth`, change `auth()->login($user)` to `auth()->setUser($user)` (stateless; stops API keys from minting browser sessions).
 5. **Impersonation:** confirm it still works. Login-swap impersonation needs `Mfa::grantForImpersonation()`.
 6. **UI**
@@ -241,6 +276,7 @@ Each app gets these steps on its own feature branch. App-specific deviations are
    - Check that flash/status display works with the app's `HandleInertiaRequests`.
    - Share the context: `'mfa' => fn () => Mfa::context($request)` in `HandleInertiaRequests::share()`.
    - Show `<MfaApiKeyNotice {...mfaApiKeyNoticeProps(useMfa())} />` (from `@/components/vendor/laravel-mfa/api-key-notice` and `@/{Pages|pages}/mfa/mfa-context`) next to the API key settings.
+   - Add the axios/`fetch` interceptor from integration step 6 ("Background requests") so the app's own background requests send the browser to the challenge on `mfa_required` / `mfa_enrollment_required`.
    - Mount `<MfaEnableNudge {...useMfaNudge()} />` (from `@/components/vendor/laravel-mfa/enable-nudge` and `@/{Pages|pages}/mfa/mfa-context`) once in the global authenticated layout; pick `position`/`offset` so it clears the app's own fixed UI (toasts, chat widgets). Pass the app's "is impersonating" state as `disabled` so an impersonating admin can't dismiss the user's nudge. Decide the copy (`mfa.nudge.*`) or turn it off (`MFA_NUDGE_ENABLED=false`).
 7. **Tests**
    - Run the existing suite. It should pass unchanged, because `actingAs()` doesn't trigger MFA.
@@ -257,7 +293,10 @@ Each app gets these steps on its own feature branch. App-specific deviations are
 - [ ] Remember-me: close the browser, reopen → challenged
 - [ ] Google login (clone-voice) → challenged
 - [ ] Enroll TOTP from settings; recovery codes shown once; remove the factor
-- [ ] Admin without MFA → forced to the settings page; other pages blocked until enrolled
+- [ ] Admin without MFA → forced to the settings page; other pages blocked until enrolled; adding the first method asks for an emailed code first; a "method added" email arrives
+- [ ] `mfa:enrollment-link <email>` link, opened by that user while signed in, lets them add a method without the email code; a second use is refused
+- [ ] A stale tab that polls (`fetch`) after the session ends lands on the challenge; after verifying, the user returns to the page, not the polled URL
+- [ ] A stale tab's `PUT`/`DELETE` after the session ends lands on the challenge (no 405)
 - [ ] Admin impersonates a user who has MFA → no challenge; exit impersonation → back as admin
 - [ ] A webhook endpoint and an API-key endpoint keep working for a user with MFA
 - [ ] `mfa:status <email>` shows the events above with one flow ID per attempt
@@ -284,6 +323,8 @@ Integration is in progress on branch `SDAP-786` (uncommitted as of 2026-10-09); 
 - [x] Page layouts set in `app.jsx`'s `resolve`: `mfa/settings` → `AuthenticatedLayout`, `mfa/challenge` → `SyncDarkModeLayout` (calls `useDarkMode()` so the `dark` class follows the cookie).
 - [x] `MfaEnableNudge` mounted in `Layouts/AuthenticatedLayout.jsx` with `disabled={!!original_user}`; check it against the app's toasts.
 - [ ] After v0.3: keep `password_confirmation => true` and drop any `confirm_middleware => []` override; add `withConfirmedPassword()` to MFA tests that add/remove factors.
+- [ ] After v0.6: republish `settings.tsx` and `factor-setup-dialog.tsx` (the enrollment verification step); add the `fetch`/axios interceptor (integration step 6, "Background requests"): `Components/Design/FilterByTags.tsx:28` and `Components/Design/AiBulkActionProgress.tsx:41` poll with plain `fetch()`; MFA tests that enroll an enforced admin need `withEnrollmentVerified($admin)`.
+- [ ] Decide on re-challenges: artistly forces remember-me with `SESSION_LIFETIME=120`, so a user idle for 2 hours is challenged again (intended; docs/configuration.md "Sessions, remember-me and re-challenges"). Accept it, raise `SESSION_LIFETIME`, or turn on trusted browsers (§1.8: `MFA_TRUSTED_BROWSERS=true` and `trusted_browsers.allow_enforced` for admins).
 - [~] Steps 7–9 of the checklist: `tests/Feature/MfaIntegrationTest.php` exists; `mfa:doctor`, manual QA and the deploy step are still to do.
 
 ## Phase 4 — clone-voice (Laravel 12, Inertia v2, React 19, Octane, Google OAuth) — `[ ]`
@@ -338,7 +379,7 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
   1. Verify identity out-of-band.
   2. Run `php artisan mfa:status <email>`.
   3. Run `php artisan mfa:reset <email>`.
-  4. Ask the user to re-enroll.
+  4. Ask the user to re-enroll. An enforced user gets an email code before their first method; for a user without a usable mailbox, run `php artisan mfa:enrollment-link <email>` and send the link on a trusted channel.
 - [ ] Document how to trace a reported failure: `mfa:status <email> --flow=<id>`, then grep the logs for `mfa_flow_id`.
 
 ---
@@ -346,7 +387,7 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
 ## Roadmap
 
 - [ ] **Per-network `verify_per_day`** (R6, accepted 2026-10-09 as a known limitation, docs/configuration.md "Known limitations"): count the daily verify cap per user and per network, like the daily send caps (`SendGuard::ipBucket`), so someone with only the password can't block the owner's code entry for a day. Decide whether the per-minute limit stays per account.
-- [ ] **Configurable remember-me for MFA** ("remember this device for N days"): a verified browser gets a signed, per-user, revocable cookie and skips the challenge until it expires. After the MFA rollout ships to production in all three apps. Open decisions: lifetime, revocation on password change and factor removal, cookie scope per guard, and whether enforced roles may use it.
+- [~] **Trusted browsers**: built on 2026-10-10 at the maintainer's request (§1.8), off by default. Follow-ups if wanted: a shorter `days` for enforced users, and an email to the owner when a browser is trusted.
 
 ---
 
@@ -493,3 +534,9 @@ The kill switch for any incident is `MFA_ENABLED=false`. It takes effect on the 
   - Challenge and recovery-code fixes (branch `fix/challenge-qol`, from v0.5.0), tests first. (1) Pasting several recovery codes (the saved list is one per line) got Laravel's raw "must not be greater than 32 characters": `recovery-code-form` now keeps the first code, read from the clipboard before the text field drops the line breaks (a single code typed in groups stays as typed), and the server answers 422 "Enter one recovery code. Each code works once." under `code` for several codes or over 32 characters, before any attempt counts (`RecoveryCodes::looksLikeSeveral()`; json-mode.md, JsonContractTest). (2) The challenge started on the method used last, so one "Try another way" to email made email (and an auto-sent code) the default from then on: authenticator apps now come first and are the default when the challenge accepts them (enforcement's required types still apply), the rest by last use (json-mode.md, configuration.md). (3) The recovery codes download is named `{app}-recovery-codes-{account}-{YYYY-MM-DD}.txt` (browser's date; unsafe characters → `-`) and its text names the app, account and download time with the time zone: new settings prop `recoveryCodesFile { app, slug, account }` (the TOTP issuer rule, now `TotpFactor::issuerFor()`, and `getMfaLabel()`), new dialog prop `recoveryCodesFile`, `downloadName` still overrides (integration.md props and upgrade note). 535 Pest and 338 Vitest tests; green on Laravel 11 lowest and type-checked in all three apps.
 - **2026-10-10**
   - Recovery-code wording (user report: a list of codes read as one long secret, so the whole list was pasted): the challenge's recovery field says "Enter one code from your saved list, like k7m2p-x1q0t. Each code works once." (a made-up example in the real format that can never be a real code: it contains `1` and `0`, which the generator never uses; a unit test reads the example from the component and checks it against `RandomCodeGenerator`'s alphabet), the setup dialog and the settings panel say each of the shown codes is a separate code, and the downloaded file says "Each line below is one code." Tests first.
+  - artistly audit fixes (§1.7; uncommitted on `claude/quizzical-wright-00a388` for review). Tests first for each; every regression test was checked to fail without its fix. (1) Enrollment verification before a first factor: `Support\EnrollmentVerification`, `RequireEnrollmentVerification`, `EnrollmentVerificationController`, `mfa:enrollment-link`, `Mfa::enrollmentLink()`, `InteractsWithMfa::withEnrollmentVerified()`, `SendGuard::attemptAccount()` (the account-cap counting is shared with `attempt()`), `Support\DeliveryQueue` (the queued-or-inline rule, shared with `OtpFactor`). (2) `NotifyAccountOwner` + `SecurityAlertNotification`, `notifications` config. (3) 303 for blocked non-GET/HEAD. (4) Intended URL only for navigations; Fetch Metadata non-navigations get the JSON 403. (5) Sessions/remember-me documented; trusted browsers designed in the Roadmap. (6) Frontend: the dialog's "Confirm it's you" step and its page wiring, preview scenarios. Results: 607 Pest (Laravel 11.22 lowest too), 364 Vitest, coverage 98.8%, typecheck-stubs OK in all three apps. Docs: configuration.md (Enrollment verification, Security notifications, Sessions, Blocked requests, Known limitations, Switches), json-mode.md (the 423, the two endpoints, the settings props), integration.md (config table, Background requests interceptor, tests, manual checks), README. `mfa:doctor` warns when enforcement is on without enrollment verification, and about a log/array mailer when only security emails use mail.
+  - Trusted browsers (§1.8), at the maintainer's request after the session-expiry discussion: server side test-first (the gate test fails without the hook), docs in configuration.md (Trusted browsers; Sessions table; Switches; Security model), json-mode.md (`remember`, `trustBrowser`, `trustedBrowsers`, the DELETE endpoints) and integration.md (config row, migrate after upgrades).
+  - Trusted-browser reminder (§1.8): server side and tests (MfaContext shape, the 12-hour window, Later, forgetting, verify-early returning to the page, `?renew=1` not a bypass); copy changed from "Renew now" to "Verify now" at the maintainer's request.
+  - Trusted browsers and the reminder complete: 636 Pest, 420 Vitest, `make ci` green, typecheck-stubs OK in artistly, clone-voice and podcast-flow. Everything since v0.5.2 is still uncommitted for the maintainer's review; suggested release v0.6.0.
+  - Review of §1.7–1.8 (standards + spec sub-agents) and every finding fixed (§1.9), tests first.
+  - Verification review (second round): earlier fixes confirmed; new small findings fixed (§1.10), tests first.
