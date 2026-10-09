@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.6 - 2026-10-09
+
+_Changes since `v0.3.5`._
+
+### Features
+
+- name the environment in the authenticator app outside production (3faafa1)
+
 ## v0.3.5 - 2026-10-09
 
 _Changes since `v0.3.0`._
