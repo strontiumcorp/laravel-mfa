@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { StrictMode } from 'react';
 import MfaChallenge from '../../stubs/inertia-react/pages/challenge';
 import { inertia } from './inertia-mock';
 
@@ -11,6 +12,8 @@ const factors = [
     { id: 3, type: 'sms' as const, type_label: 'SMS', label: null, destination: '+*******0100' },
 ];
 const urls = { send: '/mfa/challenge/send', verify: '/mfa/challenge/verify', recover: '/mfa/challenge/recover', logout: '/logout' };
+/** The factors, with a code already out for one of them (as after a refresh). */
+const withSent = (id: number, retryAfter: number | null) => factors.map((f) => (f.id === id ? { ...f, code_sent: true, retry_after: retryAfter } : f));
 const props = { factors, defaultFactorId: 1, hasRecoveryCodes: true, status: null, retryAfter: null, urls };
 
 beforeEach(() => inertia.reset());
@@ -24,12 +27,11 @@ describe('challenge page', () => {
         expect(inertia.requests).toEqual([{ method: 'post', url: urls.verify, data: { factor_id: 1, code: '123456' } }]);
     });
 
-    it('sends a code to the chosen factor and verifies against it', async () => {
+    it('sends a code when an email or SMS method is chosen, and verifies against it', async () => {
         render(<MfaChallenge {...props} />);
-        expect(screen.queryByRole('button', { name: 'Send code' })).not.toBeInTheDocument();
+        expect(inertia.requests).toEqual([]); // TOTP: nothing to send
 
         await userEvent.click(screen.getByRole('button', { name: 'Email' }));
-        await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
         await userEvent.type(screen.getByRole('textbox', { name: 'Verification code' }), '654321{Enter}');
 
         expect(inertia.requests).toEqual([
@@ -38,28 +40,98 @@ describe('challenge page', () => {
         ]);
     });
 
-    it('shows "code sent" and the countdown only for the factor the code went to', async () => {
-        const { rerender } = render(<MfaChallenge {...props} />);
-        await userEvent.click(screen.getByRole('button', { name: 'Email' }));
+    it('sends a new code on request', async () => {
+        render(<MfaChallenge {...props} factors={withSent(2, null)} defaultFactorId={2} />);
+
         await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
 
+        expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 2 } }]);
+    });
+
+    it('shows "code sent" and the countdown only for the factor the code went to', async () => {
+        const sent = withSent(3, null);
+        const { rerender } = render(<MfaChallenge {...props} factors={sent} />);
+        await userEvent.click(screen.getByRole('button', { name: 'Email' }));
+
         // The server redirects back with the status and the cooldown.
-        rerender(<MfaChallenge {...props} status="code-sent" retryAfter={120} />);
+        rerender(<MfaChallenge {...props} factors={sent} status="code-sent" retryAfter={120} />);
         expect(screen.getByRole('status')).toHaveTextContent('Code sent.');
         expect(screen.getByRole('button', { name: 'Resend in 2:00' })).toBeDisabled();
 
         await userEvent.click(screen.getByRole('button', { name: 'SMS' }));
         expect(screen.queryByRole('status')).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Send code' })).toBeEnabled();
+        expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 2 } }]);
+    });
+
+    describe('sending on arrival', () => {
+        it('sends a code when the page opens on an email or SMS method', () => {
+            render(<MfaChallenge {...props} defaultFactorId={2} />);
+
+            expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 2 } }]);
+        });
+
+        it('sends once under StrictMode', () => {
+            render(
+                <StrictMode>
+                    <MfaChallenge {...props} defaultFactorId={3} />
+                </StrictMode>,
+            );
+
+            expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 3 } }]);
+        });
+
+        it('does not send when the page opens on an authenticator app', () => {
+            render(<MfaChallenge {...props} />);
+
+            expect(inertia.requests).toEqual([]);
+        });
+
+        it('does not send again when a code is already out, and shows the countdown', () => {
+            render(<MfaChallenge {...props} factors={withSent(2, 75)} defaultFactorId={2} />);
+
+            expect(screen.getByText('We sent a code to j***@example.com.')).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Resend in 1:15' })).toBeDisabled();
+            expect(inertia.requests).toEqual([]);
+        });
+
+        it('sends once per method, however often the user switches', async () => {
+            render(<MfaChallenge {...props} />);
+
+            for (const name of ['Email', 'Authenticator app', 'Email', 'SMS', 'Email', 'SMS']) {
+                await userEvent.click(screen.getByRole('button', { name }));
+            }
+
+            expect(inertia.requests).toEqual([
+                { method: 'post', url: urls.send, data: { factor_id: 2 } },
+                { method: 'post', url: urls.send, data: { factor_id: 3 } },
+            ]);
+        });
+
+        it('does not send again after the server answers', () => {
+            const { rerender } = render(<MfaChallenge {...props} defaultFactorId={2} />);
+            // The redirect back: fresh props, same page instance.
+            rerender(<MfaChallenge {...props} factors={withSent(2, 120)} defaultFactorId={2} status="code-sent" retryAfter={120} />);
+
+            expect(inertia.requests).toHaveLength(1);
+        });
+
+        it('shows a failed send and does not retry by itself', () => {
+            inertia.respondWith({ code: 'We could not send your code. Please try again.' });
+            const { rerender } = render(<MfaChallenge {...props} defaultFactorId={2} />);
+            rerender(<MfaChallenge {...props} defaultFactorId={2} />);
+
+            expect(screen.getByRole('alert')).toHaveTextContent('We could not send your code.');
+            expect(screen.getByRole('button', { name: 'Send code' })).toBeEnabled();
+            expect(inertia.requests).toHaveLength(1);
+        });
     });
 
     it('keeps the countdown after a refresh, from the server\'s send state', () => {
-        const sent = factors.map((f) => (f.id === 2 ? { ...f, code_sent: true, retry_after: 58 } : f));
-        render(<MfaChallenge {...props} factors={sent} defaultFactorId={2} />);
+        render(<MfaChallenge {...props} factors={withSent(2, 58)} defaultFactorId={2} />);
 
         expect(screen.getByText('We sent a code to j***@example.com.')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Resend in 0:58' })).toBeDisabled();
-        expect(inertia.requests).toEqual([]);
     });
 
     it('switches to recovery codes and back, and signs out', async () => {

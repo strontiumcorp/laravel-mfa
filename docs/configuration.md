@@ -124,6 +124,8 @@ Two separate budgets, so the protection against message bombing can't be used to
 
 A refused request doesn't use up any quota. Responses include `retry_after`, and the pages show a countdown.
 
+The challenge page sends an email or SMS code by itself when it opens on that method, or when the user picks it, once per method per visit. It doesn't send when a usable code is already out (after a refresh, say): it shows "We sent a code to …" and the remaining countdown instead, from each factor's `code_sent` and `retry_after`. Opening the page (the `GET`) never sends anything, so prefetches and back/forward are safe; the send is the page's own `POST`, under the same cooldown and limits.
+
 SMS numbers must also match `factors.sms.allowed_calling_codes` and not `factors.sms.blocked_prefixes` (by default, premium-rate ranges behind `+1`). Also turn on your provider's geo-permissions and fraud protection.
 
 Events to act on:

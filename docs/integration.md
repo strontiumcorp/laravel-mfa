@@ -207,7 +207,7 @@ php artisan mfa:doctor     # exits non-zero on problems
 
 Manual check:
 - Password login with MFA → challenge → the intended page.
-- Wrong code → error; email code arrives; recovery code works once.
+- Wrong code → error; the email code arrives on its own when the challenge opens on email, and a refresh keeps the countdown without sending another; recovery code works once.
 - "Sign out" on the challenge page works.
 - An admin without MFA is sent to enroll.
 - Impersonation, webhooks and API keys still work.

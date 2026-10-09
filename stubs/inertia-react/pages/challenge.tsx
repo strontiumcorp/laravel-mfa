@@ -5,7 +5,7 @@ import MfaChallengeForm, { type MfaChallengeFactor } from '@/components/vendor/l
 import MfaRecoveryCodeForm from '@/components/vendor/laravel-mfa/recovery-code-form';
 import MfaSendCodeButton from '@/components/vendor/laravel-mfa/send-code-button';
 import { Head, router, useForm } from '@inertiajs/react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type Props = {
     factors: MfaChallengeFactor[];
@@ -46,6 +46,16 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
         send.transform(() => ({ factor_id: factorId }));
         send.post(urls.send, { preserveScroll: true });
     };
+
+    // Send a code as soon as an email/SMS method is shown (on arrival, or when
+    // picked), once per method per visit, unless one is already out. Never from
+    // the GET itself, so prefetches and back/forward don't send.
+    const autoSent = useRef(new Set<number>());
+    useEffect(() => {
+        if ((factor?.type !== 'email' && factor?.type !== 'sms') || autoSent.current.has(factor.id)) return;
+        autoSent.current.add(factor.id);
+        if (!factor.code_sent) sendCode();
+    }, [factorId]);
 
     const submitRecovery = (code: string) => {
         recover.transform(() => ({ code }));
