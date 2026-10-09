@@ -87,7 +87,7 @@ The messages are written for end users and are safe to display as-is. For the ma
 → `{ "status": "code-sent", "retry_after": 120 }`.
 
 - `retry_after` is the number of seconds until the next resend unlocks. The cooldown grows 2 → 4 → 8 → 15 minutes, but is never longer than the code's lifetime, so use it to drive a countdown.
-- A resend during the cooldown gets `429` with the remaining `retry_after`.
+- A resend during the cooldown gets `429` with the remaining `retry_after`, which also never runs past the current code's expiry (a resend is allowed once it has expired), so it always matches the challenge page's `retry_after`.
 - TOTP factors return `{ "status": "code-sent" }`, and nothing is sent.
 
 ### `POST /mfa/challenge`

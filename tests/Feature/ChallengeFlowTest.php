@@ -332,6 +332,11 @@ describe('send state on the challenge page', function () {
         $this->travel(100)->seconds();
 
         expect($sendState($this))->toBe([true, 200]);
+        // A send refused by the cooldown agrees: the code expires first, and
+        // a resend is allowed then.
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertStatus(429)->assertJsonPath('retry_after', 200);
+        $this->travel(200)->seconds();
+        $this->postJson(route('mfa.challenge.send'), ['factor_id' => $factor->id])->assertOk();
     });
 
     it('gives TOTP factors no send state', function () {

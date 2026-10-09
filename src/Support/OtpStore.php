@@ -91,11 +91,10 @@ final class OtpStore
             return ChallengeState::none($options['length']);
         }
 
-        // A resend unlocks at the end of the curve, or when the code expires
-        // (it is no longer usable then), whichever comes first.
-        $readyAt = $cooldown['ready_at'] === null ? 0 : min($cooldown['ready_at']->getTimestamp(), $cooldown['usable']->expires_at->getTimestamp());
-
-        return ChallengeState::sent($readyAt - now()->getTimestamp(), $options['length']);
+        return ChallengeState::sent(
+            $cooldown['ready_at'] === null ? null : $cooldown['ready_at']->getTimestamp() - now()->getTimestamp(),
+            $options['length'],
+        );
     }
 
     /**
@@ -104,7 +103,9 @@ final class OtpStore
      * Streak: sends since the later of "an hour ago" and the last successful
      * verification (both reset the curve). A resend is always allowed once
      * the latest code is unusable (expired or burned), so ready_at is null
-     * then; otherwise it is when the curve allows the next send.
+     * then; otherwise it is when the curve allows the next send, or when the
+     * code expires if that is sooner (it is unusable from then on). issue()'s
+     * refusal and status() both read it, so they always agree.
      *
      * @param  int|array<string, int|float>  $config
      * @return array{streak: int, usable: MfaOtpCode|null, ready_at: Carbon|null}
@@ -125,10 +126,12 @@ final class OtpStore
             return ['streak' => $streak, 'usable' => null, 'ready_at' => null];
         }
 
+        $readyAt = $latest->created_at?->copy()->addSeconds(Cooldown::after($streak, $config));
+
         return [
             'streak' => $streak,
             'usable' => $latest,
-            'ready_at' => $latest->created_at?->copy()->addSeconds(Cooldown::after($streak, $config)),
+            'ready_at' => $readyAt !== null && $readyAt->gt($latest->expires_at) ? Carbon::instance($latest->expires_at) : $readyAt,
         ];
     }
 
