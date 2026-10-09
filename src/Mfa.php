@@ -208,7 +208,7 @@ class Mfa
         }
 
         /** @var EnforcementPolicy|null $instance */
-        $instance = $policy === null ? null : $this->app->make($policy);
+        $instance = $policy === null ? null : $this->live()->make($policy);
 
         return $instance !== null && $instance->mustEnroll($user);
     }
@@ -332,7 +332,7 @@ class Mfa
         $policy = $this->config->get('mfa.routes.password_confirmation_policy');
 
         /** @var PasswordConfirmationPolicy|null $instance */
-        $instance = is_string($policy) && $policy !== '' ? $this->app->make($policy) : null;
+        $instance = is_string($policy) && $policy !== '' ? $this->live()->make($policy) : null;
 
         return $instance === null || $instance->mustConfirmPassword($user);
     }
@@ -359,7 +359,7 @@ class Mfa
      */
     public function validatePassword(Request $request, MultiFactorAuthenticatable $user, string $password): bool
     {
-        $guard = LiveContainer::getInstance()->make(AuthFactory::class)->guard($this->guardFor($request, $user));
+        $guard = $this->live()->make(AuthFactory::class)->guard($this->guardFor($request, $user));
 
         return $guard instanceof SessionGuard && $guard->getProvider()->validateCredentials($user, ['password' => $password]);
     }
@@ -462,7 +462,7 @@ class Mfa
     {
         // Resolve from the live container, not the one captured when this
         // singleton was built: under Octane each request runs in a clone.
-        $request ??= LiveContainer::getInstance()->make('request');
+        $request ??= $this->live()->make('request');
 
         $allowed = $target instanceof MultiFactorAuthenticatable && $this->hasConfirmedFactors($target)
             ? $this->isVerifiedFor($request, $impersonator)
@@ -493,7 +493,7 @@ class Mfa
      */
     public function context(?Request $request = null): MfaContext
     {
-        $request ??= LiveContainer::getInstance()->make('request');
+        $request ??= $this->live()->make('request');
         $enabled = $this->enabled();
         $routes = $enabled && (bool) $this->config->get('mfa.routes.enabled') && Route::has('mfa.settings');
 
@@ -559,7 +559,7 @@ class Mfa
     {
         return $this->nudgeEligible($user)
             && ! ($request->route() !== null && $request->routeIs('mfa.*'))
-            && ! $this->app->make(Nudge::class)->isDismissed($request->session(), $user);
+            && ! $this->live()->make(Nudge::class)->isDismissed($request->session(), $user);
     }
 
     /**
@@ -644,7 +644,7 @@ class Mfa
     /** @return list<SessionIdentity> */
     public function sessionIdentities(Request $request): array
     {
-        return SessionIdentity::resolveAll($request, LiveContainer::getInstance()->make(AuthFactory::class), $this->guards());
+        return SessionIdentity::resolveAll($request, $this->live()->make(AuthFactory::class), $this->guards());
     }
 
     /**
@@ -695,6 +695,18 @@ class Mfa
         }
 
         return $this->guards()[0] ?? 'web';
+    }
+
+    /**
+     * The container of the request being handled. Under Octane each request
+     * runs in a clone of the app, set as the global instance, while
+     * \$this->app is the one this singleton was built with at boot: anything
+     * per request (the request, auth, a policy that needs either) comes from
+     * here. Without Octane both are the same container.
+     */
+    private function live(): Container
+    {
+        return LiveContainer::getInstance();
     }
 
     private function cacheKey(int|string $userId): string

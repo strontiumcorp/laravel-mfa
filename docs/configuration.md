@@ -32,7 +32,7 @@ Everything is in `config/mfa.php`, with comments. This page covers the parts tha
 
 A user is enforced when their role is listed **or** the policy says so. With neither, MFA is opt-in. `getMfaRoles()` reads the `role` attribute. Override it for other role systems, e.g. spatie/laravel-permission: `return $this->getRoleNames()->all();`.
 
-For a rule in code, write a policy class and leave `roles` empty, so it decides alone. It is resolved from the container, so it can inject anything:
+For a rule in code, write a policy class and leave `roles` empty, so it decides alone. It is resolved from the container on every check, so it can inject anything, the current `Request` included: under Octane it comes from the container of the request being handled, never the one the app booted with. For example:
 
 ```php
 class EnforceForStaff implements \StrontiumCorp\LaravelMfa\Contracts\EnforcementPolicy
@@ -95,7 +95,7 @@ class AskPasswordUsers implements \StrontiumCorp\LaravelMfa\Contracts\PasswordCo
 'password_confirmation_policy' => \App\Mfa\AskPasswordUsers::class,
 ```
 
-Or set `password_confirmation` to `false` to ask nobody. `mfa:doctor` checks that the policy class implements the contract, and warns when Socialite is installed with no policy, and when confirmation is off entirely.
+Like the enforcement policy, it is resolved from the current request's container on every check, so it may inject the `Request` (Octane included). Or set `password_confirmation` to `false` to ask nobody. `mfa:doctor` checks that the policy class implements the contract, and warns when Socialite is installed with no policy, and when confirmation is off entirely.
 
 The password is checked by the session guard's user provider, as `Auth::validate()` would. Attempts are limited per account (`rate_limit.password_per_minute`, 5, and `rate_limit.password_per_day`, 20), counted before checking and cleared on success. While locked, the prompt counts down to the next allowed attempt.
 

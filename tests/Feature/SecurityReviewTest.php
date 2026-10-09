@@ -18,6 +18,7 @@ use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use StrontiumCorp\LaravelMfa\Notifications\OtpCodeNotification;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
 use StrontiumCorp\LaravelMfa\Support\RateLimits;
+use StrontiumCorp\LaravelMfa\Tests\Fixtures\RequestAwarePolicy;
 
 it('[#9] lets enforced users through password confirmation while enrolling (no redirect loop)', function () {
     config(['mfa.enforcement.policy' => EnforceForAdmins::class, 'mfa.routes.confirm_middleware' => ['password.confirm']]);
@@ -183,6 +184,35 @@ it('[#9] resolves the current request from the live container, not the one captu
     }
 
     expect($session->has($mfa->sessionKey('web', $target->id)))->toBeTrue();
+});
+
+it('resolves the enforcement and password confirmation policies from the live container (Octane)', function () {
+    config([
+        'mfa.enforcement.policy' => RequestAwarePolicy::class,
+        'mfa.routes.password_confirmation' => true,
+        'mfa.routes.password_confirmation_policy' => RequestAwarePolicy::class,
+    ]);
+    $mfa = app(StrontiumCorp\LaravelMfa\Mfa::class);   // resolved at boot, holds the base app
+    $user = $this->makeUser();
+
+    // Without Octane (artistly): the one container, the one request.
+    expect($mfa->isEnforced($user))->toBeFalse()->and($mfa->requiresPasswordConfirmation($user))->toBeFalse();
+
+    // Octane: this request runs in a clone of the base app with its own request.
+    $base = app();
+    $sandbox = clone $base;
+    Container::setInstance($sandbox);
+    $sandbox->instance('request', Request::create('/x', server: ['HTTP_X_STRICT' => '1']));
+
+    try {
+        $seen = [$mfa->isEnforced($user), $mfa->requiresPasswordConfirmation($user), $mfa->mustEnroll($user)];
+    } finally {
+        Container::setInstance($base);
+    }
+
+    expect($seen)->toBe([true, true, true])
+        // And back on the base app's request, the policy sees that one again.
+        ->and($mfa->isEnforced($user))->toBeFalse();
 });
 
 // Regression guard: on MySQL, whereKey('12abc') matches id 12. SQLite can't
