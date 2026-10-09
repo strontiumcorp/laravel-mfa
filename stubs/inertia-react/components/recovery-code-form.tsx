@@ -5,7 +5,7 @@
 // and knows nothing about Inertia or routes.
 //
 //     <MfaRecoveryCodeForm onSubmit={(code) => recover(code)} processing={processing} error={errors.code} onTryAnotherWay={back} />
-import { useId, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { MfaIconKey } from './icons';
 
 export type MfaRecoveryCodeFormProps = {
@@ -34,9 +34,44 @@ const FIELD =
 const FIELD_BORDER = 'border-gray-300 focus:border-gray-900 dark:border-gray-700 dark:focus:border-gray-100';
 const FIELD_BORDER_ERROR = 'border-red-500 focus:border-red-500 dark:border-red-500 dark:focus:border-red-500';
 
+// A whole code on its own: groups joined by dashes ("ab3de-fg7hk"), or a long enough run of letters and digits.
+const ONE_CODE = /^(?:[a-z0-9]+(?:-[a-z0-9]+)+|[a-z0-9]{8,})$/i;
+
+// The first code, when the text holds several (lines pasted from the saved
+// list, or codes separated by spaces or commas); null otherwise, so a single
+// code typed in groups ("ab3de fg7hk") stays as typed. The server answers
+// "Enter one recovery code" to the same input.
+function firstOfSeveral(text: string): string | null {
+    const codes = text.split(/[\s,;]+/).filter((token) => ONE_CODE.test(token));
+
+    return codes.length > 1 ? codes[0] : null;
+}
+
 export default function MfaRecoveryCodeForm({ onSubmit, processing = false, error = null, onTryAnotherWay, onUseVerificationCode, onSignOut }: MfaRecoveryCodeFormProps) {
     const [code, setCode] = useState('');
     const id = useId();
+    const input = useRef<HTMLInputElement>(null);
+    // Where the caret goes after a paste was cut down to one code.
+    const caret = useRef<number | null>(null);
+    useLayoutEffect(() => {
+        if (caret.current !== null) {
+            input.current?.setSelectionRange(caret.current, caret.current);
+            caret.current = null;
+        }
+    }, [code]);
+
+    // A text field drops line breaks, so a pasted list arrives as one long
+    // word: look at the clipboard text before it does.
+    const paste = (e: { clipboardData: DataTransfer; currentTarget: HTMLInputElement; preventDefault(): void }) => {
+        const first = firstOfSeveral(e.clipboardData.getData('text'));
+        if (first === null) return;
+
+        e.preventDefault();
+        const { value, selectionStart, selectionEnd } = e.currentTarget;
+        const start = selectionStart ?? value.length;
+        caret.current = start + first.length;
+        setCode(value.slice(0, start) + first + value.slice(selectionEnd ?? start));
+    };
     const back = onTryAnotherWay ? (
         <button type="button" onClick={onTryAnotherWay} className={QUIET}>
             Try another way
@@ -71,8 +106,10 @@ export default function MfaRecoveryCodeForm({ onSubmit, processing = false, erro
                         aria-label="Recovery code"
                         aria-describedby={`${id}-description`}
                         aria-invalid={error ? true : undefined}
+                        ref={input}
                         value={code}
-                        onChange={(e) => setCode(e.target.value)}
+                        onPaste={paste}
+                        onChange={(e) => setCode(firstOfSeveral(e.target.value) ?? e.target.value)}
                         placeholder="xxxxx-xxxxx"
                         autoComplete="off"
                         autoCapitalize="none"

@@ -13,6 +13,53 @@ describe('MfaRecoveryCodeForm', () => {
         expect(onSubmit).toHaveBeenCalledWith('abcde-12345');
     });
 
+    it('keeps only the first code when several lines are pasted', async () => {
+        const onSubmit = vi.fn();
+        render(<MfaRecoveryCodeForm onSubmit={onSubmit} />);
+        const input = screen.getByRole('textbox', { name: 'Recovery code' });
+
+        await userEvent.click(input);
+        await userEvent.paste('bxztk-e78s3\nvfw8q-zmmh8\nv7wsa-k2m9p\n');
+
+        expect(input).toHaveValue('bxztk-e78s3');
+        expect((input as HTMLInputElement).selectionStart).toBe('bxztk-e78s3'.length);
+        await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
+        expect(onSubmit).toHaveBeenCalledWith('bxztk-e78s3');
+    });
+
+    it('keeps only the first code when codes separated by spaces are pasted', async () => {
+        render(<MfaRecoveryCodeForm onSubmit={() => {}} />);
+        const input = screen.getByRole('textbox', { name: 'Recovery code' });
+
+        await userEvent.click(input);
+        await userEvent.paste('bxztk-e78s3 vfw8q-zmmh8 v7ws');
+
+        expect(input).toHaveValue('bxztk-e78s3');
+    });
+
+    it('keeps the first code of a numbered, comma-separated list', async () => {
+        render(<MfaRecoveryCodeForm onSubmit={() => {}} />);
+        const input = screen.getByRole('textbox', { name: 'Recovery code' });
+
+        await userEvent.click(input);
+        await userEvent.paste('1. bxztk-e78s3, 2. vfw8q-zmmh8');
+
+        expect(input).toHaveValue('bxztk-e78s3');
+    });
+
+    it('leaves one code with spaces or dashes as typed', async () => {
+        render(<MfaRecoveryCodeForm onSubmit={() => {}} />);
+        const input = screen.getByRole('textbox', { name: 'Recovery code' });
+
+        await userEvent.click(input);
+        await userEvent.paste('bxztk e78s3');
+        expect(input).toHaveValue('bxztk e78s3');
+
+        await userEvent.clear(input);
+        await userEvent.type(input, 'BXZTK-E78S3');
+        expect(input).toHaveValue('BXZTK-E78S3');
+    });
+
     it('needs a code', async () => {
         render(<MfaRecoveryCodeForm onSubmit={() => {}} />);
         const verify = screen.getByRole('button', { name: 'Verify' });
