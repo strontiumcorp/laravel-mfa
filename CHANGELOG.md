@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.4.1 - 2026-10-09
+
+_Changes since `v0.4.0`._
+
+### Breaking changes
+
+- **ui:** a settings card that is its own page section (4b15401)
+
+### Fixes
+
+- **ui:** keep the code input and other controls free of host form styles (bc8c250)
+
+### Other
+
+- release straight from main again, keeping the pull-request flow as release-pr (2a7866a)
+- check the settings card and API-key notice for dark colours too (bfe0676)
+- **preview:** add a Host forms plugin toggle (537e6a9)
+- guard the components against host form styles and missing dark colours (efc986f)
+
 ## v0.4.0 - 2026-10-09
 
 _Changes since `v0.3.6`._
