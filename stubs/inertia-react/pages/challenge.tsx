@@ -24,6 +24,7 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
     // status and retryAfter describe the last send; show them only on that factor.
     const [sentToId, setSentToId] = useState<number | null>(null);
     const factor = factors.find((f) => f.id === factorId) ?? null;
+    const delivered = factor?.type === 'email' || factor?.type === 'sms';
     const logoutUrl = urls.logout;
 
     // Each endpoint reports failures under "code" (send: cooldown, delivery).
@@ -54,7 +55,7 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
     // the GET itself, so prefetches and back/forward don't send.
     const autoSent = useRef(new Set<number>());
     useEffect(() => {
-        if ((factor?.type !== 'email' && factor?.type !== 'sms') || autoSent.current.has(factor.id)) return;
+        if (!delivered || autoSent.current.has(factor.id)) return;
         autoSent.current.add(factor.id);
         if (!factor.code_sent) sendCode();
     }, [factorId]);
@@ -65,7 +66,6 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
     };
 
     const signOut = logoutUrl ? () => router.post(logoutUrl) : undefined;
-    const delivered = factor?.type === 'email' || factor?.type === 'sms';
     const sentHere = sentToId === factorId;
     // A code is out: from the server (it survives a refresh), or the send just answered.
     const codeOut = Boolean(factor?.code_sent) || (sentHere && status === 'code-sent');
