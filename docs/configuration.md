@@ -236,6 +236,16 @@ php artisan mfa:reset jane@example.com             # locked-out user; verify the
 - A pending enrollment belongs to the browser session that started it and expires after 30 minutes.
 - Deleting a user deletes their factors and codes. Their audit rows stay, unlinked, until pruned.
 
+## Known limitations
+
+Trade-offs we know about and have accepted for now. Each says who it affects, what to do when it happens, and what could change.
+
+- **Someone with only the password can block code entry for a day.** Wrong codes count against `rate_limit.verify_per_day` (default 50) per user, not per network, so whoever has the password can use all 50 and the owner can't enter any code until the next day, authenticator-app codes and recovery codes included. Sending isn't affected: the daily send caps count per network, so the owner still gets codes; they just can't enter them.
+  - *When it happens:* the owner sees the rate-limit message on the challenge. Verify their identity out of band, then `php artisan mfa:reset <email>` (or wait a day), and have them change their password: the attacker has it.
+  - *What could change:* count the daily verify cap per user and per network, as the daily send caps already are (a per-network bucket keeps the owner's own network usable). Tracked on the roadmap.
+- **People behind one IP share the daily send budget.** The per-method daily caps (`factors.email.send_per_day`, `factors.sms.send_per_day`) count per user and per network, so two devices of the same user on one office network or carrier-grade NAT share one budget. At 15 email / 5 SMS a day per user this rarely matters.
+- **The per-network limits trust the client IP.** An app that trusts every proxy (`'*'`) can be sent a spoofed `X-Forwarded-For`, which dodges the per-IP and per-network limits; the per-account hourly cap and the app-wide caps still hold. Trust only your load balancer or CDN ranges (`mfa:doctor` warns).
+
 ## Performance
 
 - A verified session costs no MFA queries. Whether a user has MFA is cached and refreshed when their factors change. The cache holds the user's factor types, and the enabled types are applied on each read, so turning a type off or on takes effect at once. Within one request the cache is read once per user (kept on the request, never on a singleton), however often the gate, the shared context and the nudge ask.
