@@ -47,7 +47,9 @@ class MfaOtpCode extends Model
      * max_attempts wrong guesses, and an expired one was consumed after
      * expires_at. A code consumed in the second it expired counts as
      * verified (timestamps are whole seconds), which only makes the next
-     * send wait, never sooner.
+     * send wait, never sooner. A code superseded by a newer one
+     * (OtpStore::issue()) gets an expiry a second before it was consumed,
+     * so it always reads as expired.
      */
     public function wasVerified(int $maxAttempts): bool
     {

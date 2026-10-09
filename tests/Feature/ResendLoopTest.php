@@ -182,3 +182,61 @@ it('still warns only about sends that were never verified', function () {
 
     Event::assertNotDispatched(SuspiciousCodeRequests::class);
 });
+
+/*
+ * A resend supersedes the code out (it is marked used). When that resend's
+ * delivery fails, its code is discarded and the superseded code is the latest
+ * again: it must not be mistaken for a code used to verify, which would make
+ * the next send wait (a failed delivery leaves no cooldown) and the page say
+ * "You recently used a code".
+ */
+describe('a resend whose delivery fails', function () {
+    $state = fn () => collect(test()->getJson(route('mfa.challenge'))->assertOk()->json('factors.0'))
+        ->only(['code_sent', 'retry_after'])->all();
+    $send = fn () => test()->postJson(route('mfa.challenge.send'), ['factor_id' => test()->factor->id]);
+
+    beforeEach(function () {
+        [$this->user, $this->factor] = $this->userWithFactor(FactorType::Sms);
+        $this->freshGuards()->loginWithSession($this->user);
+    });
+
+    it('leaves no wait when it fired as the code out expired', function () use ($state, $send) {
+        config(['mfa.factors.sms.ttl' => 100]);
+        Mfa::fakeCodes('123456'); // rebuild the drivers with the new ttl
+
+        $send()->assertOk();                         // code 1, expires at 100
+        $this->travel(100)->seconds();
+        $send()->assertOk();                         // code 2 (the 2nd of the streak), expires at 200
+        $this->travel(100)->seconds();               // the page's expiry timer resends at once
+        Mfa::fakeSms()->failWith('down');
+        $send()->assertUnprocessable();              // code 3 never went out: discarded
+
+        Mfa::fakeSms();
+        expect($state())->toBe(['code_sent' => false, 'retry_after' => null]);
+        $send()->assertOk();
+    });
+
+    it('leaves no wait beyond the curve when the code out was still usable', function () use ($state, $send) {
+        $send()->assertOk();                         // code 1
+        $this->travel(120)->seconds();
+        $send()->assertOk();                         // code 2, a resend: the next waits 240
+        $this->travel(240)->seconds();
+        Mfa::fakeSms()->failWith('down');
+        $send()->assertUnprocessable();              // code 3 never went out: discarded
+
+        Mfa::fakeSms();
+        expect($state())->toBe(['code_sent' => false, 'retry_after' => null]);
+        $send()->assertOk();
+    });
+
+    it('still makes the next login wait after a code used to verify', function () use ($send) {
+        $send()->assertOk();
+        verifyAndLogOut($this->factor);
+        loginAndSend($this->user, $this->factor)->assertOk();   // the first re-login is free
+        verifyAndLogOut($this->factor);
+
+        $this->freshGuards()->loginWithSession($this->user);
+        Mfa::fakeSms()->failWith('down');
+        $send()->assertStatus(429)->assertJsonPath('retry_after', 120); // refused by the cooldown, nothing sent
+    });
+});

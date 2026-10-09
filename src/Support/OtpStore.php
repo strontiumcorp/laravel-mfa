@@ -60,7 +60,13 @@ final class OtpStore
             // Counted before the new code exists, like the streak.
             $unverified = $this->unverifiedSends($factor, $lastVerified, $cooldown['streak']);
 
-            $factor->otpCodes()->whereNull('consumed_at')->update(['consumed_at' => now()]);
+            // Supersede the code out: it stops being valid now. Its expiry is
+            // set a second before, so it reads as expired, never as a code
+            // used to verify (MfaOtpCode::wasVerified()), even if the new code
+            // is discarded after a failed delivery and this one is the latest
+            // again. Otherwise a resend fired in the second the code expired
+            // would leave a cooldown behind a delivery that never happened.
+            $factor->otpCodes()->whereNull('consumed_at')->update(['consumed_at' => now(), 'expires_at' => now()->subSecond()]);
 
             $code = $this->generator->otp($options['length']);
 
