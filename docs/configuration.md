@@ -220,6 +220,7 @@ php artisan mfa:reset jane@example.com             # locked-out user; verify the
 - Verification attempts are limited per user per minute and per day; the daily cap stops slow brute force.
 - The session ID changes after verification. Logging out clears verification even if the app doesn't invalidate the session.
 - Each logged-in guard must pass MFA on its own.
+- The gate runs before route model binding (it is placed ahead of `SubstituteBindings` in the middleware priority, after the session and auth middleware), so an unverified user gets the challenge for every URL, whether the record exists or not, and the app's binding code doesn't run for them. An app that replaces the whole priority list (`->priority([...])` in `bootstrap/app.php`, or `$middlewarePriority` in a Kernel) should list `EnsureMfaVerified` right before `SubstituteBindings` itself.
 - A user who has factors but hasn't verified can't open the MFA settings, so a stolen password can't add a factor.
 - Adding or removing a factor and regenerating recovery codes ask for the password again (see [Password confirmation](#password-confirmation)), so a stolen session alone can't change them (unless confirmation is off or the user is exempt).
 - A pending enrollment belongs to the browser session that started it and expires after 30 minutes.

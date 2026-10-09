@@ -1,14 +1,22 @@
 <?php
 
+use Illuminate\Auth\Middleware\Authenticate;
+use Illuminate\Contracts\Http\Kernel;
+use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Routing\SortedMiddleware;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Route;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Events\ChallengeRequired;
 use StrontiumCorp\LaravelMfa\Events\EnrollmentRequired;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
+use StrontiumCorp\LaravelMfa\Http\Middleware\EnsureMfaVerified;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\EnforceForEveryone;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\Role;
+use StrontiumCorp\LaravelMfa\Tests\Fixtures\User;
 
 it('lets guests through', function () {
     $this->get('/public')->assertOk();
@@ -87,6 +95,36 @@ it('challenges logins restored from a remember-me cookie on the first request', 
     $this->withCookie($guard->getRecallerName(), $cookie)
         ->get('/dashboard')
         ->assertRedirect(route('mfa.challenge'));
+});
+
+it('challenges before route model binding, so an unverified user learns nothing about records', function () {
+    // /profiles/{profile} binds a model; a missing id would be a 404.
+    Route::middleware(['web', 'auth'])->get('/profiles/{profile}', fn (User $profile) => $profile->id);
+    [$user] = $this->userWithFactor();
+    $this->loginWithSession($user);
+
+    $this->get("/profiles/{$user->id}")->assertRedirect(route('mfa.challenge'));
+    $this->get('/profiles/999999')->assertRedirect(route('mfa.challenge'));
+
+    $this->actingAsMfaVerified($user);
+    $this->get("/profiles/{$user->id}")->assertOk();
+    $this->get('/profiles/999999')->assertNotFound();
+});
+
+it('runs after the session and auth middleware, and before route model binding', function () {
+    Route::middleware(['web', 'auth'])->get('/profiles/{profile}', fn (User $profile) => $profile->id)->name('profiles.show');
+    Route::getRoutes()->refreshNameLookups();
+    app(Kernel::class); // syncs its groups and priority onto the router
+    $order = array_values(array_map(
+        fn ($m) => is_string($m) ? explode(':', $m)[0] : $m,
+        // Sorted by the router's priority list, as it runs them.
+        (new SortedMiddleware(app('router')->middlewarePriority, app('router')->gatherRouteMiddleware(Route::getRoutes()->getByName('profiles.show'))))->all(),
+    ));
+    $at = fn (string $class) => array_search($class, $order, true);
+
+    expect($at(EnsureMfaVerified::class))->toBeGreaterThan($at(StartSession::class))
+        ->toBeGreaterThan($at(Authenticate::class))
+        ->toBeLessThan($at(SubstituteBindings::class));
 });
 
 it('blocks MFA settings for users who have factors but have not verified', function () {
