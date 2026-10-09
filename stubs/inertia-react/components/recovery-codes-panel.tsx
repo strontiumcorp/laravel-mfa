@@ -56,7 +56,7 @@ export default function MfaRecoveryCodesPanel({
                 <div className="space-y-4 rounded-2xl border border-amber-300 bg-amber-50 p-5 sm:px-6 dark:border-amber-800 dark:bg-amber-950/40">
                     <div className="space-y-1">
                         <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Save your recovery codes</h2>
-                        <p className="text-sm text-gray-700 dark:text-gray-300">Each code works once. Store them somewhere safe — they won't be shown again.</p>
+                        <p className="text-sm text-gray-700 dark:text-gray-300">Each of these is a separate code and works once. Store them somewhere safe — they won't be shown again.</p>
                     </div>
                     <ul
                         aria-label="Recovery codes"

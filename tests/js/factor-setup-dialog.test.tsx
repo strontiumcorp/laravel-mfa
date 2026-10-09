@@ -230,6 +230,7 @@ describe('MfaFactorSetupDialog', () => {
             expect(screen.getByRole('dialog', { name: 'Save your recovery codes' })).toBeInTheDocument();
             expect(screen.getByText('SMS · Step 3 of 3')).toBeInTheDocument();
             expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual(codes);
+            expect(screen.getByText(/Each of these is a separate code\. Use one when you can't use your other sign-in methods; each works once/)).toBeInTheDocument();
             // Shown once: no way out but Complete.
             expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
             fireEvent.keyDown(dialog(), { key: 'Escape' });
@@ -293,7 +294,7 @@ describe('MfaFactorSetupDialog', () => {
                         'Account: mojahid@mail.com\n' +
                         'Downloaded: 2026-10-09 08:05 (Asia/Dhaka)\n' +
                         '\n' +
-                        'Each code works once. Getting new codes cancels these.\n' +
+                        'Each line below is one code. Each code works once. Getting new codes cancels these.\n' +
                         '\n' +
                         'aaaaa-11111\nbbbbb-22222\n',
                 );
@@ -309,7 +310,7 @@ describe('MfaFactorSetupDialog', () => {
                 const { name, text } = await download({});
 
                 expect(name).toBe('recovery-codes-2026-10-09.txt');
-                expect(text).toBe('Two-factor recovery codes\nDownloaded: 2026-10-09 08:05 (Asia/Dhaka)\n\nEach code works once. Getting new codes cancels these.\n\naaaaa-11111\nbbbbb-22222\n');
+                expect(text).toBe('Two-factor recovery codes\nDownloaded: 2026-10-09 08:05 (Asia/Dhaka)\n\nEach line below is one code. Each code works once. Getting new codes cancels these.\n\naaaaa-11111\nbbbbb-22222\n');
             });
 
             it('takes an explicit downloadName over the derived one', async () => {

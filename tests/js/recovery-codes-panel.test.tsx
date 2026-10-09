@@ -5,6 +5,12 @@ import MfaRecoveryCodesPanel from '../../stubs/inertia-react/components/recovery
 const codes = ['aaaaa-11111', 'bbbbb-22222'];
 
 describe('MfaRecoveryCodesPanel', () => {
+    it('says each new code is separate and works once', () => {
+        render(<MfaRecoveryCodesPanel remaining={2} codes={codes} onRegenerate={() => {}} />);
+
+        expect(screen.getByText(/Each of these is a separate code and works once\./)).toBeInTheDocument();
+    });
+
     it('shows how many codes are left', () => {
         render(<MfaRecoveryCodesPanel remaining={7} onRegenerate={() => {}} />);
 

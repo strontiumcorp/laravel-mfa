@@ -93,6 +93,14 @@ describe('MfaRecoveryCodeForm', () => {
         expect(screen.getByRole('textbox', { name: 'Recovery code' })).toHaveFocus();
     });
 
+    it('says that one line of the saved list is one code, with an example', () => {
+        render(<MfaRecoveryCodeForm onSubmit={() => {}} />);
+
+        expect(screen.getByRole('textbox', { name: 'Recovery code' })).toHaveAccessibleDescription(
+            'Enter one code from your saved list, like k7m2p-x9q4t. Each code works once.',
+        );
+    });
+
     it('goes back to the other ways in, when given the callback', async () => {
         const onTryAnotherWay = vi.fn();
         render(<MfaRecoveryCodeForm onSubmit={() => {}} onTryAnotherWay={onTryAnotherWay} onUseVerificationCode={() => {}} />);

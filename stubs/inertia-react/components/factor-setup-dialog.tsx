@@ -108,7 +108,7 @@ function recoveryCodesDownload(codes: string[], file: MfaRecoveryCodesFile | nul
         ...(file?.account ? [`Account: ${file.account}`] : []),
         `Downloaded: ${date} ${pad(now.getHours())}:${pad(now.getMinutes())}${zone ? ` (${zone})` : ''}`,
         '',
-        'Each code works once. Getting new codes cancels these.',
+        'Each line below is one code. Each code works once. Getting new codes cancels these.',
         '',
         ...codes,
         '',
@@ -563,7 +563,7 @@ export default function MfaFactorSetupDialog({
                     {step === 'saved' && hasCodes && (
                         <>
                             <p className="text-sm text-gray-600 dark:text-gray-400">
-                                If you lose access to your sign-in methods, use one of these. Each works once, and they won't be shown again.
+                                Each of these is a separate code. Use one when you can't use your other sign-in methods; each works once, and they won't be shown again.
                             </p>
                             <ul aria-label="Recovery codes" className="grid grid-cols-2 gap-x-6 gap-y-1.5 rounded-xl bg-gray-100 p-4 font-mono text-sm text-gray-900 dark:bg-gray-800 dark:text-gray-100">
                                 {recoveryCodes!.map((c) => (
