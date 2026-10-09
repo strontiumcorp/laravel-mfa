@@ -80,6 +80,11 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
     const sentHere = sentToId === factorId;
     // A code is out: from the server (it survives a refresh), or the send just answered.
     const codeOut = Boolean(factor?.code_sent) || (sentHere && status === 'code-sent');
+    // A send refused while the server's own state says a code is out and its
+    // cooldown runs is the cooldown (it is checked before any other limit), e.g.
+    // an auto-send after back/forward restored stale props. Not an error: the
+    // code is out, and the countdown says when another can be sent.
+    const sendError = sentHere && !(factor?.code_sent && factor.retry_after) ? send.errors.code : undefined;
 
     return (
         <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-10 dark:bg-gray-950">
@@ -111,7 +116,7 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
                         onSignOut={signOut}
                         initialView={backToList ? 'methods' : 'code'}
                         sent={codeOut}
-                        sendFailed={sentHere && Boolean(send.errors.code)}
+                        sendFailed={Boolean(sendError)}
                     >
                         {delivered && (
                             <MfaSendCodeButton
@@ -119,7 +124,7 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
                                 processing={send.processing}
                                 retryAfter={resendIn(factor.id) || null}
                                 sent={codeOut}
-                                error={send.errors.code}
+                                error={sendError}
                             />
                         )}
                     </MfaChallengeForm>

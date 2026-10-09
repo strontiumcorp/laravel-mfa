@@ -148,6 +148,46 @@ describe('challenge page', () => {
         expect(screen.getByRole('button', { name: 'Resend in 0:58' })).toBeDisabled();
     });
 
+    describe('a send refused because a code is already out', () => {
+        const cooldown = { code: 'Please wait before requesting another code.' };
+
+        it('shows the countdown, not an error, when coming back to the page (stale props)', () => {
+            // Back/forward restores the props from history (no code out yet) and remounts the page.
+            inertia.respondWith(cooldown);
+            const { rerender } = render(<MfaChallenge {...props} defaultFactorId={2} />);
+            // The redirect back: the server's own state, the cooldown flashed, the error under "code".
+            rerender(<MfaChallenge {...props} factors={withSent(2, 50)} defaultFactorId={2} retryAfter={50} />);
+
+            expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+            expect(description()).toHaveTextContent('Enter the 6-digit code we sent to j***@example.com.');
+            expect(screen.getByRole('button', { name: 'Resend in 0:50' })).toBeDisabled();
+            expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 2 } }]);
+        });
+
+        it('shows the countdown, not an error, after "Send a new code"', async () => {
+            // The page thinks a resend is allowed (e.g. its props are stale).
+            const { rerender } = render(<MfaChallenge {...props} factors={withSent(2, null)} defaultFactorId={2} />);
+            inertia.respondWith(cooldown);
+            await userEvent.click(screen.getByRole('button', { name: 'Send a new code' }));
+            rerender(<MfaChallenge {...props} factors={withSent(2, 40)} defaultFactorId={2} retryAfter={40} />);
+
+            expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+            expect(screen.getByRole('button', { name: 'Resend in 0:40' })).toBeDisabled();
+            expect(inertia.requests).toEqual([{ method: 'post', url: urls.send, data: { factor_id: 2 } }]);
+        });
+
+        it('still shows other refusals, e.g. the hourly limit with a code out', async () => {
+            const { rerender } = render(<MfaChallenge {...props} factors={withSent(2, null)} defaultFactorId={2} />);
+            inertia.respondWith({ code: 'Too many attempts. Please try again later.' });
+            await userEvent.click(screen.getByRole('button', { name: 'Send a new code' }));
+            // No cooldown in the factor's state: the limit, not the code out, refused it.
+            rerender(<MfaChallenge {...props} factors={withSent(2, null)} defaultFactorId={2} retryAfter={2400} />);
+
+            expect(screen.getByRole('alert')).toHaveTextContent('Too many attempts.');
+            expect(screen.getByRole('button', { name: 'Resend in 40:00' })).toBeDisabled();
+        });
+    });
+
     describe('countdowns while the page is open', () => {
         // Real time still moves, so userEvent works; advanceTimersByTime() jumps ahead.
         beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
