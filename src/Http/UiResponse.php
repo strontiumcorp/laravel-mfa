@@ -116,8 +116,8 @@ final class UiResponse
         if ($this->wantsJson()) {
             // Same shape as a validation error, plus retry_after when known.
             throw new HttpResponseException(response()->json(array_filter([
-                'message' => $reason->message(),
-                'errors' => [$field => [$reason->message()]],
+                'message' => $reason->message($retryAfter),
+                'errors' => [$field => [$reason->message($retryAfter)]],
                 'retry_after' => $retryAfter,
             ], fn ($value) => $value !== null), $status));
         }
@@ -126,7 +126,7 @@ final class UiResponse
             $this->request->session()->flash($field === 'password' ? self::PASSWORD_RETRY_AFTER : 'mfa.retry_after', $retryAfter);
         }
 
-        throw ValidationException::withMessages([$field => $reason->message()])->status($status);
+        throw ValidationException::withMessages([$field => $reason->message($retryAfter)])->status($status);
     }
 
     /**

@@ -145,7 +145,9 @@ Two separate budgets, so the protection against message bombing can't be used to
 | A confirmed destination (login codes) | Per-factor cooldown of 2 → 4 → 8 → 15 minutes, reset by a successful login or an hour of quiet. 10 sends per account per hour. 1000 per hour app-wide (`rate_limit.confirmed_global_per_hour`; `null` or `0` turns it off), then login codes pause for everyone until the hour's window frees up. No per-IP limit, so shared networks are fine. |
 | A new destination (enrollment) | 2 messages per destination per day across all accounts. 3 new destinations per account per day. 10 new destinations per IP per hour (IPv6 grouped per /64). 500 per hour app-wide, then sending pauses. |
 
-A refused request doesn't use up any quota. Responses include `retry_after`, and the pages show a countdown.
+A refused request doesn't use up any quota. Responses include `retry_after`, and the pages show a countdown. When an app-wide cap pauses sending, the message says when to try again: "Too many codes are being sent right now. Try again in 18 minutes, or use an authenticator app." (minutes rounded up).
+
+The per-IP limit is only as good as the client IP Laravel sees, so configure trusted proxies correctly. Behind a load balancer or CDN, trust only that layer (its addresses, or Cloudflare's published ranges), not `'*'`: trusting every proxy lets a client set its own `X-Forwarded-For` and pick a fresh IP for each request. `mfa:doctor` warns about both no trusted proxies and `'*'`.
 
 The challenge page sends an email or SMS code by itself when it opens on that method, or when the user picks it, once per method per visit. It doesn't send when a usable code is already out (after a refresh, say): it shows "We sent a code to …" and the remaining countdown instead, from each factor's `code_sent` and `retry_after`. Opening the page (the `GET`) never sends anything, so prefetches and back/forward are safe; the send is the page's own `POST`, under the same cooldown and limits.
 

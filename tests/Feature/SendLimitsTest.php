@@ -124,7 +124,7 @@ describe('unconfirmed destinations (enrollment)', function () {
         enrollSms('+15555550101', '203.0.113.1')->assertOk();
         enrollSms('+15555550102', '203.0.113.2')->assertOk();
         enrollSms('+15555550103', '203.0.113.3')->assertStatus(503)
-            ->assertJsonPath('errors.destination.0', "We can't send codes right now. Please use an authenticator app or try again later.");
+            ->assertJsonPath('errors.destination.0', 'Too many codes are being sent right now. Try again in 60 minutes, or use an authenticator app.');
         enrollSms('+15555550104', '203.0.113.4')->assertStatus(503);
 
         Event::assertDispatchedTimes(SendingCircuitTripped::class, 1);
@@ -216,6 +216,38 @@ describe('app-wide cap on confirmed sends (SMS pumping)', function () {
 
         $this->travel(2701)->seconds();
         loginSendSms()[2]->assertOk();
+    });
+
+    it('tells the user when to try again, in minutes', function () {
+        $this->freezeSecond();
+        config(['mfa.rate_limit.confirmed_global_per_hour' => 1]);
+        Mfa::fakeSms();
+        loginSendSms()[2]->assertOk();
+        $this->travel(2570)->seconds();
+
+        loginSendSms()[2]->assertStatus(503) // 1030 seconds left: rounded up
+            ->assertJsonPath('message', 'Too many codes are being sent right now. Try again in 18 minutes, or use an authenticator app.')
+            ->assertJsonPath('retry_after', 1030);
+
+        $this->travel(1000)->seconds();
+        loginSendSms()[2]->assertStatus(503)->assertJsonPath('errors.code.0', 'Too many codes are being sent right now. Try again in a minute, or use an authenticator app.');
+    });
+
+    it('gives the challenge page the message and the countdown', function () {
+        $this->freezeSecond();
+        config(['mfa.rate_limit.confirmed_global_per_hour' => 1, 'mfa.ui.driver' => 'inertia']);
+        Mfa::fakeSms();
+        [$first, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->loginWithSession($first)->post('/mfa/challenge/send', ['factor_id' => $factor->id])->assertRedirect();
+        $this->travel(3570)->seconds();
+
+        [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+        $this->freshGuards()->loginWithSession($user)
+            ->from('/mfa/challenge')->post('/mfa/challenge/send', ['factor_id' => $factor->id])
+            ->assertRedirect('/mfa/challenge')
+            ->assertSessionHasErrors(['code' => 'Too many codes are being sent right now. Try again in a minute, or use an authenticator app.']);
+        // The resend countdown runs to the same moment.
+        $this->get('/mfa/challenge', ['X-Inertia' => 'true'])->assertJsonPath('props.retryAfter', 30);
     });
 
     it('rolls back the account counter when the cap refuses', function () {

@@ -24,7 +24,11 @@ enum FailureReason: string
     case InvalidRecoveryCode = 'invalid_recovery_code';
     case InvalidPassword = 'invalid_password';
 
-    public function message(): string
+    /**
+     * The end-user message. $retryAfter (seconds), when known, says when to
+     * try again where that helps (an app-wide send cap).
+     */
+    public function message(?int $retryAfter = null): string
     {
         return match ($this) {
             self::InvalidCode, self::InvalidRecoveryCode => 'The provided code is invalid.',
@@ -34,12 +38,24 @@ enum FailureReason: string
             self::RateLimited => 'Too many attempts. Please try again later.',
             self::Cooldown => 'Please wait before requesting another code.',
             self::DestinationLimit => 'Too many codes were sent to this destination today. Try again tomorrow, or use an authenticator app.',
-            self::SendingPaused => "We can't send codes right now. Please use an authenticator app or try again later.",
+            self::SendingPaused => 'Too many codes are being sent right now. Try again '.self::inMinutes($retryAfter).', or use an authenticator app.',
             self::FactorNotFound => 'This verification method is not available.',
             self::FactorDisabled => 'This verification method is currently disabled.',
             self::DestinationNotAllowed => "We can't send verification codes to this destination.",
             self::DeliveryFailed => 'We could not send your code. Please try again.',
             self::InvalidPassword => 'The provided password is incorrect.',
         };
+    }
+
+    /** "in a minute", "in 18 minutes" (rounded up), or "later" when unknown. */
+    private static function inMinutes(?int $seconds): string
+    {
+        if ($seconds === null || $seconds <= 0) {
+            return 'later';
+        }
+
+        $minutes = intdiv($seconds + 59, 60);
+
+        return $minutes === 1 ? 'in a minute' : "in {$minutes} minutes";
     }
 }
