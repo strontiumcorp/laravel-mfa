@@ -37,8 +37,8 @@ use StrontiumCorp\LaravelMfa\Testing\FixedCodeGenerator;
  * Facade root (StrontiumCorp\LaravelMfa\Facades\Mfa).
  *
  * Holds no per-request state — the session/request are always passed in —
- * so it is safe as a singleton under Octane. (The enforceUsing() callback is
- * app configuration, registered once at boot.)
+ * so it is safe as a singleton under Octane. Code-level rules are classes
+ * named in config (enforcement.policy), resolved per call.
  */
 class Mfa
 {
@@ -49,9 +49,6 @@ class Mfa
 
     /** Set to false (Mfa::ignoreMigrations()) if you publish and own the migrations. */
     public static bool $runsMigrations = true;
-
-    /** @var (Closure(MultiFactorAuthenticatable): bool)|null */
-    private ?Closure $enforceUsing = null;
 
     public static function ignoreMigrations(): void
     {
@@ -194,13 +191,9 @@ class Mfa
         return array_intersect($this->typeValues($required), $this->typeValues($this->confirmedTypes($user))) === [];
     }
 
-    /** Whether an enforcement rule (enforceUsing(), roles or policy) applies to this user. */
+    /** Whether an enforcement rule (roles or policy) applies to this user. */
     public function isEnforced(MultiFactorAuthenticatable $user): bool
     {
-        if ($this->enforceUsing !== null) {
-            return (bool) ($this->enforceUsing)($user);
-        }
-
         [$roles, $policy] = $this->enforcementRules();
 
         if ($roles !== [] && (new EnforceForRoles($roles))->mustEnroll($user)) {
@@ -218,7 +211,7 @@ class Mfa
     {
         [$roles, $policy] = $this->enforcementRules();
 
-        return $this->enforceUsing !== null || $roles !== [] || $policy !== null;
+        return $roles !== [] || $policy !== null;
     }
 
     /**
@@ -308,27 +301,6 @@ class Mfa
     private function typeValues(array $types): array
     {
         return array_map(fn (FactorType $type) => $type->value, $types);
-    }
-
-    /**
-     * Decide in code who is enforced; replaces config('mfa.enforcement.roles')
-     * and ('mfa.enforcement.policy'). enforcement.required_types still applies.
-     * Register in a service provider's boot(), e.g.
-     * Mfa::enforceUsing(fn (User $user) => $user->isAdmin()). Pass null to clear.
-     *
-     * @param  (Closure(MultiFactorAuthenticatable): bool)|null  $callback
-     */
-    public function enforceUsing(?Closure $callback): static
-    {
-        $this->enforceUsing = $callback;
-
-        return $this;
-    }
-
-    /** Whether enforceUsing() has registered a callback (for mfa:doctor / about). */
-    public function enforcesInCode(): bool
-    {
-        return $this->enforceUsing !== null;
     }
 
     /** Whether this user would be let through without a challenge right now. */

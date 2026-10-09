@@ -17,8 +17,6 @@ use Illuminate\Support\Facades\Facade;
  * @method static list<\StrontiumCorp\LaravelMfa\Enums\FactorType> requiredTypes()
  * @method static list<\StrontiumCorp\LaravelMfa\Enums\FactorType> challengeTypes(\StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable $user)
  * @method static list<\StrontiumCorp\LaravelMfa\Enums\FactorType> confirmedTypes(\StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable $user)
- * @method static \StrontiumCorp\LaravelMfa\Mfa enforceUsing(?\Closure $callback)
- * @method static bool enforcesInCode()
  * @method static \StrontiumCorp\LaravelMfa\Support\MfaContext context(?\Illuminate\Http\Request $request = null)
  * @method static bool isVerified(\Illuminate\Contracts\Session\Session $session, \Illuminate\Contracts\Auth\Authenticatable $user, ?string $guard = null)
  * @method static bool isVerifiedFor(\Illuminate\Http\Request $request, \Illuminate\Contracts\Auth\Authenticatable $user)

@@ -222,14 +222,6 @@ describe('mfa:doctor', function () {
 
         config(['mfa.enforcement.policy' => PlainUser::class]);
         $this->artisan('mfa:doctor')->assertFailed()->expectsOutputToContain('implements EnforcementPolicy');
-
-        config(['mfa.enforcement.roles' => []]);
-        Mfa::enforceUsing(fn () => true);
-        try {
-            $this->artisan('mfa:doctor')->assertSuccessful()->expectsOutputToContain('Enforcement decided by Mfa::enforceUsing()');
-        } finally {
-            Mfa::enforceUsing(null);
-        }
     });
 
     it('checks the delivery queue (D8)', function () {

@@ -300,15 +300,11 @@ class DoctorCommand extends Command
                 : 'Config key "enforce" is ignored: "enforcement.roles" / "enforcement.policy" are set (remove it)');
         }
 
-        if ($mfa->enforcesInCode()) {
-            $this->components->twoColumnDetail('Enforcement decided by Mfa::enforceUsing()', '<fg=green;options=bold>OK</>');
-        }
-
-        if (! $mfa->enforcesInCode() && $roles !== []) {
+        if ($roles !== []) {
             $this->check('Enforced for roles ['.implode(', ', $roles).']', ! in_array('', $roles, true));
         }
 
-        if (! $mfa->enforcesInCode() && $policy !== null) {
+        if ($policy !== null) {
             $this->check("Enforcement policy [{$policy}] implements EnforcementPolicy", is_subclass_of($policy, EnforcementPolicy::class));
         }
 

@@ -186,9 +186,7 @@ class MfaServiceProvider extends ServiceProvider
     {
         [$roles, $policy] = $mfa->enforcementRules();
 
-        $who = $mfa->enforcesInCode()
-            ? 'Mfa::enforceUsing()'
-            : implode(' + ', array_filter([$roles !== [] ? 'roles: '.implode(', ', $roles) : null, $policy]));
+        $who = implode(' + ', array_filter([$roles !== [] ? 'roles: '.implode(', ', $roles) : null, $policy]));
 
         if ($who === '') {
             return 'opt-in';

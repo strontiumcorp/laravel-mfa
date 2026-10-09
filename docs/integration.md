@@ -98,7 +98,7 @@ MFA_LOG_CHANNEL=mfa              # optional dedicated channel
 
 | Key | Set to |
 |---|---|
-| `enforcement.roles` | The roles that must use MFA, e.g. `['admin', 'super_admin', 'support']`. For logic in code, call `Mfa::enforceUsing(fn ($user) => ...)` in a service provider instead. |
+| `enforcement.roles` | The roles that must use MFA, e.g. `['admin', 'super_admin', 'support']`. For logic in code, set `enforcement.policy` to a `Contracts\EnforcementPolicy` class instead (with `roles` empty, it decides alone). |
 | `enforcement.required_types` | What those users must set up and sign in with. Default `['totp']`: an admin with only email is sent to add an authenticator app. `[]` accepts any factor. |
 | `routes.home` | Where users land after the challenge when there's no intended page. Default `/dashboard`. |
 | `routes.logout_route` | The app's named logout route. Default `logout`. |

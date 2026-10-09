@@ -1,6 +1,7 @@
 <?php
 
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
+use StrontiumCorp\LaravelMfa\Tests\Fixtures\EnforceForEveryone;
 
 // Pins the shape mirrored by stubs/inertia-react/pages/mfa-context.ts.
 // Change both together.
@@ -31,17 +32,11 @@ it('describes the session user', function () {
 });
 
 it('flags users who must enroll', function () {
-    config(['mfa.enforcement.roles' => ['admin']]);
-    $user = $this->makeUser();
-    $this->loginWithSession($user);
-    Mfa::enforceUsing(fn () => true);
+    config(['mfa.enforcement.policy' => EnforceForEveryone::class]);
+    $this->loginWithSession($this->makeUser());
 
-    try {
-        expect(Mfa::context(request()->setLaravelSession(session()->driver()))->user)
-            ->toBe(['hasMfa' => false, 'verified' => false, 'mustEnroll' => true]);
-    } finally {
-        Mfa::enforceUsing(null);
-    }
+    expect(Mfa::context(request()->setLaravelSession(session()->driver()))->user)
+        ->toBe(['hasMfa' => false, 'verified' => false, 'mustEnroll' => true]);
 });
 
 it('serialises as JSON for Inertia shared props', function () {

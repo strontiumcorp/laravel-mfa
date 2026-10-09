@@ -7,6 +7,7 @@ use StrontiumCorp\LaravelMfa\Events\ChallengeRequired;
 use StrontiumCorp\LaravelMfa\Events\EnrollmentRequired;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
+use StrontiumCorp\LaravelMfa\Tests\Fixtures\EnforceForEveryone;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\Role;
 
 it('lets guests through', function () {
@@ -161,26 +162,18 @@ describe('enforcement (D5)', function () {
             ->and(Mfa::mustEnroll($this->makeUser()))->toBeFalse();
     });
 
-    it('lets Mfa::enforceUsing() decide in code, ahead of the config', function () {
-        config(['mfa.enforcement.roles' => ['admin']]);
-        Mfa::enforceUsing(fn ($user) => $user->email === 'boss@example.com');
+    it('enforces when either the roles or the policy class says so', function () {
+        config(['mfa.enforcement.roles' => ['admin'], 'mfa.enforcement.policy' => EnforceForAdmins::class]);
 
-        try {
-            expect(Mfa::mustEnroll($this->makeUser(['email' => 'boss@example.com'])))->toBeTrue()
-                ->and(Mfa::mustEnroll($this->makeUser()->forceFill(['role' => 'admin'])))->toBeFalse();
-        } finally {
-            Mfa::enforceUsing(null);
-        }
+        expect(Mfa::mustEnroll($this->makeUser(['is_admin' => true])))->toBeTrue()
+            ->and(Mfa::mustEnroll($this->makeUser()->forceFill(['role' => 'admin'])))->toBeTrue()
+            ->and(Mfa::mustEnroll($this->makeUser()))->toBeFalse();
     });
 
     it('never requires enrollment from users who already have a factor', function () {
-        Mfa::enforceUsing(fn () => true);
+        config(['mfa.enforcement.policy' => EnforceForEveryone::class, 'mfa.enforcement.required_types' => []]);
 
-        try {
-            [$user] = $this->userWithFactor();
-            expect(Mfa::mustEnroll($user))->toBeFalse();
-        } finally {
-            Mfa::enforceUsing(null);
-        }
+        [$user] = $this->userWithFactor();
+        expect(Mfa::mustEnroll($user))->toBeFalse();
     });
 });

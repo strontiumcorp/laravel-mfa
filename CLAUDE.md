@@ -69,7 +69,7 @@ Don't break these. Each one is covered by tests; read them before changing the a
 **Who is checked**
 - `EnsureMfaVerified` is appended to the `web` group (deny by default). It checks the **identity stored in the session** (`Support\SessionIdentity`), never `Auth::user()`. That's why `Auth::setUser()` in webhooks, jobs and per-request impersonation is never challenged, while password, Socialite and remember-me logins always are.
 - Verification is **per guard** (`mfa.verified.{guard}.{id}` in the session). Every logged-in MFA guard must pass on its own.
-- Users with no factors pass, unless enforcement (`mfa.enforcement.roles` / `.policy`, or `Mfa::enforceUsing()`; the v0.1 `mfa.enforce` key is still honoured) says they must enroll.
+- Users with no factors pass, unless enforcement (`mfa.enforcement.roles` / `.policy`; the v0.1 `mfa.enforce` key is still honoured) says they must enroll.
 - Enforced users must hold a factor of `enforcement.required_types` (default totp). Without one they verify with what they have, then a session flag (`mfa.enroll.{guard}.{id}`, set in `markVerified()`, refreshed on factor confirm/remove) holds them on the enrollment routes, so verified requests still cost no query. With one, the challenge lists and accepts only required types (`Mfa::challengeTypes()`, checked server-side in `ChallengeService`); recovery codes still work.
 - The configured `routes.logout_route` is always reachable; MFA's own challenge routes are always reachable while a challenge is pending.
 - Settings routes are unreachable for an unverified user who has factors (a stolen password can't add a factor). Pending enrollments are bound to the session that started them (`PendingEnrollments`, 30 minutes).
@@ -100,7 +100,7 @@ Don't break these. Each one is covered by tests; read them before changing the a
 
 **Config**
 - `config/mfa.php` is deep-merged with the app's published copy (`ConfigMerge`), so new nested keys reach apps with old configs. Every new key needs its default in `config/mfa.php`; don't add `config('…', fallback)` defaults in code.
-- Closures can't go in config (`config:cache`). Code-level hooks are static registrations on `Mfa` (e.g. `enforceUsing()`).
+- Closures can't go in config (`config:cache`). Code-level rules are classes named in config that implement a contract (`enforcement.policy`), resolved per call; the `Mfa` singleton holds no closures for them.
 
 ## Contracts that must change together
 

@@ -49,23 +49,21 @@ return [
     | Enforcement
     |--------------------------------------------------------------------------
     |
-    | Who must use MFA. With no roles, no policy and no Mfa::enforceUsing(),
-    | MFA is opt-in per user. A user is enforced when either rule says so.
+    | Who must use MFA. With no roles and no policy, MFA is opt-in per user.
+    | A user is enforced when either rule says so.
     |
     | roles          => roles that must use MFA, e.g. ['admin', 'support'],
     |                   matched against the user's getMfaRoles() (the "role"
     |                   attribute by default; string or enum).
-    | policy         => a class implementing Contracts\EnforcementPolicy.
+    | policy         => a class implementing Contracts\EnforcementPolicy, for
+    |                   logic in code (resolved from the container, so it
+    |                   can inject anything). With no roles, it decides alone.
     | required_types => what enforced users must set up and sign in with.
     |                   Their other factors don't count: an enforced user
     |                   with only email is sent to add an authenticator app,
     |                   and once they have one, the challenge offers only it
     |                   (recovery codes still work). Types that are disabled
     |                   are ignored; [] means any enabled type.
-    |
-    | For logic in code, call Mfa::enforceUsing(fn ($user) => ...) in a
-    | service provider; it decides instead of roles and policy. (A closure
-    | can't go here: `php artisan config:cache` can't store it.)
     |
     */
 

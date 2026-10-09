@@ -27,9 +27,21 @@ Everything is in `config/mfa.php`, with comments. This page covers the parts tha
 ],
 ```
 
-A user is enforced when their role is listed **or** the policy says so. With neither (and no `Mfa::enforceUsing()`), MFA is opt-in. `getMfaRoles()` reads the `role` attribute. Override it for other role systems, e.g. spatie/laravel-permission: `return $this->getRoleNames()->all();`.
+A user is enforced when their role is listed **or** the policy says so. With neither, MFA is opt-in. `getMfaRoles()` reads the `role` attribute. Override it for other role systems, e.g. spatie/laravel-permission: `return $this->getRoleNames()->all();`.
 
-For a rule in code, `Mfa::enforceUsing(fn ($user) => $user->isAdmin())` in a service provider decides instead of `roles` and `policy`. (Closures can't go in the config file: `config:cache` can't store them.)
+For a rule in code, write a policy class and leave `roles` empty, so it decides alone. It is resolved from the container, so it can inject anything:
+
+```php
+class EnforceForStaff implements \StrontiumCorp\LaravelMfa\Contracts\EnforcementPolicy
+{
+    public function mustEnroll(MultiFactorAuthenticatable $user): bool
+    {
+        return $user->isAdmin() || $user->team?->requires_mfa;
+    }
+}
+```
+
+`Policies\EnforceForAdmins` (users whose `isAdmin()` is true) ships as an example.
 
 **Required types.** Enforced users must have a factor of a type in `required_types` (default: an authenticator app). Their other factors don't count:
 
@@ -40,6 +52,8 @@ For a rule in code, `Mfa::enforceUsing(fn ($user) => $user->isAdmin())` in a ser
 | A required type (and maybe others) | Offered only the required types, plus recovery codes | Through |
 
 The server enforces this, not just the pages: a non-required factor is refused at `send` and `verify` (`FactorNotFound`). Removing their last required factor sends the user back to enroll. Users who aren't enforced can use any enabled type. Types that are disabled are ignored; if none of `required_types` is enabled, any factor satisfies enforcement and `mfa:doctor` warns.
+
+**Upgrading from v0.2:** `Mfa::enforceUsing()` is removed. Move its closure into an `enforcement.policy` class as above, with `roles` empty if the closure decided alone.
 
 **Upgrading from v0.1:** the top-level `'enforce'` key is now `enforcement.roles` (a list) or `enforcement.policy` (a class). The old key is still honoured when neither is set, and `mfa:doctor` warns until you move it.
 
