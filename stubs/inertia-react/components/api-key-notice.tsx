@@ -23,7 +23,7 @@ export default function MfaApiKeyNotice({ enabled = true, settingsUrl = null, cl
     if (!enabled) return null;
 
     return (
-        <div role="note" className={`rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 ${className}`}>
+        <div role="note" className={`rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200 ${className}`}>
             <p className="font-medium">Two-factor authentication isn't enforced for API keys.</p>
             <p className="mt-1">
                 Requests made with an API key skip the two-factor check. If you think your API key or your password has

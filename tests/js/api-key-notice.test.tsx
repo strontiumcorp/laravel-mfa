@@ -21,6 +21,12 @@ describe('MfaApiKeyNotice', () => {
         expect(container).toBeEmptyDOMElement();
     });
 
+    it('has its own dark-mode colours', () => {
+        render(<MfaApiKeyNotice settingsUrl="/user/two-factor" />);
+
+        expect(screen.getByRole('note')).toHaveClass('dark:border-amber-900', 'dark:bg-amber-950/40', 'dark:text-amber-200');
+    });
+
     it('accepts extra classes', () => {
         render(<MfaApiKeyNotice className="mt-4" />);
 

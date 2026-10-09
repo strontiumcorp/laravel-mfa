@@ -44,12 +44,32 @@ describe('MfaSettingsCard', () => {
 
         expect(screen.getByRole('button', { name: 'Manage' })).toHaveAttribute('data-href', '/mfa/settings');
         expect(screen.queryByRole('link')).not.toBeInTheDocument();
-        expect(renderLink).toHaveBeenCalledWith(expect.objectContaining({ href: '/mfa/settings', children: 'Manage' }));
+        expect(renderLink).toHaveBeenCalledWith(expect.objectContaining({ href: '/mfa/settings', className: expect.stringContaining('rounded-lg') }));
     });
 
-    it('accepts extra classes', () => {
-        render(<MfaSettingsCard settingsUrl="/mfa/settings" className="mt-4" />);
+    it('draws its own card, in light and dark, so it needs no wrapper', () => {
+        render(<MfaSettingsCard settingsUrl="/mfa/settings" hasMfa />);
 
-        expect(card()).toHaveClass('mt-4');
+        expect(card().tagName).toBe('SECTION');
+        expect(card()).toHaveClass('rounded-2xl', 'border', 'bg-white', 'p-4', 'sm:p-8', 'dark:bg-gray-900', 'dark:border-gray-800');
+        expect(screen.getByRole('heading', { level: 2, name: 'Two-factor authentication' })).toBeInTheDocument();
+    });
+
+    it('replaces the card surface with className, keeping the content', () => {
+        render(<MfaSettingsCard settingsUrl="/mfa/settings" hasMfa className="rounded-2xl bg-white p-4 shadow dark:bg-[#1E1F24]" />);
+
+        expect(card()).toHaveClass('rounded-2xl', 'bg-white', 'p-4', 'shadow', 'dark:bg-[#1E1F24]');
+        for (const surface of ['border', 'border-gray-200', 'dark:bg-gray-900', 'sm:p-8']) expect(card()).not.toHaveClass(surface);
+        expect(card()).toHaveTextContent('On');
+        expect(screen.getByRole('link', { name: 'Manage' })).toBeInTheDocument();
+    });
+
+    it('puts the action under the text, as a primary button only when there is something to set up', () => {
+        const { rerender } = render(<MfaSettingsCard settingsUrl="/mfa/settings" hasMfa />);
+        expect(screen.getByRole('link', { name: 'Manage' })).toHaveClass('border');
+        expect(screen.getByRole('link', { name: 'Manage' })).not.toHaveClass('bg-gray-900');
+
+        rerender(<MfaSettingsCard settingsUrl="/mfa/settings" />);
+        expect(screen.getByRole('link', { name: 'Set up' })).toHaveClass('bg-gray-900', 'dark:bg-gray-100');
     });
 });
