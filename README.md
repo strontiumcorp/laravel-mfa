@@ -40,6 +40,12 @@ Add the two-factor card to the account settings page (it links to the MFA settin
 <MfaSettingsCard {...mfaSettingsCardProps(useMfa())} renderLink={(link) => <Link {...link} />} />
 ```
 
+and, in the global layout, the nudge that asks users without two-factor to turn it on:
+
+```tsx
+<MfaEnableNudge {...useMfaNudge()} />
+```
+
 The MFA settings page asks for the password itself before factor changes, so the app needs no confirm-password page. Then check the setup:
 
 ```bash

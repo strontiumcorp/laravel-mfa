@@ -12,6 +12,7 @@ Everything is in `config/mfa.php`, with comments. This page covers the parts tha
 | `MFA_DELIVERY_QUEUE`, `MFA_DELIVERY_QUEUE_CONNECTION` | empty | Either one queues code delivery. Both empty sends inline. |
 | `MFA_UI_DRIVER` | `inertia` | `json` for other frontends; see [json-mode.md](json-mode.md). |
 | `MFA_LOG_CHANNEL`, `MFA_LOG_LEVEL` | default channel, `info` | Where MFA events are logged, and the lowest level logged. |
+| `MFA_NUDGE_ENABLED` | `true` | The "turn on two-factor" nudge for users without a method; see [Nudge](#nudge). |
 
 **The name in authenticator apps.** `factors.totp.issuer` (`MFA_TOTP_ISSUER`, default `APP_NAME`) is what authenticator apps show for the account. Outside production the environment is added in brackets ("Acme (staging)", "Acme (local)"), so a test account never looks like the real one; set `factors.totp.issuer_environment` to `false` to turn that off. It applies to apps added from then on: an existing entry keeps the name it was added with.
 
@@ -113,6 +114,26 @@ In host-app tests, `$this->actingAsMfaVerified($user)->withConfirmedPassword()` 
 - A published config that still has `'confirm_middleware' => ['password.confirm']` keeps sending users to the app's confirm page, and works as before. Set it to `[]` to use MFA's prompt.
 - A published config with `'confirm_middleware' => []` to turn confirmation **off** (social login) now asks for the password. Add `'password_confirmation' => false`, or exempt password-less users with `password_confirmation_policy`.
 
+## Nudge
+
+Users who aren't required to use MFA can be asked to turn it on: a small floating card in the app's layout (`MfaEnableNudge`, [integration step 6](integration.md#6-frontend)), and the same title and body as a notice on the MFA settings page.
+
+```php
+'nudge' => [
+    'enabled' => env('MFA_NUDGE_ENABLED', true),
+    'title' => 'Protect your account',
+    'body' => 'Turn on two-factor sign-in now. It takes a minute and will soon be required.',
+    'button' => 'Turn on',
+    'dismiss_label' => 'Not today',
+],
+```
+
+- **Who sees it.** A logged-in user (on an MFA guard) with no confirmed method who isn't enforced, while MFA and its routes are on. Enforced users never see it: they are sent to enroll anyway. The shared context says `nudge.show = false` on MFA's own pages (routes named `mfa.*`), so the card hides itself there.
+- **"Not today"** (or ×) hides it until the user's next local midnight. The browser sends its timezone (an unknown or missing one means `app.timezone`); the server works out that midnight, never taking a time from the client, and stores it as an instant, at most 26 hours away. A midnight that summer time skips becomes the day's first real minute.
+- **Per user, not per browser.** The dismissal is kept in the cache (`cache.store`, a keyed hash of the user id, expiring at that instant), so it holds on every device and after signing in again. The session keeps a copy, so a page view reads nothing once it knows; otherwise a user without MFA costs one cache read per page. Users with MFA cost nothing extra.
+- **Copy.** Plain strings, safe with `config:cache`. Each one goes through `__()`, so a `lang/{locale}.json` entry with the English text as its key translates it.
+- **Event.** `NudgeDismissed`, with `until` (ISO 8601, app timezone), reaches the log, the audit table and metrics like every MFA event.
+
 ## Sending limits
 
 Two separate budgets, so the protection against message bombing can't be used to lock an owner out:
@@ -201,5 +222,6 @@ php artisan mfa:reset jane@example.com             # locked-out user; verify the
 ## Performance
 
 - A verified session costs no MFA queries. Whether a user has MFA is cached and refreshed when their factors change.
+- The nudge adds nothing for users with MFA, and at most one cache read per page for users without it (none once the session knows it was dismissed).
 - Safe under Octane: no request state is kept between requests.
 - On multiple servers, use a shared cache and session store (Redis or database). `mfa:doctor` warns otherwise.

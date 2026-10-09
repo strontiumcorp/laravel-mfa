@@ -150,6 +150,7 @@ If the app sets `routes.confirm_middleware` to `['password.confirm']`, Laravel's
     "requiredTypes": [],
     "passwordConfirmationRequired": false,
     "passwordRetryAfter": null,
+    "nudge": { "title": "Protect your account", "body": "Turn on two-factor sign-in now. It takes a minute and will soon be required." },
     "urls": { "store": "…/mfa/factors", "confirm": "…/mfa/factors/__ID__/confirm", "resend": "…/mfa/factors/__ID__/resend",
               "destroy": "…/mfa/factors/__ID__", "recoveryCodes": "…/mfa/recovery-codes", "confirmPassword": "…/mfa/confirm-password" },
     "status": null,
@@ -159,6 +160,8 @@ If the app sets `routes.confirm_middleware` to `['password.confirm']`, Laravel's
 ```
 
 `passwordConfirmationRequired` says whether adding or removing a method would answer `423` right now (see [Password confirmation](#password-confirmation)), so a client can ask for the password before starting; the routes still enforce it. `recoveryCodesTotal` is how many a fresh set has (`recovery_codes.count`), for an "8 of 10 left" display. `availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have one. It's `[]` for other users.
+
+`nudge` holds the [nudge](configuration.md#nudge)'s title and body, to show as a notice, for a user with no method who isn't enforced (and while `nudge.enabled` is on); it's `null` otherwise.
 
 Replace `__ID__` in the URLs with a factor ID.
 
@@ -212,3 +215,19 @@ Unconfirmed destinations have tight limits, because anyone can trigger them:
 → `{ "status": "recovery-codes-generated", "recovery_codes": [ … ] }`. This invalidates every previous code.
 
 If the user has no confirmed factor yet, the response is `422 { "message": "Enable a verification method first." }`, without an `errors` key.
+
+## Nudge
+
+### `POST /mfa/nudge/dismiss`
+
+"Not today" on the [nudge](configuration.md#nudge) to turn two-factor on. The only input is the browser's timezone (optional; `Intl.DateTimeFormat().resolvedOptions().timeZone`):
+
+```json
+{ "timezone": "Asia/Dhaka" }
+```
+→ `{ "status": "nudge-dismissed", "until": "2026-10-10T18:00:00+00:00" }`
+
+- `until` is the user's next local midnight, in the app timezone, at most 26 hours away. A missing or unknown timezone counts as `app.timezone`; nothing else in the request is read.
+- It applies to the user on every device, until `until`. Whether to show the nudge is in the shared context (`Mfa::context()`, `nudge.show`).
+- Inertia and plain form posts get a `303` back to the page they came from, with no status flash.
+- Like the other MFA routes, it needs a logged-in session that has passed the challenge (a user without methods isn't challenged).
