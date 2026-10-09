@@ -4,8 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>laravel-mfa preview</title>
-    <!-- Tailwind's browser build: compiles the classes the stubs use, as the apps' Tailwind would. Needs internet. -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind's browser build: compiles the classes the stubs use, as the apps' Tailwind would. Needs internet.
+         ?forms=1 adds @tailwindcss/forms, whose base styles restyle every input (artistly uses it), so the
+         components can be checked for leaks from a host's form styles. -->
+    <script>
+        document.write('<script src="https://cdn.tailwindcss.com' + (new URLSearchParams(location.search).get('forms') === '1' ? '?plugins=forms' : '') + '"><\/script>');
+    </script>
     <script>tailwind.config = { darkMode: 'class' };</script>
 </head>
 <body class="m-0">

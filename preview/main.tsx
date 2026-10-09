@@ -106,16 +106,25 @@ function Shell() {
     const [device, setDevice] = useState<Device>((params.get('device') as Device) ?? 'all');
     const [theme, setTheme] = useState<Theme>((params.get('theme') as Theme) ?? 'system');
     const [position, setPosition] = useState<MfaEnableNudgePosition>((params.get('position') as MfaEnableNudgePosition) ?? 'bottom-right');
+    // The shell loads Tailwind once (index.html), so a change reloads it; the frames follow the URL.
+    const forms = params.get('forms') === '1';
     const isApp = scenarios.find((s) => s.id === scenario)?.page === 'app';
     const [reset, setReset] = useState(0);
 
     useEffect(() => {
         applyTheme(theme);
-        history.replaceState(null, '', `?scenario=${scenario}&device=${device}&theme=${theme}&position=${position}`);
-    }, [scenario, device, theme, position]);
+        history.replaceState(null, '', `?scenario=${scenario}&device=${device}&theme=${theme}&position=${position}${forms ? '&forms=1' : ''}`);
+    }, [scenario, device, theme, position, forms]);
+
+    const toggleForms = () => {
+        const next = new URLSearchParams(location.search);
+        if (forms) next.delete('forms');
+        else next.set('forms', '1');
+        location.search = next.toString();
+    };
 
     const widths = device === 'all' ? Object.entries(DEVICES) : [[device, DEVICES[device]] as const];
-    const src = `?frame=1&scenario=${scenario}&theme=${theme}&position=${position}`;
+    const src = `?frame=1&scenario=${scenario}&theme=${theme}&position=${position}${forms ? '&forms=1' : ''}`;
     const select = 'rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900';
 
     return (
@@ -149,6 +158,10 @@ function Shell() {
                         ))}
                     </select>
                 )}
+                <label className="flex items-center gap-2 text-sm" title="Load @tailwindcss/forms, as some apps do, to catch host form styles leaking into the components">
+                    <input type="checkbox" checked={forms} onChange={toggleForms} />
+                    Host forms plugin
+                </label>
                 <button type="button" onClick={() => setReset((r) => r + 1)} className={select}>
                     Reset
                 </button>
