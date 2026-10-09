@@ -229,5 +229,6 @@ If the user has no confirmed factor yet, the response is `422 { "message": "Enab
 
 - `until` is the user's next local midnight, in the app timezone, at most 26 hours away. A missing or unknown timezone counts as `app.timezone`; nothing else in the request is read.
 - It applies to the user on every device, until `until`. Whether to show the nudge is in the shared context (`Mfa::context()`, `nudge.show`).
+- Sent again while it is already hidden (a double click, another tab or device), it changes nothing and fires no event: the answer is the same `200` with the existing `until`.
 - Inertia and plain form posts get a `303` back to the page they came from, with no status flash.
 - Like the other MFA routes, it needs a logged-in session that has passed the challenge (a user without methods isn't challenged).

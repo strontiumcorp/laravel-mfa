@@ -62,18 +62,33 @@ final class Nudge
 
     /**
      * Hide the nudge for this user until the next midnight in $timezone (the
-     * browser's; app.timezone when it's missing or unknown).
+     * browser's; app.timezone when it's missing or unknown). If it is hidden
+     * already (another tab, device or double click), nothing changes: the
+     * existing time stands. add(), so two at once can't both count.
      *
-     * @return CarbonImmutable the instant it shows again, in app.timezone
+     * @return array{until: CarbonImmutable, changed: bool} when it shows again, in app.timezone
      */
-    public function dismiss(Session $session, Authenticatable $user, mixed $timezone): CarbonImmutable
+    public function dismiss(Session $session, Authenticatable $user, mixed $timezone): array
     {
-        $until = self::nextMidnight(CarbonImmutable::now(), $this->timezone($timezone));
+        $now = CarbonImmutable::now();
+        $until = self::nextMidnight($now, $this->timezone($timezone));
+        $changed = $this->store()->add($this->cacheKey($user), $until->getTimestamp(), $until);
 
-        $this->store()->put($this->cacheKey($user), $until->getTimestamp(), $until);
+        if (! $changed) {
+            $existing = (int) $this->store()->get($this->cacheKey($user));
+
+            // Only false when the old entry expired between add() and get(): store the new one.
+            if ($existing > $now->getTimestamp()) {
+                $until = CarbonImmutable::createFromTimestamp($existing);
+            } else {
+                $this->store()->put($this->cacheKey($user), $until->getTimestamp(), $until);
+                $changed = true;
+            }
+        }
+
         $session->put($this->sessionKey($user), $until->getTimestamp());
 
-        return $until->setTimezone($this->appTimezone());
+        return ['until' => $until->setTimezone($this->appTimezone()), 'changed' => $changed];
     }
 
     /** When the nudge shows again for this user (from the cache), in app.timezone, or null. */

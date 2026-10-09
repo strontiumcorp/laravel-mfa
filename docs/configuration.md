@@ -134,7 +134,7 @@ Users who aren't required to use MFA can be asked to turn it on: a small floatin
 - **"Not today"** (or ×) hides it until the user's next local midnight. The browser sends its timezone (an unknown or missing one means `app.timezone`); the server works out that midnight, never taking a time from the client, and stores it as an instant, at most 26 hours away. A midnight that summer time skips becomes the day's first real minute.
 - **Per user, not per browser.** The dismissal is kept in the cache (`cache.store`, a keyed hash of the user id, expiring at that instant), so it holds on every device and after signing in again. The session keeps a copy, so a page view reads nothing once it knows; otherwise a user without MFA costs one cache read per page. Users with MFA cost nothing extra.
 - **Copy.** Plain strings, safe with `config:cache`. Each one goes through `__()`, so a `lang/{locale}.json` entry with the English text as its key translates it.
-- **Event.** `NudgeDismissed`, with `until` (ISO 8601, app timezone), reaches the log, the audit table and metrics like every MFA event.
+- **Event.** `NudgeDismissed`, with `until` (ISO 8601, app timezone), reaches the log, the audit table and metrics like every MFA event. Only a dismissal that hides it fires: a repeat while it is hidden (another tab or device, a double click) keeps the existing time and records nothing.
 
 ## Sending limits
 

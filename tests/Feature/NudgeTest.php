@@ -12,6 +12,7 @@ use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Events\NudgeDismissed;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\MfaServiceProvider;
+use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use StrontiumCorp\LaravelMfa\Support\Nudge;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\EnforceForEveryone;
 
@@ -109,6 +110,26 @@ it('hides the nudge until the next midnight in the browser timezone, for that us
 
     $this->travelTo(CarbonImmutable::parse('2026-10-10T18:00:00Z'));
     expect($show())->toBeTrue();
+});
+
+it('records a dismissal only when it changes something', function () {
+    $user = $this->makeUser();
+    $this->loginWithSession($user);
+    $dismiss = fn (string $timezone) => $this->postJson(route('mfa.nudge.dismiss'), ['timezone' => $timezone])->assertOk();
+
+    $dismiss('UTC')->assertExactJson(['status' => 'nudge-dismissed', 'until' => '2026-10-10T00:00:00+00:00']);
+    // Again (a double click, another tab or device, another timezone): still
+    // a success with the time it shows again, but no new event or audit row.
+    $dismiss('Asia/Dhaka')->assertExactJson(['status' => 'nudge-dismissed', 'until' => '2026-10-10T00:00:00+00:00']);
+    app('session')->driver()->forget('mfa.nudge'); // another device: only the cache knows
+    $dismiss('UTC')->assertJsonPath('until', '2026-10-10T00:00:00+00:00');
+
+    expect(MfaAuditLog::where('event', 'nudge_dismissed')->count())->toBe(1);
+
+    // Once it has come back, "Not today" counts again.
+    $this->travelTo(CarbonImmutable::parse('2026-10-10T08:00:00Z'));
+    $dismiss('UTC')->assertJsonPath('until', '2026-10-11T00:00:00+00:00');
+    expect(MfaAuditLog::where('event', 'nudge_dismissed')->count())->toBe(2);
 });
 
 it('gives the time in the app timezone', function () {

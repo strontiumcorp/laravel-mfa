@@ -14,14 +14,18 @@ class NudgeController extends Controller
     /**
      * "Not today" on the turn-on-two-factor nudge: hidden until the next
      * midnight in the browser's timezone (the only input; the time itself is
-     * always computed here).
+     * always computed here). A repeat while it is hidden is a success that
+     * changes nothing and records nothing.
      */
     public function dismiss(Request $request, Mfa $mfa, Nudge $nudge, UiResponse $ui): Response
     {
         $user = $this->sessionUser($request, $mfa);
-        $until = $nudge->dismiss($request->session(), $user, $request->input('timezone'))->toIso8601String();
+        $dismissal = $nudge->dismiss($request->session(), $user, $request->input('timezone'));
+        $until = $dismissal['until']->toIso8601String();
 
-        event(new NudgeDismissed($user, null, null, ['until' => $until]));
+        if ($dismissal['changed']) {
+            event(new NudgeDismissed($user, null, null, ['until' => $until]));
+        }
 
         return $ui->backQuietly('nudge-dismissed', ['until' => $until]);
     }
