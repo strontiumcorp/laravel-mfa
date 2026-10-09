@@ -19,6 +19,7 @@ describe('published components', () => {
             'recovery-code-form.tsx',
             'recovery-codes-panel.tsx',
             'send-code-button.tsx',
+            'settings-card.tsx',
             'totp-setup.tsx',
         ]);
     });

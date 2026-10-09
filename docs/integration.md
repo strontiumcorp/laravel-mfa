@@ -133,7 +133,17 @@ It throws if the target has MFA and the admin hasn't passed MFA in this session.
 The published files are the app's own: restyle and rearrange them freely. `mfa:install` never overwrites them without `--force`.
 
 - Wrap the published pages in the app's layouts. The pages only wire Inertia (forms, posting, `Head`, errors) to the components, so layout changes go there.
-- Link to `route('mfa.settings')` from the account settings.
+- Add the two-factor card to the account settings page. It says whether two-factor is on and links to the MFA settings page, and hides itself when MFA or its routes are off:
+
+  ```tsx
+  import MfaSettingsCard from '@/components/vendor/laravel-mfa/settings-card';
+  import { mfaSettingsCardProps, useMfa } from '@/pages/mfa/mfa-context'; // or @/Pages/...
+  import { Link } from '@inertiajs/react';
+
+  <MfaSettingsCard {...mfaSettingsCardProps(useMfa())} renderLink={(link) => <Link {...link} />} />
+  ```
+
+  Without `renderLink` it renders a plain `<a>`. It needs the shared context below; without it, the card stays hidden.
 - Share the MFA context in `HandleInertiaRequests::share()`:
 
   ```php
@@ -163,11 +173,12 @@ The published files are the app's own: restyle and rearrange them freely. `mfa:i
 | `destination-setup` | `label`, `destination`, `onConfirm(code)`, `onResend()`, `processing`, `resending`, `retryAfter`, `sent`, `error` |
 | `recovery-codes-panel` | `remaining`, `codes`, `onRegenerate()`, `processing`, `confirmRegenerate?` |
 | `api-key-notice` | `enabled`, `settingsUrl`, `className` |
+| `settings-card` | `settingsUrl` (renders nothing when `null`), `enabled`, `hasMfa`, `mustEnroll`, `className`, `renderLink?({ href, className, children })` |
 | `password-confirm-form` | `onConfirm(password)`, `onCancel?`, `processing`, `error`, `retryAfter` (the settings page's `passwordRetryAfter`), `className` |
 
 The settings page shows `password-confirm-form` when a change answers "password confirmation required" (`routes.password_confirmation`), and retries the change once the password is confirmed. The code and password inputs clear themselves after a failed attempt (`processing` goes back to false with an `error`). `retryAfter` drives a countdown; a new value restarts it. `totp-setup` renders `qrSvg` as HTML, so pass only the server's `qr_svg`.
 
-**Upgrading from v0.2.** A new component (`password-confirm-form`) and a settings page that asks for the password inline. Run `php artisan mfa:install` to add the new component (existing files are skipped); to get the new settings page, re-publish with `--force` (this overwrites customised pages) or copy the changes from `stubs/inertia-react/pages/` in the package. Then check `routes.password_confirmation` in step 4: the [config upgrade note](configuration.md#password-confirmation) says what changed.
+**Upgrading from v0.2.** Two new components (`settings-card`, `password-confirm-form`), a `mfaSettingsCardProps()` helper in `mfa-context.ts`, and a settings page that asks for the password inline. Run `php artisan mfa:install` to add the new components (existing files are skipped); to get the new settings page and helper, re-publish with `--force` (this overwrites customised pages) or copy the changes from `stubs/inertia-react/pages/` in the package. Then check `routes.password_confirmation` in step 4: the [config upgrade note](configuration.md#password-confirmation) says what changed.
 
 **Upgrading from v0.1.** v0.1 published `api-key-notice.tsx` and `mfa-context.ts` to `{Components|components}/mfa/`, and self-contained pages. Run `php artisan mfa:install --force` (this overwrites customised pages), change the imports as above (`<MfaApiKeyNotice />` now takes its state as props), then delete `{Components|components}/mfa/`. `mfa:install` warns while those old files remain.
 

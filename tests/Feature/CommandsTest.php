@@ -64,6 +64,7 @@ it('publishes the pages into the app\'s pages directory and the components into 
             ->expectsOutputToContain("{$js}/components/vendor/laravel-mfa/challenge-form.tsx")
             ->expectsOutputToContain("from '@/{$dir}/mfa/mfa-context'")
             ->expectsOutputToContain("from '@/components/vendor/laravel-mfa/api-key-notice'")
+            ->expectsOutputToContain("from '@/components/vendor/laravel-mfa/settings-card'")
             ->expectsOutputToContain('routes.password_confirmation_policy')
             ->doesntExpectOutputToContain('earlier version');
 
@@ -71,7 +72,7 @@ it('publishes the pages into the app\'s pages directory and the components into 
             ->and($names("{$js}/{$dir}/mfa"))->toBe(['challenge.tsx', 'mfa-context.ts', 'settings.tsx'])
             ->and(file_get_contents("{$js}/{$dir}/mfa/challenge.tsx"))->toBe(file_get_contents("{$stubs}/pages/challenge.tsx"))
             ->and($names("{$js}/components/vendor/laravel-mfa"))->toBe($names("{$stubs}/components"))
-            ->and($names("{$js}/components/vendor/laravel-mfa"))->toContain('api-key-notice.tsx', 'challenge-form.tsx', 'totp-setup.tsx', 'password-confirm-form.tsx')
+            ->and($names("{$js}/components/vendor/laravel-mfa"))->toContain('api-key-notice.tsx', 'challenge-form.tsx', 'totp-setup.tsx', 'password-confirm-form.tsx', 'settings-card.tsx')
             ->and(file_get_contents("{$js}/components/vendor/laravel-mfa/totp-setup.tsx"))->toBe(file_get_contents("{$stubs}/components/totp-setup.tsx"))
             ->and("{$js}/Components/vendor")->not->toBeDirectory()
             ->and("{$js}/{$dir}/mfa/components")->not->toBeDirectory();

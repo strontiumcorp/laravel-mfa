@@ -40,9 +40,12 @@ class InstallCommand extends Command
         $this->line('     The settings page asks for the password before factor changes (no confirm page needed).');
         $this->line('     Social-login users without a password: routes.password_confirmation_policy');
         $this->line('     (a Contracts\\PasswordConfirmationPolicy class), or routes.password_confirmation => false');
-        $this->line('  4. Link to route(\'mfa.settings\') from your account settings page');
-        $this->line('     Share the MFA context in HandleInertiaRequests::share():');
+        $this->line('  4. Share the MFA context in HandleInertiaRequests::share():');
         $this->line('       \'mfa\' => fn () => \\StrontiumCorp\\LaravelMfa\\Facades\\Mfa::context($request),');
+        $this->line('     add the two-factor card to your account settings page:');
+        $this->line('       <fg=gray>import</> MfaSettingsCard <fg=gray>from</> \'@/'.self::COMPONENTS_DIR.'/settings-card\';');
+        $this->line("       <fg=gray>import</> { mfaSettingsCardProps, useMfa } <fg=gray>from</> '@/{$pagesDir}/mfa/mfa-context';");
+        $this->line('       <MfaSettingsCard {...mfaSettingsCardProps(useMfa())} renderLink={(link) => <Link {...link} />} />');
         $this->line('     and show the API-key notice next to API keys:');
         $this->line('       <fg=gray>import</> MfaApiKeyNotice <fg=gray>from</> \'@/'.self::COMPONENTS_DIR.'/api-key-notice\';');
         $this->line("       <fg=gray>import</> { mfaApiKeyNoticeProps, useMfa } <fg=gray>from</> '@/{$pagesDir}/mfa/mfa-context';");

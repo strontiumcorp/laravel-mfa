@@ -9,6 +9,7 @@
 // never read it themselves. Pass them what they need, for example:
 //
 //     <MfaApiKeyNotice {...mfaApiKeyNoticeProps(useMfa())} />
+//     <MfaSettingsCard {...mfaSettingsCardProps(useMfa())} renderLink={(link) => <Link {...link} />} />
 //
 // It's a .ts file, so the app's pages glob (**/*.tsx) doesn't treat it as a page.
 // Mirrors StrontiumCorp\LaravelMfa\Support\MfaContext; keep the two in sync.
@@ -51,5 +52,18 @@ export function mfaApiKeyNoticeProps(mfa: MfaContext | null): { enabled: boolean
     return {
         enabled: mfa?.enabled ?? true,
         settingsUrl: mfa?.user && !mfa.user.hasMfa ? mfa.urls.settings : null,
+    };
+}
+
+/**
+ * Props for MfaSettingsCard, the account-settings entry: hidden when MFA is
+ * off, the MFA routes are off, or the app doesn't share the context.
+ */
+export function mfaSettingsCardProps(mfa: MfaContext | null): { enabled: boolean; settingsUrl: string | null; hasMfa: boolean; mustEnroll: boolean } {
+    return {
+        enabled: mfa?.enabled ?? false,
+        settingsUrl: mfa?.urls.settings ?? null,
+        hasMfa: mfa?.user?.hasMfa ?? false,
+        mustEnroll: mfa?.user?.mustEnroll ?? false,
     };
 }

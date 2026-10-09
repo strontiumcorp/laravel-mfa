@@ -18,6 +18,25 @@ for app in "$@"; do
   mkdir -p "$work/pages/mfa" "$work/components/vendor/laravel-mfa"
   cp "$root"/stubs/inertia-react/pages/* "$work/pages/mfa/"
   cp "$root"/stubs/inertia-react/components/* "$work/components/vendor/laravel-mfa/"
+  # The integration snippets from docs/integration.md step 6, as an app writes them.
+  cat > "$work/pages/integration-examples.tsx" <<'TSX'
+import MfaApiKeyNotice from '@/components/vendor/laravel-mfa/api-key-notice';
+import MfaSettingsCard from '@/components/vendor/laravel-mfa/settings-card';
+import { mfaApiKeyNoticeProps, mfaSettingsCardProps, useMfa } from '@/pages/mfa/mfa-context';
+import { Link } from '@inertiajs/react';
+
+export default function AccountSettings() {
+    const mfa = useMfa();
+
+    return (
+        <>
+            <MfaSettingsCard {...mfaSettingsCardProps(mfa)} renderLink={(link) => <Link {...link} />} />
+            <MfaSettingsCard {...mfaSettingsCardProps(mfa)} />
+            <MfaApiKeyNotice {...mfaApiKeyNoticeProps(mfa)} />
+        </>
+    );
+}
+TSX
   cat > "$work/tsconfig.json" <<JSON
 { "compilerOptions": { "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx",
   "strict": true, "noEmit": true, "skipLibCheck": true, "lib": ["DOM", "ES2022"], "baseUrl": ".",

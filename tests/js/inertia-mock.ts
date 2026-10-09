@@ -12,6 +12,8 @@ type Options = { onStart?: () => void; onSuccess?: () => void; onError?: (errors
 export const inertia = (() => {
     const requests: Request[] = [];
     const responses: (Errors | null)[] = [];
+    // What usePage().props returns.
+    const pageProps: Record<string, unknown> = {};
 
     // Callbacks run in Inertia's order: start, then success or error, then finish.
     const send = (request: Request, options: Options = {}) => {
@@ -40,14 +42,17 @@ export const inertia = (() => {
 
     return {
         requests,
+        pageProps,
         /** Answer the next requests (in order) with these validation errors; null = success. */
         respondWith: (...errors: (Errors | null)[]) => responses.push(...errors),
         reset: () => {
             requests.splice(0);
             responses.splice(0);
+            for (const key of Object.keys(pageProps)) delete pageProps[key];
         },
         module: {
             Head: () => null,
+            usePage: () => ({ props: pageProps }),
             useForm,
             router: {
                 post: (url: string, data: unknown = {}, options?: Options) => send({ method: 'post', url, data }, options),

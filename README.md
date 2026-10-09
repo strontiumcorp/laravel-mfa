@@ -34,7 +34,13 @@ class User extends Authenticatable implements MultiFactorAuthenticatable
 
 `mfa:install` publishes the config, two Inertia pages to `resources/js/{Pages|pages}/mfa/`, and plain React components to `resources/js/components/vendor/laravel-mfa/`. The files are yours to restyle. Import the components as `@/components/vendor/laravel-mfa/<name>`; they need only React, so they work outside Inertia too.
 
-Link to `route('mfa.settings')` from the account page. The MFA settings page asks for the password itself before factor changes, so the app needs no confirm-password page. Then check the setup:
+Add the two-factor card to the account settings page (it links to the MFA settings page; see [integration step 6](docs/integration.md#6-frontend)):
+
+```tsx
+<MfaSettingsCard {...mfaSettingsCardProps(useMfa())} renderLink={(link) => <Link {...link} />} />
+```
+
+The MFA settings page asks for the password itself before factor changes, so the app needs no confirm-password page. Then check the setup:
 
 ```bash
 php artisan mfa:doctor
