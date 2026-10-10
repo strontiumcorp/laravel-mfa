@@ -155,11 +155,20 @@ export default function MfaSettings(props: Props) {
     // needed), then the account check (when needed), then the QR code or the
     // address/number, then the code, then the recovery codes. A setup left pending (e.g. after a reload) reopens it,
     // unless the user closed it ("Continue setup" in its card).
-    const [setupType, setSetupType] = useState<MfaFactorType | null>(null);
+    // Confirming can come back as a full page load instead (e.g. the app's
+    // asset version changes once the session is verified), which loses the
+    // dialog: the flashed codes then reopen it on its last step, for the
+    // method confirmed last.
+    const [reloadedType] = useState(() =>
+        status === 'factor-enabled' && recoveryCodes
+            ? ([...factors].sort((a, b) => (a.confirmed_at ?? '').localeCompare(b.confirmed_at ?? '')).pop()?.type ?? null)
+            : null,
+    );
+    const [setupType, setSetupType] = useState<MfaFactorType | null>(reloadedType);
     const [closedIds, setClosedIds] = useState<number[]>([]);
     // The pending setup being confirmed: confirming removes it from the props.
     const [confirming, setConfirming] = useState<Pending | null>(null);
-    const [confirmed, setConfirmed] = useState(false);
+    const [confirmed, setConfirmed] = useState(reloadedType !== null);
     // Password: confirmed in this dialog, or asked again by the server mid-way (it expired).
     const [passwordDone, setPasswordDone] = useState(false);
     const [passwordAgain, setPasswordAgain] = useState(false);

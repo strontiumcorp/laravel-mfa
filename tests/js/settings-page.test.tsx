@@ -253,6 +253,24 @@ describe('settings page', () => {
         expect(screen.queryByRole('list', { name: 'Recovery codes' })).not.toBeInTheDocument();
     });
 
+    it('reopens the recovery codes step when confirming reloaded the page (e.g. a new asset version)', async () => {
+        const totp = { ...email, id: 8, type: 'totp' as const, type_label: 'Authenticator app', destination: null, confirmed_at: '2026-10-10T10:00:00+00:00' };
+        const codes = ['aaaaa-11111', 'bbbbb-22222'];
+        const user = userEvent.setup();
+        render(<MfaSettings {...props} factors={[{ ...email, confirmed_at: '2026-09-01T10:00:00+00:00' }, totp]} status="factor-enabled" recoveryCodes={codes} />);
+
+        const dialog = screen.getByRole('dialog', { name: 'Save your recovery codes' });
+        expect(dialog).toHaveTextContent('Authenticator app');
+        expect(within(dialog).getAllByRole('listitem').map((li) => li.textContent)).toEqual(codes);
+        expect(screen.getAllByRole('list', { name: 'Recovery codes' })).toHaveLength(1);
+
+        await user.click(within(dialog).getByRole('button', { name: 'Copy' }));
+        await user.click(within(dialog).getByRole('button', { name: 'Complete' }));
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(screen.queryByRole('list', { name: 'Recovery codes' })).not.toBeInTheDocument();
+    });
+
     it('names the downloaded codes after the app and account from the props', async () => {
         const pendingTotp = { ...email, id: 8, type: 'totp' as const, type_label: 'Authenticator app', destination: null, secret: 'JBSWY3DP', qr_svg: '<svg/>' };
         vi.useFakeTimers({ toFake: ['Date'] });
