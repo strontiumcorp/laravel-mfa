@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.8.0 - 2026-10-11
+
+_Changes since `v0.7.0`._
+
+### Breaking changes
+
+- **ui:** idle warning, reminder timer and multi-step challenge (f691c61)
+- verification lifetime, admin reset logout and all-of required types (c7024ee)
+
+### Documentation
+
+- **plan:** plan and log the verification lifetime, revocation and required types (d30a021)
+- verification lifetime, revocation and all-of required types (146e3e7)
+
+### Other
+
+- skip ParaTest 7.26.1, which breaks Pest's parallel runner (c48a435)
+- freeze the clock in the OTP cooldown test (3cc5ce2)
+
 ## v0.7.0 - 2026-10-10
 
 _Changes since `v0.6.0`._
