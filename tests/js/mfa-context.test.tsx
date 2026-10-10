@@ -1,7 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
+import { useState } from 'react';
+import MfaIdleWarning from '../../stubs/inertia-react/components/idle-warning';
 import userEvent from '@testing-library/user-event';
 import MfaEnableNudge from '../../stubs/inertia-react/components/enable-nudge';
-import { mfaApiKeyNoticeProps, mfaNudgeProps, mfaSettingsCardProps, mfaTrustReminderWhen, useMfa, useMfaNudge, type MfaContext } from '../../stubs/inertia-react/pages/mfa-context';
+import { mfaApiKeyNoticeProps, mfaNudgeProps, mfaSettingsCardProps, mfaReminderWhen, useMfa, useMfaIdleWarning, useMfaNudge, type MfaContext } from '../../stubs/inertia-react/pages/mfa-context';
 import { inertia } from './inertia-mock';
 
 vi.mock('@inertiajs/react', async () => (await import('./inertia-mock')).inertia.module);
@@ -20,25 +22,28 @@ const context = (overrides: Partial<MfaContext> = {}): MfaContext => ({
         dismissLabel: 'Not today',
         dismissUrl: '/mfa/nudge/dismiss',
     },
-    trustReminder: {
+    reverifyReminder: {
         show: false,
+        reason: null,
         expiresAt: null,
+        showAt: null,
         title: 'Two-factor check coming up',
         body: "This browser will ask for your sign-in code again :when. Do it now so it doesn't interrupt you later.",
         button: 'Verify now',
         dismissLabel: 'Later',
         verifyUrl: '/mfa/challenge?renew=1',
-        dismissUrl: '/mfa/trusted-browsers/reminder/dismiss',
+        dismissUrl: '/mfa/reminder/dismiss',
     },
+    verification: null,
     ...overrides,
 });
 const NOW = new Date('2026-10-10T12:00:00Z').getTime();
 /** A user with MFA on a trusted browser whose trust ends in `minutes`. */
-const reminding = (minutes: number, overrides: Partial<MfaContext['trustReminder']> = {}) =>
+const reminding = (minutes: number, overrides: Partial<MfaContext['reverifyReminder']> = {}) =>
     context({
         user: { hasMfa: true, verified: true, mustEnroll: false },
         nudge: { ...context().nudge, show: false },
-        trustReminder: { ...context().trustReminder, show: true, expiresAt: new Date(Date.now() + minutes * 60_000).toISOString(), ...overrides },
+        reverifyReminder: { ...context().reverifyReminder, show: true, reason: 'trust', expiresAt: new Date(Date.now() + minutes * 60_000).toISOString(), ...overrides },
     });
 
 beforeEach(() => inertia.reset());
@@ -145,7 +150,7 @@ describe('useMfaNudge', () => {
         expect(container).toBeEmptyDOMElement();
     });
 
-describe('mfaTrustReminderWhen', () => {
+describe('mfaReminderWhen', () => {
     const at = (ms: number) => new Date(NOW + ms).toISOString();
 
     it.each([
@@ -160,15 +165,15 @@ describe('mfaTrustReminderWhen', () => {
         [2 * 60_000 - 1_000, 'in a minute'],
         [1_000, 'in a minute'],
     ])('rounds %i ms down to "%s", never promising more time than is left', (ms, text) => {
-        expect(mfaTrustReminderWhen(at(ms), NOW)).toBe(text);
+        expect(mfaReminderWhen(at(ms), NOW)).toBe(text);
     });
 
     it('says "soon" when it is past, now, unknown or invalid', () => {
-        expect(mfaTrustReminderWhen(at(-60_000), NOW)).toBe('soon');
-        expect(mfaTrustReminderWhen(at(0), NOW)).toBe('soon');
-        expect(mfaTrustReminderWhen(null, NOW)).toBe('soon');
-        expect(mfaTrustReminderWhen(undefined, NOW)).toBe('soon');
-        expect(mfaTrustReminderWhen('not a date', NOW)).toBe('soon');
+        expect(mfaReminderWhen(at(-60_000), NOW)).toBe('soon');
+        expect(mfaReminderWhen(at(0), NOW)).toBe('soon');
+        expect(mfaReminderWhen(null, NOW)).toBe('soon');
+        expect(mfaReminderWhen(undefined, NOW)).toBe('soon');
+        expect(mfaReminderWhen('not a date', NOW)).toBe('soon');
     });
 });
 
@@ -176,13 +181,13 @@ describe('the trusted browser reminder', () => {
     it('takes the copy, with :when filled in, and its own URLs', () => {
         expect(mfaNudgeProps(reminding(5 * 60 + 1))).toEqual({
             show: true,
-            kind: 'trust-reminder',
+            kind: 'reminder',
             title: 'Two-factor check coming up',
             body: "This browser will ask for your sign-in code again in 5 hours. Do it now so it doesn't interrupt you later.",
             button: 'Verify now',
             dismissLabel: 'Later',
             settingsUrl: '/mfa/challenge?renew=1',
-            dismissUrl: '/mfa/trusted-browsers/reminder/dismiss',
+            dismissUrl: '/mfa/reminder/dismiss',
             closeLabel: 'Dismiss',
         });
         expect(mfaNudgeProps(reminding(-1)).body).toContain('again soon.');
@@ -198,6 +203,7 @@ describe('the trusted browser reminder', () => {
         expect(mfaNudgeProps(both)).toMatchObject({ kind: 'enable', title: 'Protect your account' });
 
         expect(mfaNudgeProps(reminding(30, { show: false }))).toMatchObject({ show: false, kind: 'enable' });
+        expect(mfaNudgeProps(reminding(30, { reason: null }))).toMatchObject({ show: false, kind: 'enable' });
         expect(mfaNudgeProps({ ...reminding(30), enabled: false }).show).toBe(false);
         expect(mfaNudgeProps(reminding(30, { verifyUrl: null })).show).toBe(false);
         expect(mfaNudgeProps(reminding(30, { dismissUrl: null })).show).toBe(false);
@@ -215,8 +221,166 @@ describe('the trusted browser reminder', () => {
         expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
         await userEvent.click(screen.getByRole('button', { name: 'Later' }));
 
-        expect(inertia.requests).toEqual([{ method: 'post', url: '/mfa/trusted-browsers/reminder/dismiss', data: {} }]);
+        expect(inertia.requests).toEqual([{ method: 'post', url: '/mfa/reminder/dismiss', data: {} }]);
         expect(screen.queryByRole('region')).not.toBeInTheDocument();
     });
 });
+});
+
+describe('the reminder on a page opened before it is due', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('is due once showAt has come, without a new request', () => {
+        const showAt = new Date(NOW + 60_000).toISOString();
+        const ctx = reminding(30, { show: false, reason: 'lifetime', showAt, expiresAt: new Date(NOW + 30 * 60_000).toISOString() });
+
+        expect(mfaNudgeProps(ctx, NOW).show).toBe(false);
+        expect(mfaNudgeProps(ctx, NOW + 60_000)).toMatchObject({ show: true, kind: 'reminder' });
+        expect(mfaNudgeProps(ctx, NOW + 60_000).body).toContain('again in 29 minutes.');
+    });
+
+    it('appears in the layout when it becomes due, and keeps :when current', async () => {
+        vi.useFakeTimers({ now: NOW });
+        inertia.pageProps.mfa = reminding(0, {
+            show: false,
+            reason: 'lifetime',
+            showAt: new Date(NOW + 5 * 60_000).toISOString(),
+            expiresAt: new Date(NOW + 35 * 60_000).toISOString(),
+        });
+        function Layout() {
+            return <MfaEnableNudge {...useMfaNudge()} />;
+        }
+        render(<Layout />);
+        expect(screen.queryByRole('region')).not.toBeInTheDocument();
+
+        await act(async () => vi.advanceTimersByTime(5 * 60_000));
+        expect(screen.getByRole('region', { name: 'Two-factor check coming up' })).toHaveTextContent('again in 30 minutes.');
+
+        await act(async () => vi.advanceTimersByTime(60_000));
+        expect(screen.getByRole('region')).toHaveTextContent('again in 29 minutes.');
+    });
+
+    it('never schedules past what setTimeout can hold (a trust reminder weeks away)', () => {
+        vi.useFakeTimers({ now: NOW });
+        const spy = vi.spyOn(globalThis, 'setTimeout');
+        inertia.pageProps.mfa = reminding(0, { show: false, showAt: new Date(NOW + 29 * 86_400_000).toISOString() });
+        function Layout() {
+            return <MfaEnableNudge {...useMfaNudge()} />;
+        }
+        render(<Layout />);
+
+        expect(spy.mock.calls.every(([, ms]) => (ms ?? 0) <= 2 ** 31 - 1)).toBe(true);
+        expect(screen.queryByRole('region')).not.toBeInTheDocument();
+    });
+});
+
+describe('useMfaIdleWarning', () => {
+    // The server's clock matches the browser's (NOW) unless a test says otherwise.
+    const verification = {
+        profile: 'enforced',
+        now: '2026-10-10T12:00:00Z',
+        expiresAt: '2026-10-10T16:00:00Z',
+        remindAt: '2026-10-10T15:30:00Z',
+        graceUntil: '2026-10-10T16:10:00Z',
+        idleSeconds: 1500,
+        idleExpiresAt: '2026-10-10T12:25:00Z',
+        renewUrl: '/mfa/challenge?renew=1',
+        keepAliveUrl: '/mfa/session/keep-alive',
+        stateUrl: '/mfa/session',
+    };
+    beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['Date'] }));
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    it('has nothing to watch without an idle timeout, or for an unverified session', () => {
+        const watched = (mfa: MfaContext) => {
+            inertia.pageProps.mfa = mfa;
+            let at: string | null = 'unset';
+            function Probe() {
+                at = useMfaIdleWarning().idleExpiresAt;
+                return null;
+            }
+            render(<Probe />);
+
+            return at;
+        };
+
+        expect(watched(context({ user: { hasMfa: true, verified: true, mustEnroll: false } }))).toBeNull();
+        expect(watched(context({ user: { hasMfa: true, verified: false, mustEnroll: false }, verification }))).toBeNull();
+        expect(watched(context({ user: { hasMfa: true, verified: true, mustEnroll: false }, verification: { ...verification, keepAliveUrl: null } }))).toBeNull();
+        expect(watched(context({ user: { hasMfa: true, verified: true, mustEnroll: false }, verification }))).toBe('2026-10-10T12:25:00.000Z');
+    });
+
+    it("moves the server's deadlines onto the browser's clock", () => {
+        inertia.pageProps.mfa = context({ user: { hasMfa: true, verified: true, mustEnroll: false }, verification: { ...verification, now: '2026-10-10T11:30:00Z' } });
+        let at: string | null = null;
+        function Probe() {
+            at = useMfaIdleWarning().idleExpiresAt;
+            return null;
+        }
+        render(<Probe />);
+
+        // The browser is 30 minutes ahead: the 25 minutes left are 25 minutes on its clock too.
+        expect(at).toBe('2026-10-10T12:55:00.000Z');
+    });
+
+    it('stays signed in with a keep-alive POST (XSRF header), then reads the new deadline', async () => {
+        document.cookie = 'XSRF-TOKEN=abc%3D';
+        const fetch = vi.fn(async (url: string, _init?: RequestInit) =>
+            url === '/mfa/session'
+                ? new Response(JSON.stringify({ verification: { ...verification, idleExpiresAt: '2026-10-10T12:50:00Z' } }), { status: 200 })
+                : new Response(null, { status: 204 }),
+        );
+        vi.stubGlobal('fetch', fetch);
+        inertia.pageProps.mfa = context({ user: { hasMfa: true, verified: true, mustEnroll: false }, verification });
+
+        let props!: ReturnType<typeof useMfaIdleWarning>;
+        function Probe() {
+            props = useMfaIdleWarning();
+            return null;
+        }
+        render(<Probe />);
+
+        expect(props.idleExpiresAt).toBe('2026-10-10T12:25:00.000Z');
+        await expect(props.onStay()).resolves.toBe('2026-10-10T12:50:00.000Z');
+        expect(fetch.mock.calls[0][0]).toBe('/mfa/session/keep-alive');
+        expect(fetch.mock.calls[0][1]).toMatchObject({ method: 'POST', headers: { 'X-XSRF-TOKEN': 'abc=' } });
+        expect(fetch.mock.calls[1][0]).toBe('/mfa/session');
+    });
+
+    it('keeps the deadline stable while the layout re-renders, so the warning still shows', async () => {
+        vi.useRealTimers();
+        vi.useFakeTimers({ now: NOW });
+        inertia.pageProps.mfa = context({ user: { hasMfa: true, verified: true, mustEnroll: false }, verification });
+        let rerender!: () => void;
+        function Layout() {
+            const [, setN] = useState(0);
+            rerender = () => setN((n) => n + 1);
+            return <MfaIdleWarning {...useMfaIdleWarning()} />;
+        }
+        render(<Layout />);
+
+        for (let minute = 1; minute <= 23; minute++) {
+            await act(async () => void (await vi.advanceTimersByTimeAsync(60_000)));
+            act(() => rerender()); // e.g. the reminder's minute clock
+        }
+
+        expect(screen.getByRole('region', { name: 'Still there?' })).toBeInTheDocument();
+    });
+
+    it('reports a failed keep-alive as null (the session already ended)', async () => {
+        vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 403 })));
+        inertia.pageProps.mfa = context({ user: { hasMfa: true, verified: true, mustEnroll: false }, verification });
+        let props!: ReturnType<typeof useMfaIdleWarning>;
+        function Probe() {
+            props = useMfaIdleWarning();
+            return null;
+        }
+        render(<Probe />);
+
+        await expect(props.onStay()).resolves.toBeNull();
+        await expect(props.refresh()).resolves.toBeNull();
+    });
 });

@@ -16,16 +16,27 @@ type Props = {
     /** "Don't ask again on this browser" is offered for this many days; null = not offered. */
     trustBrowser: { days: number } | null;
     /**
-     * Verifying early (?renew=1, from the trusted browser reminder): the user is
-     * already verified and comes back to keep this browser trusted. The box
-     * starts ticked and "Not now" goes back instead of "Sign out".
+     * Verifying early (?renew=1, from the "check coming up" reminder): the user
+     * is already verified and comes back to start a new window, or to keep
+     * this browser trusted (the box then starts ticked). "Not now" goes back
+     * instead of "Sign out".
      */
     renew: boolean;
+    /**
+     * An enforced user who must pass several methods (enforcement.required_types):
+     * how many, and which are done. `factors` then lists only the ones still to
+     * go. null = any one method is enough.
+     */
+    steps?: { total: number; passed: string[] } | null;
     urls: { send: string; verify: string; recover: string; logout: string | null };
 };
 
-export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCodes, status, retryAfter, trustBrowser, renew = false, urls }: Props) {
+export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCodes, status, retryAfter, trustBrowser, renew = false, steps = null, urls }: Props) {
     const [factorId, setFactorId] = useState<number | null>(defaultFactorId);
+    // After a step the server sends the methods still to go: move on to the next one.
+    useEffect(() => {
+        if (!factors.some((f) => f.id === factorId)) setFactorId(defaultFactorId);
+    }, [factors, defaultFactorId]);
     const [useRecovery, setUseRecovery] = useState(false);
     // Leaving the recovery form with "Try another way" reopens the list of methods.
     const [backToList, setBackToList] = useState(false);
@@ -124,9 +135,20 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
 
             <main className="w-full max-w-sm">
                 <h1 className="sr-only">Verify it's you</h1>
-                {renew && trustBrowser && !useRecovery && (
+                {steps && !useRecovery && (
+                    <p aria-live="polite" className="mb-4 text-center text-sm text-gray-600 dark:text-gray-400">
+                        <span className="font-semibold text-gray-900 dark:text-gray-100">
+                            Step {Math.min(steps.passed.length + 1, steps.total)} of {steps.total}
+                        </span>
+                        {' · '}
+                        {steps.passed.length === 0 ? 'Your account needs a code from each of its methods.' : 'Code accepted. Now the next one.'}
+                    </p>
+                )}
+                {renew && !useRecovery && (
                     <p className="mb-4 text-center text-sm text-gray-600 dark:text-gray-400">
-                        Verify now so this browser keeps skipping the code for another {trustBrowser.days} {trustBrowser.days === 1 ? 'day' : 'days'}.
+                        {trustBrowser
+                            ? `Verify now so this browser keeps skipping the code for another ${trustBrowser.days} ${trustBrowser.days === 1 ? 'day' : 'days'}.`
+                            : "Verify now so the next check doesn't interrupt you."}
                     </p>
                 )}
 

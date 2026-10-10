@@ -194,6 +194,16 @@ describe('MfaFactorCards', () => {
         expect(card('Authenticator app')).not.toHaveTextContent("Doesn't meet");
     });
 
+    it('names every required method, and grays out a method the account can no longer sign in with', () => {
+        const totpTypes = types.filter((t) => t.type !== 'email' && t.type !== 'sms');
+        render(<MfaFactorCards types={[...totpTypes, { type: 'sms', label: 'SMS' }]} factors={[email]} onAdd={noop} onRemove={noop} required requiredTypes={['totp', 'sms']} />);
+
+        expect(screen.getByRole('note')).toHaveTextContent('Your account needs: Authenticator app and SMS');
+        expect(card('Email')).toHaveTextContent('Not used for sign-in');
+        expect(card('Email')).not.toHaveTextContent('Active');
+        expect(within(card('Email')).getByRole('button', { name: 'Remove Email' })).toBeEnabled();
+    });
+
     it('asks for any method when the requirement names none', () => {
         render(<MfaFactorCards types={types} factors={[]} onAdd={noop} onRemove={noop} required />);
 

@@ -14,6 +14,12 @@ export const scenarios: Scenario[] = [
     { id: 'new', page: 'settings', title: 'Settings · nothing set up', state: () => initialState() },
     { id: 'enforced', page: 'settings', title: 'Settings · enforced, needs an authenticator app', state: () => initialState({ mustEnroll: true, requiredTypes: ['totp'] }) },
     {
+        id: 'enforced-unused',
+        page: 'settings',
+        title: 'Settings · enforced (authenticator app and email required), an old SMS method no longer used',
+        state: () => initialState({ factors: [totp(), sms()], mustEnroll: true, requiredTypes: ['totp', 'email'], recoveryCodesRemaining: 8 }),
+    },
+    {
         id: 'enforced-check',
         page: 'settings',
         title: 'Settings · enforced user, first method (email check)',
@@ -101,12 +107,18 @@ export const scenarios: Scenario[] = [
             return initialState({ factors: [f, totp()], recoveryCodesRemaining: 8, codeUsedAt: { [f.id]: Date.now() - 30_000 } });
         },
     },
+    {
+        id: 'challenge-steps',
+        page: 'challenge',
+        title: 'Challenge · enforced user who must pass two methods (required: authenticator app and email)',
+        state: () => initialState({ factors: [totp(), email()], requiredTypes: ['totp', 'email'], recoveryCodesRemaining: 8 }),
+    },
     { id: 'challenge-email', page: 'challenge', title: 'Challenge · email only', state: () => initialState({ factors: [email()], recoveryCodesRemaining: 8 }) },
     { id: 'challenge-totp', page: 'challenge', title: 'Challenge · authenticator app only, no recovery codes', state: () => initialState({ factors: [totp()] }) },
     {
         id: 'challenge-renew',
         page: 'challenge',
-        title: 'Challenge · verifying early from the trusted browser reminder',
+        title: 'Challenge · verifying early from the "check coming up" reminder (trusted browser)',
         state: () => initialState({ factors: [totp(), email()], recoveryCodesRemaining: 8, trustBrowserDays: 30, renew: true }),
     },
     {
@@ -114,6 +126,18 @@ export const scenarios: Scenario[] = [
         page: 'app',
         title: 'App page · trusted browser reminder (this browser asks again in 5 hours)',
         state: () => initialState({ factors: [totp()], recoveryCodesRemaining: 8, trustBrowserDays: 30, trustEndsInMinutes: 5 * 60 - 10 }),
+    },
+    {
+        id: 'lifetime-reminder',
+        page: 'app',
+        title: 'App page · admin\'s 4-hour window ends in 25 minutes (mfa.lifetime)',
+        state: () => initialState({ factors: [totp()], recoveryCodesRemaining: 8, lifetimeEndsAt: Date.now() + 25 * 60_000, idleExpiresAt: Date.now() + 25 * 60_000 }),
+    },
+    {
+        id: 'idle-warning',
+        page: 'app',
+        title: 'App page · "Still there?" before the idle timeout (ends in 1:50)',
+        state: () => initialState({ factors: [totp()], recoveryCodesRemaining: 8, lifetimeEndsAt: Date.now() + 3 * 3600_000, idleExpiresAt: Date.now() + 110_000 }),
     },
     { id: 'nudge', page: 'app', title: 'App page · nudge to turn two-factor on (no method yet)', state: () => initialState() },
     { id: 'account', page: 'account', title: 'Account settings · card and API-key notice', state: () => initialState({ factors: [totp()], recoveryCodesRemaining: 8 }) },

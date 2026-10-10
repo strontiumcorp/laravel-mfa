@@ -213,20 +213,26 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
         const name = f.label ?? f.type_label;
         const removing = removingId === f.id;
         const asking = confirmingId === f.id && promptFactor !== f.id;
+        // Not one of the account's required types: it can't be used to sign in, only removed.
+        const unused = requiredTypes.length > 0 && !requiredTypes.includes(f.type);
 
         return (
             <article key={`f${f.id}`} className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
                 <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-3 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-x-5 sm:gap-y-4 sm:p-5 sm:px-6">
-                    <div className={`flex size-11 shrink-0 items-center justify-center rounded-lg sm:size-14 sm:rounded-xl ${TILE[f.type]}`}>
+                    <div
+                        className={`flex size-11 shrink-0 items-center justify-center rounded-lg sm:size-14 sm:rounded-xl ${unused ? 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500' : TILE[f.type]}`}
+                    >
                         <MfaFactorIcon type={f.type} size={28} className="size-6 sm:size-7" />
                     </div>
-                    <div className="min-w-0 grow space-y-1">
+                    <div className={`min-w-0 grow space-y-1 ${unused ? 'opacity-60' : ''}`}>
                         <div className="flex flex-wrap items-center gap-2">
                             <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{name}</h3>
-                            <Badge tone="active">Active</Badge>
+                            {unused ? <Badge tone="off">Not used for sign-in</Badge> : <Badge tone="active">Active</Badge>}
                         </div>
                         <p className="text-sm text-gray-600 dark:text-gray-400">
-                            {f.destination ? (
+                            {unused ? (
+                                "Your account signs in with its required methods only. You can remove this one."
+                            ) : f.destination ? (
                                 <>
                                     Codes sent to <span className="font-medium text-gray-900 dark:text-gray-100">{f.destination}</span>
                                 </>
@@ -442,7 +448,7 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
                     <MfaIconShieldAlert size={20} className="mt-0.5 shrink-0 text-amber-700 dark:text-amber-300" />
                     <div className="space-y-0.5">
                         <p className="text-sm font-semibold text-amber-900 dark:text-amber-100">
-                            {requiredLabels.length === 0 ? 'Your account needs two-factor authentication' : `Your account needs: ${requiredLabels.join(' or ')}`}
+                            {requiredLabels.length === 0 ? 'Your account needs two-factor authentication' : `Your account needs: ${requiredLabels.join(' and ')}`}
                         </p>
                         <p className="text-sm text-amber-800 dark:text-amber-200">Set it up to keep using the app. It takes about a minute.</p>
                     </div>

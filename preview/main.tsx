@@ -5,11 +5,12 @@ import { type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import MfaApiKeyNotice from '../stubs/inertia-react/components/api-key-notice';
 import MfaEnableNudge, { type MfaEnableNudgePosition } from '../stubs/inertia-react/components/enable-nudge';
+import MfaIdleWarning from '../stubs/inertia-react/components/idle-warning';
 import MfaSettingsCard from '../stubs/inertia-react/components/settings-card';
 import MfaChallenge from '../stubs/inertia-react/pages/challenge';
 import { mfaApiKeyNoticeProps, mfaSettingsCardProps, useMfaNudge, type MfaContext } from '../stubs/inertia-react/pages/mfa-context';
 import MfaSettings from '../stubs/inertia-react/pages/settings';
-import { CODE, NUDGE, PASSWORD, RECOVERY_CODE, TRUST_REMINDER, challengeProps, settingsProps, urls, type State } from './backend';
+import { CODE, IDLE_SECONDS, LIFETIME_REMINDER, NUDGE, PASSWORD, RECOVERY_CODE, TRUST_REMINDER, challengeProps, handle, settingsProps, urls, type State } from './backend';
 import { boot, Link, toasts, useBackendState } from './inertia';
 import { scenarios } from './scenarios';
 
@@ -33,13 +34,42 @@ function contextFor(s: State): MfaContext {
         urls: { settings: '/mfa/settings', challenge: '/mfa/challenge' },
         // As Mfa::context() decides it, for an app page (never shown on the MFA pages).
         nudge: { show: s.factors.length === 0 && !s.mustEnroll && !s.nudgeDismissed, ...NUDGE, dismissUrl: urls.nudgeDismiss },
-        trustReminder: {
-            show: s.factors.length > 0 && s.trustEndsInMinutes !== null && s.trustEndsInMinutes <= 12 * 60 && !s.trustReminderDismissed,
-            expiresAt: s.trustEndsInMinutes === null ? null : new Date(Date.now() + s.trustEndsInMinutes * 60_000).toISOString(),
-            ...TRUST_REMINDER,
-            verifyUrl: urls.trustReminderVerify,
-            dismissUrl: urls.trustReminderDismiss,
-        },
+        reverifyReminder: reminderFor(s),
+        verification:
+            s.lifetimeEndsAt === null && s.idleExpiresAt === null
+                ? null
+                : {
+                      profile: 'enforced',
+                      now: new Date().toISOString(),
+                      expiresAt: iso(s.lifetimeEndsAt),
+                      remindAt: iso(s.lifetimeEndsAt === null ? null : s.lifetimeEndsAt - 30 * 60_000),
+                      graceUntil: iso(s.lifetimeEndsAt === null ? null : s.lifetimeEndsAt + 10 * 60_000),
+                      idleSeconds: s.idleExpiresAt === null ? null : IDLE_SECONDS,
+                      idleExpiresAt: iso(s.idleExpiresAt),
+                      renewUrl: urls.reminderVerify,
+                      keepAliveUrl: s.idleExpiresAt === null ? null : urls.keepAlive,
+                      stateUrl: urls.sessionState,
+                  },
+    };
+}
+
+const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
+
+/** As Mfa::context() decides it: the lifetime window's end first, else the trusted browser's. */
+function reminderFor(s: State): MfaContext['reverifyReminder'] {
+    const lifetime = s.lifetimeEndsAt !== null;
+    const expires = lifetime ? s.lifetimeEndsAt : s.trustEndsInMinutes === null ? null : Date.now() + s.trustEndsInMinutes * 60_000;
+    const showAt = expires === null ? null : expires - (lifetime ? 30 * 60_000 : 12 * 3600_000);
+    const live = s.factors.length > 0 && expires !== null && !s.reminderDismissed;
+
+    return {
+        show: live && showAt !== null && showAt <= Date.now(),
+        reason: live ? (lifetime ? 'lifetime' : 'trust') : null,
+        expiresAt: live ? iso(expires) : null,
+        showAt: live ? iso(showAt) : null,
+        ...(lifetime ? LIFETIME_REMINDER : TRUST_REMINDER),
+        verifyUrl: urls.reminderVerify,
+        dismissUrl: urls.reminderDismiss,
     };
 }
 
@@ -60,7 +90,23 @@ function AppPage({ position }: { position: MfaEnableNudgePosition }) {
                 ))}
             </div>
             <MfaEnableNudge {...useMfaNudge()} position={position} />
+            <PreviewIdleWarning />
         </>
+    );
+}
+
+/** The idle warning against the fake backend (the app would use useMfaIdleWarning(), which calls the server with fetch()). */
+function PreviewIdleWarning() {
+    const s = useBackendState();
+    const current = () => iso(s.idleExpiresAt);
+
+    return (
+        <MfaIdleWarning
+            idleExpiresAt={current()}
+            refresh={async () => current()}
+            onStay={async () => (handle(s, 'post', urls.keepAlive, {}).errors ? null : current())}
+            onContinue={() => location.reload()}
+        />
     );
 }
 

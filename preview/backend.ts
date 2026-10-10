@@ -33,7 +33,10 @@ export type State = {
     pending: Factor[];
     recoveryCodesRemaining: number;
     mustEnroll: boolean;
+    /** An enforced user's required types (enforcement.required_types): only these can be added, and the challenge asks for each one held. */
     requiredTypes: FactorType[];
+    /** Challenge: the required types already passed in this challenge. */
+    stepsPassed: FactorType[];
     enabledTypes: FactorType[];
     /** Factor changes need the password (routes.password_confirmation). */
     requirePassword: boolean;
@@ -61,8 +64,12 @@ export type State = {
     trustedBrowsers: TrustedBrowser[];
     /** This browser's trust ends in this many minutes (the app pages show the reminder); null = not a trusted browser. */
     trustEndsInMinutes: number | null;
-    /** "Later" on the reminder (for the rest of the session). */
-    trustReminderDismissed: boolean;
+    /** The verification's fixed window (mfa.lifetime) ends at this time (ms); null = no window. */
+    lifetimeEndsAt: number | null;
+    /** The idle timeout ends at this time (ms); null = no idle timeout. */
+    idleExpiresAt: number | null;
+    /** "Later" on the "check coming up" reminder (until the next verification). */
+    reminderDismissed: boolean;
     /** The challenge opened from the reminder's "Verify now" (?renew=1). */
     renew: boolean;
     // One-request flashes, as the package's session flashes.
@@ -95,8 +102,20 @@ export const urls = {
     },
     challenge: { send: '/mfa/challenge/send', verify: '/mfa/challenge', recover: '/mfa/challenge/recover', logout: '/logout' },
     nudgeDismiss: '/mfa/nudge/dismiss',
-    trustReminderDismiss: '/mfa/trusted-browsers/reminder/dismiss',
-    trustReminderVerify: '/mfa/challenge?renew=1',
+    reminderDismiss: '/mfa/reminder/dismiss',
+    reminderVerify: '/mfa/challenge?renew=1',
+    keepAlive: '/mfa/session/keep-alive',
+    sessionState: '/mfa/session',
+};
+
+/** The enforced profile's idle timeout in the preview (mfa.lifetime.profiles.enforced.idle, 25 minutes). */
+export const IDLE_SECONDS = 25 * 60;
+
+export const LIFETIME_REMINDER = {
+    title: 'Two-factor check coming up',
+    body: "For your security you'll be asked for your sign-in code again :when. Do it now so it doesn't interrupt you.",
+    button: 'Verify now',
+    dismissLabel: 'Later',
 };
 
 export const TRUST_REMINDER = {
@@ -165,6 +184,7 @@ export function initialState(overrides: Partial<State> = {}): State {
         recoveryCodesRemaining: 0,
         mustEnroll: false,
         requiredTypes: [],
+        stepsPassed: [],
         enabledTypes: ['totp', 'email', 'sms'],
         requirePassword: false,
         passwordConfirmed: false,
@@ -176,7 +196,9 @@ export function initialState(overrides: Partial<State> = {}): State {
         trustBrowserDays: null,
         trustedBrowsers: [],
         trustEndsInMinutes: null,
-        trustReminderDismissed: false,
+        lifetimeEndsAt: null,
+        idleExpiresAt: null,
+        reminderDismissed: false,
         renew: false,
         nudgeDismissed: false,
         status: null,
@@ -314,6 +336,15 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
 
     if (method === 'post' && url === urls.challenge.verify) {
         if (data.code !== CODE) return { errors: { code: 'The provided code is invalid.' } };
+        const passedType = s.factors.find((f) => f.id === data.factor_id)?.type;
+        const steps = challengeSteps(s);
+        if (steps && passedType && !s.stepsPassed.includes(passedType)) {
+            s.stepsPassed = [...s.stepsPassed, passedType];
+            if (s.stepsPassed.length < steps.total) {
+                s.status = 'factor-verified';
+                return { toast: `${LABELS[passedType]} accepted. One more to go.` };
+            }
+        }
         if (data.remember === true && s.trustBrowserDays !== null) {
             s.trustEndsInMinutes = s.trustBrowserDays * 24 * 60;
             s.trustedBrowsers = [trustedBrowser('Chrome on Mac', 0, { current: true }, s.trustBrowserDays), ...s.trustedBrowsers.map((b) => ({ ...b, current: false }))];
@@ -337,9 +368,15 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
 
     if (method === 'post' && url === urls.challenge.logout) return { toast: 'Signed out (preview).' };
 
-    if (method === 'post' && url === urls.trustReminderDismiss) {
-        s.trustReminderDismissed = true;
-        s.status = 'trust-reminder-dismissed';
+    if (method === 'post' && url === urls.reminderDismiss) {
+        s.reminderDismissed = true;
+        s.status = 'reminder-dismissed';
+        return {};
+    }
+
+    if (method === 'post' && url === urls.keepAlive) {
+        if (s.idleExpiresAt === null || s.idleExpiresAt <= Date.now()) return { errors: { session: 'Multi-factor authentication required.' } };
+        s.idleExpiresAt = Date.now() + IDLE_SECONDS * 1000;
         return {};
     }
 
@@ -353,7 +390,10 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
 
 /** The settings page's props, as SettingsController::show() builds them. */
 export function settingsProps(s: State) {
-    const available = s.enabledTypes.map((type) => ({ type, label: LABELS[type], recommended: type === 'totp' }));
+    // An enforced user may add only the required types (Mfa::enrollableTypes()).
+    const available = s.enabledTypes
+        .filter((type) => s.requiredTypes.length === 0 || s.requiredTypes.includes(type))
+        .map((type) => ({ type, label: LABELS[type], recommended: type === 'totp' }));
 
     return {
         factors: s.factors,
@@ -389,6 +429,13 @@ function usedWait(s: State, f: Factor): number | null {
 }
 
 /** The challenge page's props, as ChallengeController::show() builds them. */
+/** The challenge's steps when an enforced user holds several required types, else null. */
+function challengeSteps(s: State): { total: number; passed: FactorType[] } | null {
+    const held = s.requiredTypes.filter((type) => s.factors.some((f) => f.type === type));
+
+    return held.length > 1 ? { total: held.length, passed: s.stepsPassed.filter((type) => held.includes(type)) } : null;
+}
+
 export function challengeProps(s: State) {
     // Each email/SMS factor's code still out, its cooldown (120s here), how long it stays valid (600s), and its code length.
     const sendState = (f: Factor) => {
@@ -399,9 +446,14 @@ export function challengeProps(s: State) {
         return { code_sent: true, retry_after: wait > 0 ? wait : null, expires_in: 600 - elapsed, code_length: 6 };
     };
 
+    // An enforced user sees only the required types still to pass (Mfa::challengeRequirement()).
+    const steps = challengeSteps(s);
+    const shown = s.factors.filter((f) => s.requiredTypes.length === 0 || (s.requiredTypes.includes(f.type) && !s.stepsPassed.includes(f.type)));
+
     return {
-        factors: s.factors.map((f) => ({ ...f, ...sendState(f) })),
-        defaultFactorId: s.factors[0]?.id ?? null,
+        factors: shown.map((f) => ({ ...f, ...sendState(f) })),
+        defaultFactorId: shown[0]?.id ?? null,
+        steps,
         hasRecoveryCodes: s.recoveryCodesRemaining > 0,
         status: s.status,
         retryAfter: s.retryAfter,

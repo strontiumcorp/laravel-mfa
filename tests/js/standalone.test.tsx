@@ -26,6 +26,7 @@ describe('published components', () => {
             'factor-list.tsx',
             'factor-setup-dialog.tsx',
             'icons.tsx',
+            'idle-warning.tsx',
             'password-confirm-form.tsx',
             'recovery-code-form.tsx',
             'recovery-codes-dialog.tsx',

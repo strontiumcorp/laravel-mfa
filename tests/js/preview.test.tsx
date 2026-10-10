@@ -86,12 +86,22 @@ describe('UI preview', () => {
         expect(s.trustedBrowsers).toEqual([]);
     });
 
-    it('hides the trusted browser reminder for the session on "Later"', () => {
+    it('hides the "check coming up" reminder on "Later"', () => {
         const s = initialState({ factors: [], trustEndsInMinutes: 60 });
 
-        expect(handle(s, 'post', '/mfa/trusted-browsers/reminder/dismiss', {})).toEqual({});
-        expect(s.trustReminderDismissed).toBe(true);
+        expect(handle(s, 'post', '/mfa/reminder/dismiss', {})).toEqual({});
+        expect(s.reminderDismissed).toBe(true);
         expect(challengeProps(initialState({ renew: true })).renew).toBe(true);
         expect(challengeProps(initialState()).renew).toBe(false);
+    });
+
+    it('keeps the idle timeout alive until it has ended', () => {
+        const s = initialState({ idleExpiresAt: Date.now() + 60_000 });
+
+        expect(handle(s, 'post', '/mfa/session/keep-alive', {})).toEqual({});
+        expect(s.idleExpiresAt).toBeGreaterThan(Date.now() + 24 * 60_000);
+
+        s.idleExpiresAt = Date.now() - 1;
+        expect(handle(s, 'post', '/mfa/session/keep-alive', {}).errors).toBeDefined();
     });
 });

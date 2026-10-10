@@ -26,6 +26,25 @@ const description = () => document.querySelector('[aria-live="polite"]');
 beforeEach(() => inertia.reset());
 
 describe('challenge page', () => {
+    it('shows the step an enforced user is on, and moves on to the next method after one is accepted', async () => {
+        const { rerender } = render(<MfaChallenge {...props} factors={factors.slice(0, 2)} steps={{ total: 2, passed: [] }} />);
+        expect(screen.getByText('Step 1 of 2')).toBeInTheDocument();
+        await userEvent.type(screen.getByRole('textbox', { name: 'Verification code' }), '123456{Enter}');
+        expect(inertia.requests).toEqual([{ method: 'post', url: urls.verify, data: { factor_id: 1, code: '123456' } }]);
+
+        // The server answers with the methods still to go.
+        rerender(<MfaChallenge {...props} factors={[factors[1]]} defaultFactorId={2} status="factor-verified" steps={{ total: 2, passed: ['totp'] }} />);
+        expect(screen.getByText('Step 2 of 2')).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Check your email' })).toBeInTheDocument();
+        expect(inertia.requests.at(-1)).toEqual({ method: 'post', url: urls.send, data: { factor_id: 2 } });
+    });
+
+    it('shows no steps when any one method is enough', () => {
+        render(<MfaChallenge {...props} />);
+
+        expect(screen.queryByText(/Step \d of/)).not.toBeInTheDocument();
+    });
+
     it('verifies with the selected factor', async () => {
         render(<MfaChallenge {...props} />);
 
