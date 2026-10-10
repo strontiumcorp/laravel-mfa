@@ -8,15 +8,18 @@ use Illuminate\Foundation\Application;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
 use StrontiumCorp\LaravelMfa\Contracts\EnforcementPolicy;
+use StrontiumCorp\LaravelMfa\Contracts\LifetimePolicy;
 use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 use StrontiumCorp\LaravelMfa\Contracts\PasswordConfirmationPolicy;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Http\Middleware\EnsureMfaVerified;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
+use StrontiumCorp\LaravelMfa\Support\VerificationLifetime;
 use Throwable;
 
 /**
@@ -102,8 +105,10 @@ class DoctorCommand extends Command
         }
 
         $cacheStore = config('mfa.cache.store') ?? config('cache.default');
-        if (in_array(config("cache.stores.{$cacheStore}.driver"), ['file', 'array'], true)) {
-            $this->warn_("Cache store [{$cacheStore}] is not shared — rate limits and factor cache are per-server");
+        if (config("cache.stores.{$cacheStore}.driver") === 'array' && ! app()->runningUnitTests()) {
+            $this->check("Cache store [{$cacheStore}] keeps entries between requests", false, 'the array store is per request (per worker under Octane): revocations (Mfa::reset()) would not reach other sessions; set MFA_CACHE_STORE');
+        } elseif (in_array(config("cache.stores.{$cacheStore}.driver"), ['file', 'array'], true)) {
+            $this->warn_("Cache store [{$cacheStore}] is not shared — rate limits, the factor cache and revocations (Mfa::reset()) are per-server, so a reset may only reach sessions on the server that ran it once its cache entry expires");
         }
 
         if (config('mfa.delivery.queue_connection') || config('mfa.delivery.queue')) {
@@ -116,6 +121,7 @@ class DoctorCommand extends Command
         }
 
         $this->checkEnforcement($mfa);
+        $this->checkLifetime();
 
         if (config('mfa.ui.driver') === 'inertia') {
             $this->check('inertiajs/inertia-laravel is installed (ui.driver = inertia)', class_exists(Inertia::class));
@@ -353,6 +359,45 @@ class DoctorCommand extends Command
             $this->warn_('Enrollment verification is off (enrollment_verification.required_for): someone with only the password of an account that must enroll can add their own authenticator app and take the account over');
         } elseif (in_array($verification, ['enforced', 'everyone'], true) && ! config('mfa.enrollment_verification.email')) {
             $this->components->twoColumnDetail('Enrollment verification', 'administrator links only (mfa:enrollment-link)');
+        }
+    }
+
+    private function checkLifetime(): void
+    {
+        $policy = config('mfa.lifetime.policy');
+
+        if (is_string($policy) && $policy !== '') {
+            $this->check("Lifetime policy [{$policy}] implements LifetimePolicy", is_subclass_of($policy, LifetimePolicy::class));
+        }
+
+        $session = (int) config('session.lifetime');
+
+        foreach ((array) config('mfa.lifetime.profiles') as $name => $raw) {
+            $this->check("Lifetime profile [{$name}] is a list of settings", is_array($raw));
+            if (! is_array($raw)) {
+                continue;
+            }
+
+            $this->check(
+                "Lifetime profile [{$name}] on_expiry is \"challenge\" or \"logout\"",
+                in_array($raw['on_expiry'] ?? 'challenge', ['challenge', 'logout'], true),
+            );
+
+            $profile = $this->laravel->make(VerificationLifetime::class)->profile((string) $name);
+
+            if ($profile['absolute'] === null && ($profile['grace'] > 0 || $profile['reminder'] !== null)) {
+                $this->warn_("Lifetime profile [{$name}] sets grace or reminder without absolute — they do nothing");
+            } elseif ($profile['absolute'] !== null && $profile['reminder'] !== null && $profile['reminder'] >= $profile['absolute']) {
+                $this->warn_("Lifetime profile [{$name}] reminds {$profile['reminder']} minutes before a {$profile['absolute']}-minute window ends — the reminder shows from the start");
+            }
+
+            if ($profile['idle'] !== null && $session > 0 && $session < $profile['idle']) {
+                $this->warn_("Lifetime profile [{$name}] idle ({$profile['idle']} min) is longer than session.lifetime ({$session} min) — the session ends first, so the idle setting does nothing");
+            }
+
+            if ($profile['on_expiry'] === 'logout' && ! Route::has('login')) {
+                $this->warn_("Lifetime profile [{$name}] logs out on expiry, but there is no [login] route — users are sent to routes.home");
+            }
         }
     }
 

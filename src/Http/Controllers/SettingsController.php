@@ -5,6 +5,7 @@ namespace StrontiumCorp\LaravelMfa\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Enums\FailureReason;
@@ -50,7 +51,8 @@ class SettingsController extends Controller
         return $this->ui->page('settings', [
             'factors' => $factors->filter(fn (MfaFactor $f) => $f->isConfirmed())->map(fn (MfaFactor $f) => $f->toPublicArray())->values(),
             'pending' => $pending,
-            'availableTypes' => $this->availableTypes(),
+            // Only the required types for an enforced user (the factor routes refuse the rest).
+            'availableTypes' => $this->availableTypes($user),
             'recoveryCodesRemaining' => $recoveryCodes->remaining($user),
             // How many a fresh set has (recovery_codes.count), for the "8 of 10 left" meter.
             'recoveryCodesTotal' => (int) config('mfa.recovery_codes.count'),
@@ -99,6 +101,15 @@ class SettingsController extends Controller
         ]);
     }
 
+    /** The labels of the types this user may add, e.g. "Authenticator app and Email". */
+    private function labels(MultiFactorAuthenticatable $user): string
+    {
+        $labels = array_map(fn (FactorType $t) => $t->label(), $this->mfa->enrollableTypes($user));
+        $last = array_pop($labels);
+
+        return $labels === [] ? (string) $last : implode(', ', $labels).' and '.$last;
+    }
+
     /** @return array{app: string, slug: string, account: string} */
     private function recoveryCodesFile(MultiFactorAuthenticatable $user): array
     {
@@ -108,13 +119,14 @@ class SettingsController extends Controller
     }
 
     /**
-     * Enabled types, recommended ones first (otherwise in enum order).
+     * The types this user may add (Mfa::enrollableTypes()), recommended ones
+     * first (otherwise in enum order).
      *
      * @return list<array{type: string, label: string, recommended: bool}>
      */
-    private function availableTypes(): array
+    private function availableTypes(MultiFactorAuthenticatable $user): array
     {
-        return collect($this->mfa->enabledTypes())
+        return collect($this->mfa->enrollableTypes($user))
             ->map(fn (FactorType $t) => ['type' => $t->value, 'label' => $t->label(), 'recommended' => $this->mfa->isTypeRecommended($t)])
             ->sortBy(fn (array $t) => $t['recommended'] ? 0 : 1)
             ->values()
@@ -123,16 +135,16 @@ class SettingsController extends Controller
 
     public function store(Request $request): Response
     {
+        $user = $this->sessionUser($request, $this->mfa);
+        // An enforced user may add only the required types (enforcement.required_types).
         // Equivalent mutant(s): Rule::in() accepts backed enums.
-        $enabled = array_map(fn (FactorType $t) => $t->value, $this->mfa->enabledTypes()); // @pest-mutate-ignore: UnwrapArrayMap
+        $allowed = array_map(fn (FactorType $t) => $t->value, $this->mfa->enrollableTypes($user)); // @pest-mutate-ignore: UnwrapArrayMap
 
         $validated = $request->validate([
-            'type' => ['required', Rule::in($enabled)],
+            'type' => ['required', Rule::in($allowed)],
             'destination' => ['nullable', 'string', 'max:255'],
             'label' => ['nullable', 'string', 'max:100'],
-        ]);
-
-        $user = $this->sessionUser($request, $this->mfa);
+        ], ['type.in' => __('Your account can only use :types.', ['types' => $this->labels($user)])]);
 
         try {
             $enrollment = $this->enrollment->start($user, FactorType::from($validated['type']), $validated);
@@ -156,6 +168,13 @@ class SettingsController extends Controller
 
         if (! PendingEnrollments::owns($request->session(), $factor)) {
             $this->ui->failure(FailureReason::FactorNotFound);
+        }
+
+        // A setup started before the user became enforced can't finish as a type they may not use.
+        $type = $user->mfaFactors()->whereKey($factor)->value('type');
+        $type = $type instanceof FactorType ? $type : FactorType::tryFrom((string) $type);
+        if ($type !== null && ! in_array($type, $this->mfa->enrollableTypes($user), true)) {
+            throw ValidationException::withMessages(['code' => __('Your account can only use :types.', ['types' => $this->labels($user)])]);
         }
 
         $confirmation = $this->enrollment->confirm($user, $factor, $validated['code']);

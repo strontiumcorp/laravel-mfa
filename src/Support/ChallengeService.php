@@ -77,10 +77,20 @@ final class ChallengeService
             ]);
         }
 
-        $this->limits->clearVerify($user);
+        // A login challenge clears the limits when it completes (completed()):
+        // with several required types, one passed step is not the end.
+        if ($stage !== 'challenge') {
+            $this->limits->clearVerify($user);
+        }
         $factor->forceFill(['last_used_at' => now()])->save();
 
         return VerificationResult::success(['factor_id' => $factor->getKey(), 'factor' => $factor->type]);
+    }
+
+    /** The login challenge is passed: its failed attempts no longer count. */
+    public function completed(MultiFactorAuthenticatable $user): void
+    {
+        $this->limits->clearVerify($user);
     }
 
     public function recover(MultiFactorAuthenticatable $user, string $code): VerificationResult

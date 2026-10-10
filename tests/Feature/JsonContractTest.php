@@ -6,6 +6,7 @@ use PragmaRX\Google2FA\Google2FA;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
+use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\EnforceForEveryone;
 
@@ -20,7 +21,7 @@ it('GET /mfa/challenge', function () {
 
     $this->loginWithSession($user)->getJson('/mfa/challenge')->assertOk()->assertExactJsonStructure([
         'factors' => ['*' => ['id', 'type', 'type_label', 'label', 'destination', 'confirmed', 'confirmed_at', 'last_used_at', 'code_sent', 'retry_after', 'expires_in', 'code_length']],
-        'defaultFactorId', 'hasRecoveryCodes', 'trustBrowser', 'renew',
+        'defaultFactorId', 'hasRecoveryCodes', 'trustBrowser', 'renew', 'steps',
         'urls' => ['send', 'verify', 'recover', 'logout'],
         'status', 'recoveryCodes', 'retryAfter',
     ]);
@@ -64,6 +65,39 @@ it('POST /mfa/challenge/send, /mfa/challenge, /mfa/challenge/recover', function 
     $this->loginWithSession($user)->postJson('/mfa/challenge/recover', ['code' => $code])
         ->assertExactJsonStructure(['status', 'redirect', 'remaining'])
         ->assertJsonPath('status', 'verified-with-recovery-code');
+});
+
+it('verification lifetime: 403 with the reason, 401 when it logs out, the deadlines and keep-alive', function () {
+    $this->freezeSecond();
+    config(['mfa.enforcement.policy' => EnforceForAdmins::class]);
+    [$admin, $factor] = $this->userWithFactor(attributes: ['is_admin' => true]);
+    $this->loginWithSession($admin)->postJson('/mfa/challenge', ['factor_id' => $factor->id, 'code' => $this->currentTotpCode($factor)])->assertOk();
+
+    $this->getJson('/mfa/session')->assertOk()->assertExactJsonStructure(['verification' => ['profile', 'now', 'expiresAt', 'remindAt', 'graceUntil', 'idleSeconds', 'idleExpiresAt']]);
+    $this->postJson('/mfa/session/keep-alive')->assertNoContent();
+
+    $this->travel(25)->minutes();
+    $this->getJson('/api/me')->assertStatus(403)->assertExactJson([
+        'message' => 'Multi-factor authentication required.', 'error' => 'mfa_required', 'reason' => 'idle', 'redirect' => url('/mfa/challenge'),
+    ]);
+
+    config(['mfa.lifetime.profiles.enforced.on_expiry' => 'logout']);
+    $this->travel(31)->seconds();
+    $this->postJson('/mfa/challenge', ['factor_id' => $factor->id, 'code' => $this->currentTotpCode($factor)])->assertOk();
+    $this->travel(25)->minutes();
+    $this->getJson('/api/me')->assertStatus(401)->assertExactJson([
+        'message' => 'Your session has ended. Please sign in again.', 'error' => 'mfa_session_ended', 'reason' => 'idle', 'redirect' => url('/login'),
+    ]);
+});
+
+it('GET /mfa/session for a session without a window', function () {
+    [$user] = $this->userWithFactor();
+    $this->actingAsMfaVerified($user)->getJson('/mfa/session')->assertOk()->assertExactJson(['verification' => null]);
+});
+
+it('POST /mfa/reminder/dismiss', function () {
+    [$user] = $this->userWithFactor();
+    $this->actingAsMfaVerified($user)->postJson('/mfa/reminder/dismiss')->assertOk()->assertExactJson(['status' => 'reminder-dismissed']);
 });
 
 it('error shapes: 422 invalid, 429 throttled, 403 from the middleware', function () {

@@ -4,10 +4,7 @@ namespace StrontiumCorp\LaravelMfa\Console;
 
 use Illuminate\Console\Command;
 use StrontiumCorp\LaravelMfa\Console\Concerns\ResolvesUser;
-use StrontiumCorp\LaravelMfa\Events\FactorDisabled;
 use StrontiumCorp\LaravelMfa\Mfa;
-use StrontiumCorp\LaravelMfa\Models\MfaFactor;
-use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
 
 /**
  * Support tool for locked-out users (lost phone + lost recovery codes).
@@ -24,7 +21,7 @@ class ResetCommand extends Command
 
     use ResolvesUser;
 
-    public function handle(Mfa $mfa, RecoveryCodes $recoveryCodes): int
+    public function handle(Mfa $mfa): int
     {
         if (! $user = $this->resolveUser()) {
             return self::FAILURE;
@@ -36,13 +33,8 @@ class ResetCommand extends Command
             return self::FAILURE;
         }
 
-        $user->mfaFactors()->get()->each(function (MfaFactor $factor) use ($user) {
-            $factor->delete();
-            event(new FactorDisabled($user, $factor->type, null, ['factor_id' => $factor->id, 'via' => 'console:mfa:reset', 'by_administrator' => true]));
-        });
-
-        $recoveryCodes->clear($user);
-        $mfa->forgetCachedState($user);
+        // Also ends every session they verified in, on its next request.
+        $mfa->reset($user, 'console:mfa:reset');
 
         $this->components->info("MFA reset for user #{$user->getAuthIdentifier()}.");
 

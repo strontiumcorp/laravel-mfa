@@ -168,10 +168,12 @@ describe('performance', function () {
         return $queries;
     }
 
-    it('runs zero MFA queries for verified sessions', function () {
+    it('runs zero MFA queries for verified sessions once the revocation lookup is cached', function () {
         [$user] = $this->userWithFactor();
         $this->actingAsMfaVerified($user);
 
+        // Cold cache: the one lookup of the user's revocation stamp (Mfa::reset()).
+        expect(mfaQueries(fn () => $this->get('/dashboard')->assertOk()))->toHaveCount(1)->each->toContain('mfa_revocations');
         expect(mfaQueries(fn () => $this->get('/dashboard')->assertOk()))->toBeEmpty();
     });
 

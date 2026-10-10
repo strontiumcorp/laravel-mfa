@@ -54,6 +54,10 @@ class InstallCommand extends Command
         $this->line('       <fg=gray>import</> MfaEnableNudge <fg=gray>from</> \'@/'.self::COMPONENTS_DIR.'/enable-nudge\';');
         $this->line("       <fg=gray>import</> { useMfaNudge } <fg=gray>from</> '@/{$pagesDir}/mfa/mfa-context';");
         $this->line('       <MfaEnableNudge {...useMfaNudge()} />');
+        $this->line('     and, next to it, the idle warning for users with an idle timeout:');
+        $this->line('       <fg=gray>import</> MfaIdleWarning <fg=gray>from</> \'@/'.self::COMPONENTS_DIR.'/idle-warning\';');
+        $this->line("       <fg=gray>import</> { useMfaIdleWarning } <fg=gray>from</> '@/{$pagesDir}/mfa/mfa-context';");
+        $this->line('       <MfaIdleWarning {...useMfaIdleWarning()} />');
         $this->line('  5. php artisan mfa:doctor   <fg=gray># verifies the integration</>');
 
         return self::SUCCESS;

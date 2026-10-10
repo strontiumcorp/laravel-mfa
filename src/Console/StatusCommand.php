@@ -4,11 +4,13 @@ namespace StrontiumCorp\LaravelMfa\Console;
 
 use Illuminate\Console\Command;
 use StrontiumCorp\LaravelMfa\Console\Concerns\ResolvesUser;
+use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Models\MfaTrustedBrowser;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
+use StrontiumCorp\LaravelMfa\Support\Revocations;
 
 /**
  * Support tool: "why can't this user log in?" in one command.
@@ -35,6 +37,8 @@ class StatusCommand extends Command
         $this->components->twoColumnDetail('Has active MFA (cached)', $mfa->hasConfirmedFactors($user) ? 'yes' : 'no');
         $this->components->twoColumnDetail('Must enroll (policy)', $mfa->mustEnroll($user) ? 'yes' : 'no');
         $this->components->twoColumnDetail('Recovery codes remaining', (string) $recoveryCodes->remaining($user));
+        $this->components->twoColumnDetail('Lifetime profile', $this->profileSummary($mfa, $user));
+        $this->components->twoColumnDetail('Verifications last revoked', ($at = app(Revocations::class)->stamps($user->getAuthIdentifier())['revoked']) > 0 ? date('Y-m-d H:i:s', $at) : 'never');
         $this->components->twoColumnDetail('Trusted browsers', (string) MfaTrustedBrowser::query()->where('user_id', $user->getAuthIdentifier())->where('expires_at', '>', now())->count());
 
         $this->newLine();
@@ -63,5 +67,21 @@ class StatusCommand extends Command
         );
 
         return self::SUCCESS;
+    }
+
+    /** The profile this user's next verification gets (mfa.lifetime), with its window. */
+    private function profileSummary(Mfa $mfa, MultiFactorAuthenticatable $user): string
+    {
+        $name = $mfa->lifetime()->profileFor($user);
+        $profile = $mfa->lifetime()->profile($name);
+
+        $parts = array_filter([
+            $profile['absolute'] === null ? null : "{$profile['absolute']} min window",
+            $profile['idle'] === null ? null : "{$profile['idle']} min idle",
+            $profile['grace'] > 0 ? "{$profile['grace']} min grace" : null,
+            $profile['on_expiry'] === 'logout' ? 'logs out' : null,
+        ]);
+
+        return $name.($parts === [] ? ' (until the session ends)' : ' ('.implode(', ', $parts).')');
     }
 }

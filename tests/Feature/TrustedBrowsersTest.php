@@ -59,7 +59,11 @@ function newSession($test, $user, array $cookies = []): void
     }
 }
 
-it('is off by default: not offered, and "remember" does nothing', function () {
+it('is on by default', function () {
+    expect((require __DIR__.'/../../config/mfa.php')['trusted_browsers']['enabled'])->toBeTrue();
+});
+
+it('can be turned off: not offered, and "remember" does nothing', function () {
     config(['mfa.trusted_browsers.enabled' => false]);
     [$user, $factor] = $this->userWithFactor();
     $this->loginWithSession($user);
@@ -169,6 +173,7 @@ it('ends for every browser when a method is added or removed, or a recovery code
     'mfa:reset' => [function ($test, $user) {
         $test->artisan('mfa:reset', ['user' => $user->id, '--force' => true])->assertSuccessful();
         $test->createMfaFactor($user); // re-enrolled (no event), so there is something to challenge
+        $test->travel(1)->seconds();   // signing in again after the reset logged them out
     }, 'factor_disabled'],
     'a recovery code used' => [function ($test, $user) {
         $code = app(RecoveryCodes::class)->generate($user)[0];
@@ -188,7 +193,8 @@ it('is never offered after a recovery code', function () {
 });
 
 it('is not offered to enforced users unless allow_enforced is on', function () {
-    config(['mfa.enforcement.policy' => EnforceForEveryone::class]);
+    // An enforced profile without a window or idle timeout (one with either never gets trust).
+    config(['mfa.enforcement.policy' => EnforceForEveryone::class, 'mfa.lifetime.profiles.enforced.absolute' => null, 'mfa.lifetime.profiles.enforced.idle' => null]);
     [$user, $factor] = $this->userWithFactor();
     $this->loginWithSession($user);
 
@@ -210,7 +216,7 @@ it('is not offered to enforced users unless allow_enforced is on', function () {
 });
 
 it('still holds an enforced user without a required type on the settings page', function () {
-    config(['mfa.enforcement.policy' => EnforceForEveryone::class, 'mfa.trusted_browsers.allow_enforced' => true]);
+    config(['mfa.enforcement.policy' => EnforceForEveryone::class, 'mfa.trusted_browsers.allow_enforced' => true, 'mfa.lifetime.profiles.enforced.absolute' => null, 'mfa.lifetime.profiles.enforced.idle' => null]);
     [$user, $factor] = $this->userWithFactor();
     [$name, $token] = trustThisBrowser($this, $user, $factor);
     config(['mfa.enforcement.required_types' => ['sms']]);
@@ -294,7 +300,7 @@ it('is pruned after it expires, goes with the user, and shows in mfa:status', fu
 
 describe('the reminder before a trusted browser expires', function () {
     beforeEach(function () {
-        Route::middleware(['web', 'auth'])->get('/app-page', fn () => Mfa::context()->trustReminder);
+        Route::middleware(['web', 'auth'])->get('/app-page', fn () => Mfa::context()->reverifyReminder);
         Route::middleware(['web', 'auth'])->get('/app-page/form', fn () => 'form');
     });
 
@@ -304,14 +310,16 @@ describe('the reminder before a trusted browser expires', function () {
         [$name, $token] = trustThisBrowser($this, $user, $factor);
         $expires = now()->addDays(30);
 
-        $this->getJson('/app-page')->assertJson(['show' => false, 'expiresAt' => null]);
+        // Not due: hidden, with its deadlines so an open page can show it later.
+        $this->getJson('/app-page')->assertJson(['show' => false, 'expiresAt' => $expires->toIso8601String()]);
 
         $this->travelTo($expires->copy()->subHours(12)->subSecond());
         newSession($this, $user, [$name => $token]);
-        $this->get('/app-page')->assertJson(['show' => false]);
+        // Not due yet, but an open page is told when it will be.
+        $this->get('/app-page')->assertJson(['show' => false, 'reason' => 'trust', 'showAt' => $expires->copy()->subHours(12)->toIso8601String()]);
 
         $this->travelTo($expires->copy()->subHours(12));
-        $this->get('/app-page')->assertJson(['show' => true, 'expiresAt' => $expires->toIso8601String(), 'button' => 'Verify now']);
+        $this->get('/app-page')->assertJson(['show' => true, 'reason' => 'trust', 'expiresAt' => $expires->toIso8601String(), 'showAt' => $expires->copy()->subHours(12)->toIso8601String(), 'button' => 'Verify now']);
 
         // A session on another browser (no trusted cookie) has nothing to renew.
         $this->post('/logout');
@@ -329,10 +337,10 @@ describe('the reminder before a trusted browser expires', function () {
         $this->get('/app-page')->assertJson(['show' => false]);
         config(['mfa.trusted_browsers.reminder.hours' => 12]);
 
-        $this->postJson('/mfa/trusted-browsers/reminder/dismiss')->assertOk()->assertExactJson(['status' => 'trust-reminder-dismissed']);
+        $this->postJson('/mfa/reminder/dismiss')->assertOk()->assertExactJson(['status' => 'reminder-dismissed']);
         $this->get('/app-page')->assertJson(['show' => false]);
 
-        session()->forget(TrustedBrowsers::REMINDER_DISMISSED);
+        session()->forget(StrontiumCorp\LaravelMfa\Mfa::REMINDER_DISMISSED);
         $this->get('/app-page')->assertJson(['show' => true]);
         $this->deleteJson('/mfa/trusted-browsers')->assertOk();
         $this->get('/app-page')->assertJson(['show' => false]);
@@ -441,7 +449,7 @@ describe('review fixes', function () {
         $request->setLaravelSession(session()->driver());
 
         $before = count($calls);
-        expect(app(TrustedBrowsers::class)->reminderDue($request, $user, 'web'))->toBeNull()
+        expect(app(TrustedBrowsers::class)->reminderWindow($request, $user, 'web'))->toBeNull()
             ->and(count($calls))->toBe($before);
     });
 });

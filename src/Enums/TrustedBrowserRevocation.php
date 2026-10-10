@@ -16,4 +16,6 @@ enum TrustedBrowserRevocation: string
     /** Often a lost device. */
     case RecoveryCodeUsed = 'recovery_code_used';
     case PasswordChanged = 'password_changed';
+    /** Mfa::reset() or Mfa::revokeVerifications(). */
+    case VerificationsRevoked = 'verifications_revoked';
 }

@@ -2,6 +2,7 @@
 
 namespace StrontiumCorp\LaravelMfa;
 
+use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Container\Container as LiveContainer;
@@ -16,6 +17,7 @@ use Illuminate\Contracts\Session\Session;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use StrontiumCorp\LaravelMfa\Contracts\CodeGenerator;
 use StrontiumCorp\LaravelMfa\Contracts\EnforcementPolicy;
 use StrontiumCorp\LaravelMfa\Contracts\Factor;
@@ -23,23 +25,31 @@ use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 use StrontiumCorp\LaravelMfa\Contracts\PasswordConfirmationPolicy;
 use StrontiumCorp\LaravelMfa\Contracts\SmsSender;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
+use StrontiumCorp\LaravelMfa\Enums\TrustedBrowserRevocation;
+use StrontiumCorp\LaravelMfa\Events\FactorDisabled;
 use StrontiumCorp\LaravelMfa\Events\ImpersonationGranted;
+use StrontiumCorp\LaravelMfa\Events\VerificationsRevoked;
 use StrontiumCorp\LaravelMfa\Events\VerificationSucceeded;
 use StrontiumCorp\LaravelMfa\Exceptions\ImpersonationNotAllowed;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForRoles;
 use StrontiumCorp\LaravelMfa\Sms\SmsManager;
+use StrontiumCorp\LaravelMfa\Support\ChallengeSteps;
 use StrontiumCorp\LaravelMfa\Support\EnrollmentLinks;
 use StrontiumCorp\LaravelMfa\Support\MfaContext;
 use StrontiumCorp\LaravelMfa\Support\Nudge;
+use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
 use StrontiumCorp\LaravelMfa\Support\RequestContext;
+use StrontiumCorp\LaravelMfa\Support\Revocations;
 use StrontiumCorp\LaravelMfa\Support\SessionIdentity;
 use StrontiumCorp\LaravelMfa\Support\TrustedBrowsers;
+use StrontiumCorp\LaravelMfa\Support\VerificationLifetime;
 use StrontiumCorp\LaravelMfa\Testing\FakeSmsSender;
 use StrontiumCorp\LaravelMfa\Testing\FixedCodeGenerator;
+use Throwable;
 
 /**
- * @phpstan-import-type TrustReminder from MfaContext
+ * @phpstan-import-type ReverifyReminder from MfaContext
  *
  * Facade root (StrontiumCorp\LaravelMfa\Facades\Mfa).
  *
@@ -54,6 +64,15 @@ class Mfa
 
     /** Set on a verified session whose user still lacks a required factor type. */
     public const ENROLL_PREFIX = 'mfa.enroll';
+
+    /** Session: when each guard's user logged in (unix seconds), for Mfa::reset()'s logout. */
+    public const LOGIN_AT_PREFIX = 'mfa.login_at';
+
+    /** Session: who granted an impersonation (grantForImpersonation()), per guard and target. */
+    public const IMPERSONATOR_PREFIX = 'mfa.impersonator';
+
+    /** Session: "Later" on the "check coming up" reminder, until the next verification. */
+    public const REMINDER_DISMISSED = 'mfa.reminder_dismissed';
 
     /** When the password was last confirmed: Laravel's own key, shared with password.confirm. */
     public const PASSWORD_CONFIRMED_AT = 'auth.password_confirmed_at';
@@ -225,8 +244,9 @@ class Mfa
 
     /**
      * Whether this user must (still) enroll: an enforcement rule applies and
-     * they have no confirmed factor of a required type (any enabled type
-     * when enforcement.required_types names none that is enabled).
+     * they lack a confirmed factor of some required type (every type in
+     * enforcement.required_types that is enabled; any one enabled type when
+     * it names none).
      */
     public function mustEnroll(MultiFactorAuthenticatable $user): bool
     {
@@ -244,7 +264,7 @@ class Mfa
             return false;
         }
 
-        return array_intersect($this->typeValues($required), $this->typeValues($this->confirmedTypes($user))) === [];
+        return array_diff($this->typeValues($required), $this->typeValues($this->confirmedTypes($user))) !== [];
     }
 
     /** Whether an enforcement rule (roles or policy) applies to this user. */
@@ -312,24 +332,53 @@ class Mfa
     }
 
     /**
-     * The types this user may verify with at the challenge: for an enforced
-     * user who has a required factor, only the required types; otherwise
-     * every enabled type (an enforced user without one verifies with what
-     * they have, then must enroll).
+     * The types this user may verify with at the challenge (see
+     * challengeRequirement()).
      *
      * @return list<FactorType>
      */
     public function challengeTypes(MultiFactorAuthenticatable $user): array
     {
+        return $this->challengeRequirement($user)['types'];
+    }
+
+    /**
+     * What this user's challenge asks for. An enforced user who holds
+     * required types must pass **every** one they hold, one code each
+     * (`all`), and nothing else counts; a recovery code still passes the
+     * whole challenge on its own. Everyone else, and an enforced user who
+     * holds no required type yet (they verify with what they have, then must
+     * enroll), passes with any one enabled type.
+     *
+     * @return array{types: list<FactorType>, all: bool}
+     */
+    public function challengeRequirement(MultiFactorAuthenticatable $user): array
+    {
         $required = $this->requiredTypes();
 
         if ($required === [] || ! $this->enforcesAnyone() || ! $this->isEnforced($user)) {
-            return $this->enabledTypes();
+            return ['types' => $this->enabledTypes(), 'all' => false];
         }
 
-        $held = array_intersect($this->typeValues($required), $this->typeValues($this->confirmedTypes($user)));
+        $held = array_values(array_intersect($this->typeValues($required), $this->typeValues($this->confirmedTypes($user))));
 
-        return $held === [] ? $this->enabledTypes() : array_map(fn (string $value) => FactorType::from($value), array_values($held));
+        return $held === []
+            ? ['types' => $this->enabledTypes(), 'all' => false]
+            : ['types' => array_map(fn (string $value) => FactorType::from($value), $held), 'all' => true];
+    }
+
+    /**
+     * The types this user may add on the settings page: the required types
+     * for an enforced user (enforcement.required_types), every enabled type
+     * otherwise. The factor routes refuse the rest.
+     *
+     * @return list<FactorType>
+     */
+    public function enrollableTypes(MultiFactorAuthenticatable $user): array
+    {
+        $required = $this->requiredTypes();
+
+        return $required !== [] && $this->enforcesAnyone() && $this->isEnforced($user) ? $required : $this->enabledTypes();
     }
 
     /**
@@ -457,9 +506,26 @@ class Mfa
 
         $request->session()->put($this->sessionKey($guard, $user->getAuthIdentifier()), now()->getTimestamp());
         $this->syncEnrollmentRequirement($request->session(), $guard, $user);
+        $lifetime = $user instanceof MultiFactorAuthenticatable ? $this->lifetime()->start($request->session(), $guard, $user) : null;
+        // Warm the revocation lookup the gate makes on every request.
+        $this->live()->make(Revocations::class)->stamps($user->getAuthIdentifier());
+        // Passed MFA as themselves: no longer riding on an impersonator's grant,
+        // and no half-finished challenge left over.
+        $request->session()->forget([
+            self::IMPERSONATOR_PREFIX.'.'.$guard.'.'.$user->getAuthIdentifier(),
+            ChallengeSteps::SESSION_KEY.'.'.$guard.'.'.$user->getAuthIdentifier(),
+        ]);
+        // A new window: the "check coming up" reminder starts over.
+        $request->session()->forget(self::REMINDER_DISMISSED);
         $request->session()->regenerate();
 
-        $this->events->dispatch(new VerificationSucceeded($user, $via, null, $context));
+        // The window, for verifications that have one (mfa.lifetime).
+        $window = $lifetime !== null && ($lifetime['until'] !== null || $lifetime['idle'] !== null) ? array_filter([
+            'profile' => $lifetime['profile'],
+            'expires_at' => $lifetime['until'] === null ? null : CarbonImmutable::createFromTimestamp($lifetime['until'])->toIso8601String(),
+        ]) : [];
+
+        $this->events->dispatch(new VerificationSucceeded($user, $via, null, $context + $window));
 
         RequestContext::end($request);
     }
@@ -504,8 +570,12 @@ class Mfa
      * If the target has MFA, the impersonator must have actually passed MFA
      * in this session; having no factors is not enough (decision D9), so
      * impersonation can never step around the target's second factor.
-     * Otherwise the impersonator only needs to be MFA-satisfied. Any password
-     * confirmation in the session is dropped: it was the impersonator's.
+     * Otherwise the impersonator only needs to be MFA-satisfied, and not in
+     * the last minutes of their own verification (grace). The impersonation
+     * gets the target's lifetime profile capped at the admin's own window,
+     * ends when the admin is revoked or reset, and logs out when it ends.
+     * Any password confirmation in the session is dropped: it was the
+     * impersonator's.
      */
     public function grantForImpersonation(Authenticatable $impersonator, Authenticatable $target, ?Request $request = null): void
     {
@@ -517,14 +587,34 @@ class Mfa
             ? $this->isVerifiedFor($request, $impersonator)
             : ! $impersonator instanceof MultiFactorAuthenticatable || $this->isSatisfied($request, $impersonator);
 
-        if (! $allowed) {
+        $guard = $this->guardFor($request, $target);
+        $session = $request->session();
+        $adminId = $impersonator->getAuthIdentifier();
+        // The admin's own verification, under the guard they signed in with
+        // (the target's after a same-guard swap; their own with several guards).
+        $adminGuard = $this->guardFor($request, $impersonator);
+        $adminGuard = $this->verifiedAt($session, $adminGuard, $adminId) !== null ? $adminGuard : $guard;
+        $adminVerifiedAt = $this->verifiedAt($session, $adminGuard, $adminId);
+        $adminLifetime = $this->lifetime()->entry($session, $adminGuard, $adminId);
+
+        // Not on a verification that is ending (grace included) or was revoked.
+        if (! $allowed
+            || ($adminLifetime !== null && $this->lifetime()->status($session, $adminGuard, $adminId, $adminLifetime) !== null)
+            || ($adminVerifiedAt !== null && $this->isRevoked($adminId, $adminVerifiedAt))) {
             throw ImpersonationNotAllowed::impersonatorNotVerified();
         }
 
-        $request->session()->put(
-            $this->sessionKey($this->guardFor($request, $target), $target->getAuthIdentifier()),
-            now()->getTimestamp(),
-        );
+        $session->put($this->sessionKey($guard, $target->getAuthIdentifier()), now()->getTimestamp());
+        // The target's profile, capped at the admin's own window; it logs out when it ends.
+        if ($target instanceof MultiFactorAuthenticatable) {
+            $this->lifetime()->startImpersonation($session, $guard, $target, $adminLifetime);
+        }
+        // Revoking the admin (or resetting them) ends it too.
+        $session->put(self::IMPERSONATOR_PREFIX.'.'.$guard.'.'.$target->getAuthIdentifier(), [
+            'id' => $adminId,
+            'guard' => $adminGuard,
+            'since' => $adminVerifiedAt ?? now()->getTimestamp(),
+        ]);
         // A password confirmed by the impersonator is not the target's: it
         // must not let them change the target's factors (or pass the app's
         // own password.confirm as the target).
@@ -534,6 +624,110 @@ class Mfa
             'impersonator_type' => $impersonator::class,
             'impersonator_id' => $impersonator->getAuthIdentifier(),
         ]));
+    }
+
+    /**
+     * An administrator's reset: removes every factor and recovery code, and
+     * logs the user out of every session on its next request (they sign in
+     * again with their password, then enroll if they must). $by names who
+     * asked, for the events (e.g. "console:mfa:reset").
+     */
+    public function reset(MultiFactorAuthenticatable $user, ?string $by = null): int
+    {
+        $count = 0;
+
+        foreach ($user->mfaFactors()->get() as $factor) {
+            $factor->delete();
+            $count++;
+            $this->events->dispatch(new FactorDisabled($user, $factor->type, null, ['factor_id' => $factor->id, 'via' => $by ?? 'app', 'by_administrator' => true]));
+        }
+
+        $this->live()->make(RecoveryCodes::class)->clear($user);
+        $this->forgetCachedState($user);
+        $this->revokeVerifications($user, $by, logout: true);
+
+        return $count;
+    }
+
+    /**
+     * End every verified session of this user on its next request, without
+     * touching their factors (e.g. a role removed or an account suspended):
+     * they pass MFA again, or with $logout sign in again. Their trusted
+     * browsers end too, or one would verify them right away.
+     */
+    public function revokeVerifications(MultiFactorAuthenticatable $user, ?string $by = null, bool $byAdministrator = true, bool $logout = false): void
+    {
+        // Trusted browsers first: one used between the stamp and their removal
+        // would verify again a second later, after the stamp.
+        // Even while the feature is off: turned on again later, an old cookie must not verify them.
+        $this->live()->make(TrustedBrowsers::class)->forget($user, TrustedBrowserRevocation::VerificationsRevoked);
+
+        $this->live()->make(Revocations::class)->revoke($user->getAuthIdentifier(), $logout);
+
+        // A new remember token, or a remember-me cookie would log them straight back in
+        // (as Laravel's logout() does: only when there is one to replace).
+        if ($logout && $user instanceof Model && $user->getRememberTokenName() !== '' && ! empty($user->getRememberToken())) {
+            $user->forceFill([$user->getRememberTokenName() => Str::random(60)])->saveQuietly();
+        }
+
+        $this->events->dispatch(new VerificationsRevoked($user, null, null, array_filter([
+            'by' => $by ?? 'app', 'by_administrator' => $byAdministrator ?: null, 'logout' => $logout ?: null,
+        ])));
+    }
+
+    /** Whether a verification of this user made at $verifiedAt (unix seconds) was revoked since. */
+    public function isRevoked(int|string $userId, int $verifiedAt): bool
+    {
+        return $this->live()->make(Revocations::class)->revokes($userId, $verifiedAt);
+    }
+
+    /**
+     * The user's last revocation and logout (unix seconds, 0 = never): one
+     * cache read.
+     *
+     * @return array{revoked: int, logged_out: int}
+     */
+    public function revocations(int|string $userId): array
+    {
+        $revocations = $this->live()->make(Revocations::class);
+        $request = $this->liveRequest();
+
+        // The gate asks for both on most requests: one round trip (MGET, or one
+        // query on a database store) instead of two. Each is kept on the request.
+        if ($request !== null && ! $request->attributes->has(self::MEMO_PREFIX.$userId)) {
+            try {
+                $values = $this->cacheStore()->many([$this->cacheKey($userId), $revocations->cacheKey($userId)]);
+                if (is_string($types = $values[$this->cacheKey($userId)] ?? null)) {
+                    $request->attributes->set(self::MEMO_PREFIX.$userId, $types);
+                }
+                $revocations->prime($userId, $values[$revocations->cacheKey($userId)] ?? null);
+            } catch (Throwable) {
+                // Each is read on its own below, with its own failure handling.
+            }
+        }
+
+        return $revocations->stamps($userId);
+    }
+
+    /** When this session's guard logged its user in (unix seconds), 0 when unknown (before this was recorded). */
+    public function loginAt(Session $session, string $guard, int|string $id): int
+    {
+        $at = $session->get(self::LOGIN_AT_PREFIX.'.'.$guard.'.'.$id);
+
+        return is_numeric($at) ? (int) $at : 0;
+    }
+
+    /** When this session's verification for the guard and user was made (unix seconds), null if it isn't. */
+    public function verifiedAt(Session $session, string $guard, int|string $id): ?int
+    {
+        $at = $session->get($this->sessionKey($guard, $id));
+
+        return is_numeric($at) ? (int) $at : null;
+    }
+
+    public function lifetime(): VerificationLifetime
+    {
+        return $this->live()->make(VerificationLifetime::class);
     }
 
     /**
@@ -596,35 +790,79 @@ class Mfa
                 ...$this->nudgeCopy(),
                 'dismissUrl' => $routes ? route('mfa.nudge.dismiss') : null,
             ],
-            trustReminder: $this->trustReminder($request, $routes, ($user['verified'] ?? false) ? $identity : null),
+            reverifyReminder: $this->reverifyReminder($request, $routes, ($user['verified'] ?? false) ? $identity : null),
+            verification: $this->verificationContext($request, $routes, ($user['verified'] ?? false) ? $identity : null),
         );
     }
 
     /**
-     * The renewal reminder for a trusted browser (trusted_browsers.reminder),
-     * for a verified session on one whose trust ends soon, off MFA's own
-     * pages. Read from the session: no query.
+     * The verified session's deadlines (mfa.lifetime) for the frontend's
+     * timers, null when it has none. Read from the session: no query.
      *
-     * @return TrustReminder
+     * @return array{profile: string, now: string, expiresAt: string|null, remindAt: string|null, graceUntil: string|null, idleSeconds: int|null, idleExpiresAt: string|null, renewUrl: string|null, keepAliveUrl: string|null, stateUrl: string|null}|null
      */
-    private function trustReminder(Request $request, bool $routes, ?SessionIdentity $identity): array
+    private function verificationContext(Request $request, bool $routes, ?SessionIdentity $identity): ?array
+    {
+        $entry = $identity === null ? null : $this->lifetime()->entry($request->session(), $identity->guard, $identity->id);
+        $described = $entry === null || $identity === null ? null : $this->lifetime()->describe($request->session(), $identity->guard, $identity->id, $entry);
+
+        return $described === null ? null : [
+            ...$described,
+            'renewUrl' => $routes && $entry['until'] !== null ? route('mfa.challenge', ['renew' => 1]) : null,
+            'keepAliveUrl' => $routes && $entry['idle'] !== null ? route('mfa.session.keep-alive') : null,
+            'stateUrl' => $routes ? route('mfa.session') : null,
+        ];
+    }
+
+    /**
+     * The "check coming up" reminder, for a verified session off MFA's own
+     * pages, not dismissed this session: the end of the lifetime window
+     * (mfa.lifetime: reminder minutes) or of a trusted browser's trust
+     * (trusted_browsers.reminder.hours). `show` says it is due now;
+     * `showAt` lets an open page show it when it becomes due. Read from the
+     * session first: no query on most pages.
+     *
+     * @return ReverifyReminder
+     */
+    private function reverifyReminder(Request $request, bool $routes, ?SessionIdentity $identity): array
     {
         $model = $identity?->user();
-        $due = $routes && $identity !== null && $model instanceof MultiFactorAuthenticatable
+        $eligible = $routes && $identity !== null && $model instanceof MultiFactorAuthenticatable
             && ! ($request->route() !== null && $request->routeIs('mfa.*'))
-            ? $this->live()->make(TrustedBrowsers::class)->reminderDue($request, $model, $identity->guard)
-            : null;
-        $text = fn (string $key): string => (string) __((string) $this->config->get("mfa.trusted_browsers.reminder.{$key}"));
+            && ! $request->session()->get(self::REMINDER_DISMISSED);
+
+        $reason = null;
+        $expires = $showAt = null;
+        $grace = 0;
+
+        if ($eligible) {
+            $entry = $this->lifetime()->entry($request->session(), $identity->guard, $identity->id);
+
+            if ($entry !== null && $entry['until'] !== null && $entry['remind_at'] !== null) {
+                // Through the grace period too: a page left open is still told.
+                [$reason, $expires, $showAt, $grace] = ['lifetime', $entry['until'], $entry['remind_at'], $entry['grace']];
+            } elseif (($trust = $this->live()->make(TrustedBrowsers::class)->reminderWindow($request, $model, $identity->guard)) !== null) {
+                [$reason, $expires, $showAt] = ['trust', ...$trust];
+            }
+        }
+
+        $now = now()->getTimestamp();
+        $copy = $reason === 'lifetime' ? 'mfa.lifetime.reminder' : 'mfa.trusted_browsers.reminder';
+        $text = fn (string $key): string => (string) __((string) $this->config->get("{$copy}.{$key}"));
+        $iso = fn (?int $ts): ?string => $ts === null ? null : CarbonImmutable::createFromTimestamp($ts)->toIso8601String();
+        $live = $expires !== null && $now < $expires + $grace;
 
         return [
-            'show' => $due !== null,
-            'expiresAt' => $due?->toIso8601String(),
+            'show' => $live && $now >= $showAt,
+            'reason' => $live ? $reason : null,
+            'expiresAt' => $live ? $iso($expires) : null,
+            'showAt' => $live ? $iso($showAt) : null,
             'title' => $text('title'),
             'body' => $text('body'),
             'button' => $text('button'),
             'dismissLabel' => $text('dismiss_label'),
             'verifyUrl' => $routes ? route('mfa.challenge', ['renew' => 1]) : null,
-            'dismissUrl' => $routes ? route('mfa.trusted-browsers.reminder.dismiss') : null,
+            'dismissUrl' => $routes ? route('mfa.reminder.dismiss') : null,
         ];
     }
 

@@ -7,7 +7,6 @@ use StrontiumCorp\LaravelMfa\Events\NudgeDismissed;
 use StrontiumCorp\LaravelMfa\Http\UiResponse;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Support\Nudge;
-use StrontiumCorp\LaravelMfa\Support\TrustedBrowsers;
 use Symfony\Component\HttpFoundation\Response;
 
 class NudgeController extends Controller
@@ -31,11 +30,14 @@ class NudgeController extends Controller
         return $ui->backQuietly('nudge-dismissed', ['until' => $until]);
     }
 
-    /** "Later" on the trusted browser's renewal reminder: hidden for the rest of this session. */
-    public function dismissTrustReminder(Request $request, TrustedBrowsers $browsers, UiResponse $ui): Response
+    /**
+     * "Later" on the "check coming up" reminder (the lifetime window's end,
+     * or a trusted browser's): hidden until the next verification.
+     */
+    public function dismissReminder(Request $request, UiResponse $ui): Response
     {
-        $browsers->dismissReminder($request);
+        $request->session()->put(Mfa::REMINDER_DISMISSED, true);
 
-        return $ui->backQuietly('trust-reminder-dismissed');
+        return $ui->backQuietly('reminder-dismissed');
     }
 }

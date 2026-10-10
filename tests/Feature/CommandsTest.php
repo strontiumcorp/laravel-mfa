@@ -7,6 +7,7 @@ use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Support\Facades\Artisan;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
+use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\ExemptSocialLogins;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\PlainUser;
 
@@ -67,6 +68,7 @@ it('publishes the pages into the app\'s pages directory and the components into 
             ->expectsOutputToContain("from '@/components/vendor/laravel-mfa/settings-card'")
             ->expectsOutputToContain("from '@/components/vendor/laravel-mfa/enable-nudge'")
             ->expectsOutputToContain('<MfaEnableNudge {...useMfaNudge()} />')
+            ->expectsOutputToContain('<MfaIdleWarning {...useMfaIdleWarning()} />')
             ->expectsOutputToContain('routes.password_confirmation_policy')
             ->doesntExpectOutputToContain('earlier version');
 
@@ -269,4 +271,48 @@ it('warns about a log mailer in production when only security emails go out by m
 
     config(['mfa.notifications.enabled' => false, 'mfa.enrollment_verification.email' => false]);
     $this->artisan('mfa:doctor')->doesntExpectOutputToContain('Mailer is "log"');
+});
+
+describe('mfa:doctor verification lifetime', function () {
+    it('fails on a policy class that is not a LifetimePolicy and a bad on_expiry', function () {
+        config(['session.driver' => 'database', 'mfa.factors.sms.enabled' => false, 'mfa.lifetime.policy' => ExemptSocialLogins::class]);
+        $this->artisan('mfa:doctor')->assertFailed()->expectsOutputToContain('implements LifetimePolicy');
+
+        config(['mfa.lifetime.policy' => null, 'mfa.lifetime.profiles.enforced.on_expiry' => 'signout']);
+        $this->artisan('mfa:doctor')->assertFailed()->expectsOutputToContain('on_expiry is "challenge" or "logout"');
+    });
+
+    it('warns about settings that do nothing', function () {
+        config(['session.driver' => 'database', 'mfa.factors.sms.enabled' => false, 'session.lifetime' => 20,
+            'mfa.lifetime.profiles.default' => ['absolute' => null, 'idle' => null, 'reminder' => null, 'grace' => 10, 'on_expiry' => 'challenge']]);
+
+        $this->artisan('mfa:doctor')->assertSuccessful()
+            ->expectsOutputToContain('[default] sets grace or reminder without absolute')
+            ->expectsOutputToContain('[enforced] idle (25 min) is longer than session.lifetime (20 min)');
+    });
+});
+
+it('shows the lifetime profile and the last revocation in mfa:status', function () {
+    config(['mfa.enforcement.policy' => EnforceForAdmins::class]);
+    [$admin] = $this->userWithFactor(FactorType::Totp, ['is_admin' => true]);
+
+    $this->artisan('mfa:status', ['user' => $admin->email])->assertSuccessful()
+        ->expectsOutputToContain('enforced (240 min window, 25 min idle, 10 min grace)')
+        ->expectsOutputToContain('never');
+
+    Mfa::revokeVerifications($admin);
+    $this->artisan('mfa:status', ['user' => $admin->email])->assertSuccessful()->expectsOutputToContain(date('Y-m-d H:i'));
+});
+
+it('fails mfa:doctor on an array cache store outside tests, and warns about a reminder longer than the window', function () {
+    config(['session.driver' => 'database', 'mfa.factors.sms.enabled' => false, 'mfa.lifetime.profiles.enforced.reminder' => 300]);
+    $this->artisan('mfa:doctor')->assertSuccessful()->expectsOutputToContain('reminds 300 minutes before a 240-minute window ends');
+
+    $env = $this->app['env'];
+    $this->app['env'] = 'production';
+    try {
+        $this->artisan('mfa:doctor')->assertFailed()->expectsOutputToContain('keeps entries between requests');
+    } finally {
+        $this->app['env'] = $env;
+    }
 });

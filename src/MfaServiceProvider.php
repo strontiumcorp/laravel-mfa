@@ -2,6 +2,7 @@
 
 namespace StrontiumCorp\LaravelMfa;
 
+use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Console\Scheduling\Schedule;
@@ -23,6 +24,7 @@ use StrontiumCorp\LaravelMfa\Listeners\ForgetMfaStateOnLogout;
 use StrontiumCorp\LaravelMfa\Listeners\ForgetTrustedBrowsers;
 use StrontiumCorp\LaravelMfa\Listeners\LogMfaActivity;
 use StrontiumCorp\LaravelMfa\Listeners\NotifyAccountOwner;
+use StrontiumCorp\LaravelMfa\Listeners\RecordLoginTime;
 use StrontiumCorp\LaravelMfa\Listeners\RecordMfaMetrics;
 use StrontiumCorp\LaravelMfa\Listeners\WriteMfaAuditLog;
 use StrontiumCorp\LaravelMfa\Metrics\LogMetricsRecorder;
@@ -181,6 +183,7 @@ class MfaServiceProvider extends ServiceProvider
         Event::listen(array_keys(NotifyAccountOwner::EVENTS), NotifyAccountOwner::class);
         Event::listen(array_keys(ForgetTrustedBrowsers::EVENTS), ForgetTrustedBrowsers::class);
         Event::listen([PasswordReset::class, 'eloquent.updated: '.Mfa::userModel()], [ForgetTrustedBrowsers::class, 'passwordChanged']);
+        Event::listen(Login::class, RecordLoginTime::class);
         Event::listen(Logout::class, ForgetMfaStateOnLogout::class);
     }
 
@@ -235,6 +238,6 @@ class MfaServiceProvider extends ServiceProvider
 
         $required = array_map(fn ($t) => $t->value, $mfa->requiredTypes());
 
-        return $who.' (requires '.($required === [] ? 'any factor' : implode(' or ', $required)).')';
+        return $who.' (requires '.($required === [] ? 'any factor' : implode(' and ', $required)).')';
     }
 }

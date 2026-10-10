@@ -2,7 +2,6 @@
 
 namespace StrontiumCorp\LaravelMfa\Support;
 
-use Carbon\CarbonImmutable;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Session\Session;
@@ -38,9 +37,6 @@ final class TrustedBrowsers
     /** Session: the trusted browser this session runs on, per guard and user ({id, expires_at}). */
     public const SESSION_KEY = 'mfa.trusted_until';
 
-    /** Session: "Later" on the renewal reminder. */
-    public const REMINDER_DISMISSED = 'mfa.trust_reminder_dismissed';
-
     public function __construct(
         private readonly Mfa $mfa,
         private readonly CodeHasher $hasher,
@@ -53,8 +49,16 @@ final class TrustedBrowsers
      */
     public function offeredTo(MultiFactorAuthenticatable $user): bool
     {
-        return (bool) config('mfa.trusted_browsers.enabled')
-            && (config('mfa.trusted_browsers.allow_enforced') || ! $this->mfa->isEnforced($user));
+        if (! config('mfa.trusted_browsers.enabled')) {
+            return false;
+        }
+
+        // Asked once: the lifetime profile depends on it too.
+        $enforced = $this->mfa->isEnforced($user);
+
+        return (config('mfa.trusted_browsers.allow_enforced') || ! $enforced)
+            // A window or idle timeout (mfa.lifetime) would be undone by the cookie the moment it ends.
+            && ! $this->mfa->lifetime()->hasWindow($user, $enforced);
     }
 
     /** How long a browser stays trusted. */
@@ -194,39 +198,29 @@ final class TrustedBrowsers
     }
 
     /**
-     * The renewal reminder (trusted_browsers.reminder): when this session
-     * runs on a trusted browser whose trust ends within reminder.hours, when
-     * it ends. Read from the session only (no query), so it can go in the
-     * shared context on every page.
+     * The renewal reminder's window (trusted_browsers.reminder): when this
+     * session runs on a trusted browser, [when its trust ends, when the
+     * reminder starts], else null. Read from the session first, so most
+     * pages end there without asking the enforcement rules.
+     *
+     * @return array{0: int, 1: int}|null
      */
-    public function reminderDue(Request $request, MultiFactorAuthenticatable $user, string $guard): ?CarbonImmutable
+    public function reminderWindow(Request $request, MultiFactorAuthenticatable $user, string $guard): ?array
     {
-        // The session first: most pages end here, without asking the
-        // enforcement rules (a policy class may query).
         $expires = $request->hasSession() ? $request->session()->get(self::SESSION_KEY.'.'.$guard.'.'.$user->getAuthIdentifier().'.expires_at') : null;
+        $hours = max(0, (int) config('mfa.trusted_browsers.reminder.hours'));
 
-        if (! is_numeric($expires) || $request->session()->get(self::REMINDER_DISMISSED) || ! $this->offeredTo($user)) {
+        if (! is_numeric($expires) || $hours === 0 || ! $this->offeredTo($user)) {
             return null;
         }
 
-        $now = now()->getTimestamp();
-        $hours = max(0, (int) config('mfa.trusted_browsers.reminder.hours'));
-
-        return $hours > 0 && $now < (int) $expires && $now >= (int) $expires - $hours * 3600
-            ? CarbonImmutable::createFromTimestamp((int) $expires)
-            : null;
+        return [(int) $expires, (int) $expires - $hours * 3600];
     }
 
     /** Whether this session runs on a browser trusted for this user (renewal is possible). */
     public function runsOnTrustedBrowser(Request $request, MultiFactorAuthenticatable $user, string $guard): bool
     {
         return $request->hasSession() && $request->session()->has(self::SESSION_KEY.'.'.$guard.'.'.$user->getAuthIdentifier());
-    }
-
-    /** "Later" on the reminder: hidden for the rest of this session. */
-    public function dismissReminder(Request $request): void
-    {
-        $request->session()->put(self::REMINDER_DISMISSED, true);
     }
 
     /** A short name for the browser, e.g. "Chrome on Mac", from its user agent. */
@@ -265,7 +259,7 @@ final class TrustedBrowsers
             'id' => (int) $browser->getKey(),
             'expires_at' => $browser->expires_at->getTimestamp(),
         ]);
-        $request->session()->forget(self::REMINDER_DISMISSED);
+        $request->session()->forget(Mfa::REMINDER_DISMISSED);
     }
 
     private function liveSession(): ?Session

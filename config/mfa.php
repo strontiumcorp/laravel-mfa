@@ -60,12 +60,13 @@ return [
     | policy         => a class implementing Contracts\EnforcementPolicy, for
     |                   logic in code (resolved from the container, so it
     |                   can inject anything). With no roles, it decides alone.
-    | required_types => what enforced users must set up and sign in with.
-    |                   Their other factors don't count: an enforced user
-    |                   with only email is sent to add an authenticator app,
-    |                   and once they have one, the challenge offers only it
-    |                   (recovery codes still work). Types that are disabled
-    |                   are ignored; [] means any enabled type.
+    | required_types => what enforced users must set up and sign in with,
+    |                   every one listed: the challenge asks for a code from
+    |                   each (recovery codes still pass it alone), and the
+    |                   settings page offers only these. Their other factors
+    |                   don't count: an enforced user with only email is sent
+    |                   to add an authenticator app. Types that are disabled
+    |                   are ignored; [] means any one enabled type.
     |
     */
 
@@ -125,9 +126,12 @@ return [
     | browser, for that user, until it expires. Ends early when the password
     | changes, a sign-in method is added or removed, a recovery code is used,
     | on mfa:reset, or from the settings page. Logging out doesn't end it.
-    | Never offered after signing in with a recovery code.
+    | Never offered after signing in with a recovery code, nor to (or honoured
+    | for) users whose lifetime profile has an `absolute` window or an `idle`
+    | timeout (see Verification lifetime below): the cookie would verify them
+    | again the moment either ends.
     |
-    | enabled        => offer it at all (off by default).
+    | enabled        => offer it at all.
     | days           => how long a browser stays trusted.
     | allow_enforced => offer it to users enforcement applies to (admins).
     |                   Weigh it: a stolen trusted browser plus the password
@@ -143,7 +147,7 @@ return [
     */
 
     'trusted_browsers' => [
-        'enabled' => env('MFA_TRUSTED_BROWSERS', false),
+        'enabled' => env('MFA_TRUSTED_BROWSERS', true),
         'days' => 30,
         'allow_enforced' => false,
         'cookie' => 'mfa_trusted',
@@ -151,6 +155,71 @@ return [
             'hours' => 12,
             'title' => 'Two-factor check coming up',
             'body' => "This browser will ask for your sign-in code again :when. Do it now so it doesn't interrupt you later.",
+            'button' => 'Verify now',
+            'dismiss_label' => 'Later',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Verification lifetime
+    |--------------------------------------------------------------------------
+    |
+    | How long one passed challenge lasts. Each verification gets a profile
+    | when it succeeds; its deadlines are kept in the session, so a verified
+    | request still costs no query.
+    |
+    | policy   => a class implementing Contracts\LifetimePolicy that names
+    |             the profile for a user. null = "enforced" for users an
+    |             enforcement rule applies to, else "default".
+    | profiles => per profile, all in minutes (null = off):
+    |   absolute  => the window, counted from the challenge. Not sliding:
+    |                activity never extends it. null = until the session ends.
+    |   idle      => ends it after this long without activity (page visits,
+    |                Inertia visits, form submits; not background requests).
+    |   reminder  => the nudge card says the check is coming this long before
+    |                `absolute` ends; "Verify now" starts a new window.
+    |   grace     => after `absolute` ends, page visits are challenged but
+    |                form submits and background requests still pass for this
+    |                long, so the end never breaks a request in progress.
+    |   on_expiry => "challenge": ask for a code again, still logged in.
+    |                "logout": end the login too (also forgets remember-me).
+    | idle_ignore => route names or paths that never count as activity
+    |                (e.g. an autosave POST).
+    | no_grace    => route names or paths that are challenged at once when
+    |                `absolute` ends, even for a form submit (sensitive actions).
+    | reminder (copy) => title, body (:when becomes e.g. "in 25 minutes"),
+    |                button and dismiss label. Through __().
+    |
+    | An administrator's reset (Mfa::reset(), mfa:reset) or
+    | Mfa::revokeVerifications() ends every verified session of that user on
+    | its next request, whatever the profile.
+    |
+    */
+
+    'lifetime' => [
+        'policy' => null,
+        'profiles' => [
+            'default' => [
+                'absolute' => null,
+                'idle' => null,
+                'reminder' => null,
+                'grace' => null,
+                'on_expiry' => 'challenge',
+            ],
+            'enforced' => [
+                'absolute' => env('MFA_ENFORCED_LIFETIME', 240),
+                'idle' => env('MFA_ENFORCED_IDLE', 25),
+                'reminder' => 30,
+                'grace' => env('MFA_ENFORCED_GRACE', 10),
+                'on_expiry' => env('MFA_ENFORCED_ON_EXPIRY', 'challenge'),
+            ],
+        ],
+        'idle_ignore' => [],
+        'no_grace' => [],
+        'reminder' => [
+            'title' => 'Two-factor check coming up',
+            'body' => "For your security you'll be asked for your sign-in code again :when. Do it now so it doesn't interrupt you.",
             'button' => 'Verify now',
             'dismiss_label' => 'Later',
         ],
@@ -619,6 +688,7 @@ return [
         'recovery_codes' => 'mfa_recovery_codes',
         'audit_logs' => 'mfa_audit_logs',
         'trusted_browsers' => 'mfa_trusted_browsers',
+        'revocations' => 'mfa_revocations',
     ],
 
 ];
