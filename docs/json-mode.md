@@ -27,7 +27,17 @@ HTTP/1.1 403 Forbidden
 { "message": "Multi-factor authentication required.", "error": "mfa_required", "redirect": "https://app.test/mfa/challenge" }
 ```
 
-Users who are required to enroll get `"error": "mfa_enrollment_required"`, with `redirect` pointing at `/mfa/settings`: enforced users with no factor, and enforced users who verified but still lack a required type (`enforcement.required_types`). The challenge lists, and accepts, only an enforced user's required types once they have one.
+When an earlier verification of this session has just ended, the body also has `"reason"`: `"absolute"` (the [lifetime](configuration.md#verification-lifetime) window and its grace ran out), `"idle"` (no activity for the profile's `idle` minutes) or `"revoked"` (an administrator's `Mfa::reset()` / `mfa:reset`, or `Mfa::revokeVerifications()`). Only the request that ends it carries it; the next ones are plain `mfa_required`.
+
+A profile with `on_expiry: "logout"` logs the user out instead:
+
+```http
+HTTP/1.1 401 Unauthorized
+
+{ "message": "Your session has ended. Please sign in again.", "error": "mfa_session_ended", "reason": "absolute", "redirect": "https://app.test/login" }
+```
+
+Users who are required to enroll get `"error": "mfa_enrollment_required"`, with `redirect` pointing at `/mfa/settings`: enforced users with no factor, and enforced users who verified but still lack a required type (`enforcement.required_types`). The challenge lists, and accepts, only an enforced user's required types once they have one, and asks for each of them (see `steps` below).
 
 A global response interceptor is the simplest way to handle both:
 
@@ -50,7 +60,8 @@ For `fetch()`, see the wrapper in [integration step 6](integration.md#background
 | `422` | Wrong, expired or reused code; invalid destination; unknown factor | `{ "message": "...", "errors": { "code": ["..."] } }`. Enrollment errors use the `destination` or `type` key instead of `code`. |
 | `429` | Rate limited; resend during the cooldown; too many codes to one destination today (`destination_limit`); the account's daily cap for that method from this network (`daily_limit`, `factors.{type}.send_per_day`; authenticator apps and recovery codes still work) | Same shape, plus `"retry_after": <seconds>` when known |
 | `503` | An app-wide send cap was hit (likely an attack): new destinations (`unconfirmed_global_per_hour`), or login codes (`confirmed_global_per_hour`; authenticator apps and recovery codes still work) | Same shape, plus `"retry_after": <seconds>` until sending resumes |
-| `403` | Not verified yet (see above), or settings opened while a challenge is pending | `{ "error": "mfa_required", ... }` |
+| `403` | Not verified yet (see above), or settings opened while a challenge is pending | `{ "error": "mfa_required", ... }`, plus `reason` when a verification just ended |
+| `401` | The verification ended and its profile logs out (`on_expiry: "logout"`), an impersonation ended, or an administrator's reset logged the user out (`reason: "revoked"`) | `{ "error": "mfa_session_ended", "reason": "...", "redirect": "…/login" }` |
 | `423` | A factor change needs the password first (see [Password confirmation](#password-confirmation)) | `{ "message": "...", "error": "password_confirmation_required", "confirm_url": "…/mfa/confirm-password" }` |
 | `423` | A first factor needs proof of ownership first (see [Enrollment verification](#enrollment-verification)) | `{ "message": "...", "error": "enrollment_verification_required", "email": "j***@example.com", "send_url": "…", "verify_url": "…" }` |
 
@@ -70,6 +81,8 @@ The messages are written for end users and are safe to display as-is. For the ma
     "defaultFactorId": 7,
     "hasRecoveryCodes": true,
     "trustBrowser": null,
+    "renew": false,
+    "steps": null,
     "urls": { "send": "…/mfa/challenge/send", "verify": "…/mfa/challenge", "recover": "…/mfa/challenge/recover", "logout": "…/logout" },
     "status": null,
     "recoveryCodes": null,
@@ -80,6 +93,7 @@ The messages are written for end users and are safe to display as-is. For the ma
 - `factors` lists authenticator apps first, then the rest by most recently used, and `defaultFactorId` is the first of them: a user with an authenticator app always starts on it (nothing is sent), even after signing in with email last time. Destinations are always masked.
 - `code_sent` is `true` while an email/SMS factor has a usable code out (sent, not expired, not used or burned). `retry_after` is the whole seconds until a resend is allowed, or `null` when it is allowed now. Both survive a refresh, so use them to restore the countdown, and to skip sending a new code when one is already out. `code_sent: false` with a `retry_after` means a code was just used to verify and the next one has to wait (the cooldown spans logins): show the countdown and send when it ends, rather than sending at once (that send would get `429`). `expires_in` is the whole seconds until that code expires, or `null` when none is out: once it runs out, treat the code as gone (a resend is allowed then). TOTP factors always have `false`, `null` and `null`. Opening the page never sends a code: call `POST /mfa/challenge/send` yourself.
 - `code_length` is how many digits the factor's codes have: always `6` for TOTP, `factors.{type}.length` for email and SMS.
+- `steps` is set when an enforced user must pass several required types (`enforcement.required_types`, every one they hold): `{ "total": 2, "passed": ["totp"] }`. `factors` then lists only the types still to pass. `null` means any one factor passes.
 - `urls.logout` is `null` when `config('mfa.routes.logout_route')` doesn't name an existing route.
 - If the session is already verified, or the user has no factors, the endpoint redirects to the intended page instead.
 
@@ -101,7 +115,9 @@ The messages are written for end users and are safe to display as-is. For the ma
 ```
 → `{ "status": "verified", "redirect": "https://app.test/dashboard" }`
 
-`remember` (optional) trusts this browser: the next sessions of this user on it skip the challenge for `trusted_browsers.days` (see [configuration.md](configuration.md#trusted-browsers)). It is ignored unless `GET /mfa/challenge` returned `trustBrowser` (`{ "days": 30 }`; `null` when it isn't offered). `GET /mfa/challenge?renew=1` from a verified session on a trusted browser returns the challenge with `"renew": true` instead of redirecting (the shared context's `trustReminder.verifyUrl`, shown in the last hours of the trust); passing it with `remember: true` trusts the browser again and `redirect` is the page the user came from. `renew` is `false` otherwise. `POST /mfa/trusted-browsers/reminder/dismiss` hides the reminder for the session → `{ "status": "trust-reminder-dismissed" }`. The response sets the trusted-browser cookie, so keep the cookies. `POST /mfa/challenge/recover` never trusts the browser.
+With `steps`, every code but the last answers `{ "status": "factor-verified", "remaining": ["email"] }` (`200`, the session is not verified yet): fetch `GET /mfa/challenge` again and verify the next type. A passed step counts for 10 minutes. Inertia and form posts are redirected back to the challenge with that status flashed.
+
+`remember` (optional) trusts this browser: the next sessions of this user on it skip the challenge for `trusted_browsers.days` (see [configuration.md](configuration.md#trusted-browsers)). It is ignored unless `GET /mfa/challenge` returned `trustBrowser` (`{ "days": 30 }`; `null` when it isn't offered). `GET /mfa/challenge?renew=1` from a verified session that has a fixed [lifetime](configuration.md#verification-lifetime) window, or runs on a trusted browser, returns the challenge with `"renew": true` instead of redirecting (the shared context's `reverifyReminder.verifyUrl`). Verifying then starts a new window (with `remember: true`, also trusts the browser again), and `redirect` is the page the user came from. `renew` is `false` otherwise. `POST /mfa/reminder/dismiss` hides the reminder until the next verification → `{ "status": "reminder-dismissed" }`. The response sets the trusted-browser cookie, so keep the cookies. `POST /mfa/challenge/recover` never trusts the browser.
 
 The session ID is regenerated on success, so take the new cookie from the response. (Inertia requests get a full page visit to the intended page instead: `409` with `X-Inertia-Location`.) `redirect` is the page the user originally asked for, or `config('mfa.routes.home')` if there was none.
 
@@ -209,7 +225,7 @@ No body. → `{ "status": "enrollment-code-sent", "retry_after": 120, "email": "
 }
 ```
 
-`passwordConfirmationRequired` says whether adding or removing a method would answer `423` right now (see [Password confirmation](#password-confirmation)), so a client can ask for the password before starting; the routes still enforce it. `enrollmentVerification` does the same for the proof of ownership before a first factor (see [Enrollment verification](#enrollment-verification)). `recoveryCodesTotal` is how many a fresh set has (`recovery_codes.count`), for an "8 of 10 left" display. `recoveryCodesFile` is what a downloaded codes file is named after: `app` is the name authenticator apps show (`factors.totp.issuer`, with the environment in brackets outside production unless `factors.totp.issuer_environment` is off), `slug` the same for a file name, and `account` the user's authenticator label (`getMfaLabel()`: the email, else the auth identifier). The bundled dialog names the file `{slug}-recovery-codes-{account}-{YYYY-MM-DD}.txt` with the browser's date. `availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have one. It's `[]` for other users.
+`passwordConfirmationRequired` says whether adding or removing a method would answer `423` right now (see [Password confirmation](#password-confirmation)), so a client can ask for the password before starting; the routes still enforce it. `enrollmentVerification` does the same for the proof of ownership before a first factor (see [Enrollment verification](#enrollment-verification)). `recoveryCodesTotal` is how many a fresh set has (`recovery_codes.count`), for an "8 of 10 left" display. `recoveryCodesFile` is what a downloaded codes file is named after: `app` is the name authenticator apps show (`factors.totp.issuer`, with the environment in brackets outside production unless `factors.totp.issuer_environment` is off), `slug` the same for a file name, and `account` the user's authenticator label (`getMfaLabel()`: the email, else the auth identifier). The bundled dialog names the file `{slug}-recovery-codes-{account}-{YYYY-MM-DD}.txt` with the browser's date. `availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have every one, and `availableTypes` lists only those (`POST /mfa/factors` refuses other types with `422` on `type`). It's `[]` for other users.
 
 `nudge` holds the [nudge](configuration.md#nudge)'s title and body, to show as a notice, for a user with no method who isn't enforced (and while `nudge.enabled` is on); it's `null` otherwise.
 
@@ -277,6 +293,25 @@ Stop trusting one browser, or all of the user's browsers. → `{ "status": "trus
 → `{ "status": "recovery-codes-generated", "recovery_codes": [ … ] }`. This invalidates every previous code.
 
 If the user has no confirmed factor yet, the response is `422 { "message": "Enable a verification method first." }`, without an `errors` key.
+
+## Verification lifetime
+
+For pages that show the idle warning (see [configuration.md](configuration.md#verification-lifetime)). Both run behind the gate: once the verification has ended they answer `403` like any other request.
+
+### `GET /mfa/session`
+
+The verified session's deadlines as they are now (another tab may have been active). It never counts as activity.
+
+```json
+{ "verification": { "profile": "enforced", "now": "2026-10-11T12:00:00+00:00", "expiresAt": "2026-10-11T16:00:00+00:00", "remindAt": "2026-10-11T15:30:00+00:00",
+  "graceUntil": "2026-10-11T16:10:00+00:00", "idleSeconds": 1500, "idleExpiresAt": "2026-10-11T12:25:00+00:00" } }
+```
+
+`verification` is `null` for a session whose profile has no window and no idle timeout. Times are ISO 8601; `null` fields are off. `now` is the server's clock, to correct for a client clock that is off.
+
+### `POST /mfa/session/keep-alive`
+
+"Stay signed in": counts as activity for the idle timeout → `204 No Content`. It never moves the absolute window.
 
 ## Nudge
 

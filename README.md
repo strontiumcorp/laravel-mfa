@@ -66,13 +66,15 @@ The middleware is added to the `web` group, so every web route is protected. It 
 | `actingAs()` in tests | Not challenged, so those tests keep passing. Tests that log enforced users in for real are sent to enroll; see [integration step 7](docs/integration.md#7-tests) |
 | JSON requests and scripts' `fetch()` | `403 {"error": "mfa_required", "redirect": "..."}` |
 | Remember-me login after the session expired | Challenged again, unless the user trusted that browser (opt-in; see [Sessions](docs/configuration.md#sessions-remember-me-and-re-challenges)) |
+| Enforced users (admins) | Verified for a fixed 4 hours with a 25-minute idle timeout, a reminder before it ends, and a grace period so the end never breaks a form submit (see [Verification lifetime](docs/configuration.md#verification-lifetime)) |
+| An administrator resets a user's MFA (`Mfa::reset()`, `mfa:reset`) | Every session of that user is logged out on its next request |
 
 Users without factors aren't challenged, unless `enforcement` requires them to enroll. Enforced users must use an authenticator app by default (`enforcement.required_types`), and prove they own the account with an emailed code (or an administrator's link) before adding their first method, so a leaked password alone can't enroll. Owners are emailed when their methods or recovery codes change.
 
 ## Documentation
 
 - [docs/integration.md](docs/integration.md): adding the package to an app, step by step, with Laravel version notes.
-- [docs/configuration.md](docs/configuration.md): enforcement, password confirmation, enrollment verification, security notifications, sending limits, SMS providers, observability, sessions, security model.
+- [docs/configuration.md](docs/configuration.md): enforcement, password confirmation, enrollment verification, verification lifetime, trusted browsers, security notifications, sending limits, SMS providers, observability, sessions, security model.
 - [docs/json-mode.md](docs/json-mode.md): the endpoints for non-Inertia frontends.
 
 ## Testing your app

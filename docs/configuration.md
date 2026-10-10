@@ -14,7 +14,9 @@ Everything is in `config/mfa.php`, with comments. This page covers the parts tha
 | `MFA_LOG_CHANNEL`, `MFA_LOG_LEVEL` | default channel, `info` | Where MFA events are logged, and the lowest level logged. |
 | `MFA_NUDGE_ENABLED` | `true` | The "turn on two-factor" nudge for users without a method; see [Nudge](#nudge). |
 | `MFA_ENROLLMENT_VERIFICATION` | `enforced` | Who must prove ownership (an email code or an admin link) before their first factor: `enforced`, `everyone` or `null`; see [Enrollment verification](#enrollment-verification). |
-| `MFA_TRUSTED_BROWSERS` | `false` | Offer "Don't ask again on this browser for N days" on the challenge; see [Trusted browsers](#trusted-browsers). |
+| `MFA_TRUSTED_BROWSERS` | `true` | Offer "Don't ask again on this browser for N days" on the challenge (never to users with a fixed lifetime window); see [Trusted browsers](#trusted-browsers). |
+| `MFA_ENFORCED_LIFETIME`, `MFA_ENFORCED_IDLE`, `MFA_ENFORCED_GRACE` | `240`, `25`, `10` | Minutes: how long an enforced user's verification lasts, its idle timeout, and the grace after the window; see [Verification lifetime](#verification-lifetime). |
+| `MFA_ENFORCED_ON_EXPIRY` | `challenge` | What happens when it ends: `challenge` (ask for a code again) or `logout`. |
 | `MFA_NOTIFICATIONS_ENABLED` | `true` | Security emails to the account owner; see [Security notifications](#security-notifications). |
 
 **The name in authenticator apps.** `factors.totp.issuer` (`MFA_TOTP_ISSUER`, default `APP_NAME`) is what authenticator apps show for the account. Outside production the environment is added in brackets ("Acme (staging)", "Acme (local)"), so a test account never looks like the real one; set `factors.totp.issuer_environment` to `false` to turn that off. It applies to apps added from then on: an existing entry keeps the name it was added with. The downloaded recovery codes file is named after the same name (`acme-staging-recovery-codes-…`).
@@ -29,7 +31,7 @@ Everything is in `config/mfa.php`, with comments. This page covers the parts tha
 'enforcement' => [
     'roles' => ['admin', 'support'],          // from $user->getMfaRoles()
     'policy' => \App\Mfa\MyPolicy::class,     // a Contracts\EnforcementPolicy (optional)
-    'required_types' => ['totp'],             // what enforced users must use; [] = any
+    'required_types' => ['totp'],             // what enforced users must use, every one listed; [] = any
 ],
 ```
 
@@ -49,15 +51,18 @@ class EnforceForStaff implements \StrontiumCorp\LaravelMfa\Contracts\Enforcement
 
 `Policies\EnforceForAdmins` (users whose `isAdmin()` is true) ships as an example.
 
-**Required types.** Enforced users must have a factor of a type in `required_types` (default: an authenticator app). Their other factors don't count:
+**Required types.** Enforced users must have a factor of **every** type in `required_types` (default: an authenticator app), and pass **each** of them at the challenge, one code each. Their other factors don't count:
 
 | Enforced user has | At the challenge | After passing it |
 |---|---|---|
-| No factor | (not challenged) | Held on the settings page until they add a required type |
-| Only other types (e.g. email) | Verifies with what they have | Held on the settings page until they add a required type |
-| A required type (and maybe others) | Offered only the required types, plus recovery codes | Through |
+| No factor | (not challenged) | Held on the settings page until they add every required type |
+| Only other types (e.g. email) | Verifies with any one of them | Held on the settings page until they add every required type |
+| Some required types | Passes each required type they have, one after the other; nothing else is offered | Held on the settings page until they add the rest |
+| Every required type (and maybe others) | Passes each required type, one after the other ("Step 1 of 2"); nothing else is offered | Through |
 
-The server enforces this, not just the pages: a non-required factor is refused at `send` and `verify` (`FactorNotFound`). Removing their last required factor sends the user back to enroll. Users who aren't enforced can use any enabled type. Types that are disabled are ignored; if none of `required_types` is enabled, any factor satisfies enforcement and `mfa:doctor` warns.
+A recovery code still passes the whole challenge on its own. Each passed step counts for 10 minutes from when it was passed, and goes on logging in or out and when the session is revoked. "Verify now" (`?renew=1`) walks through every step too. On the settings page an enforced user is offered only the required types; a method of another type they already have is shown grayed out as "Not used for sign-in", so they can remove it.
+
+The server enforces this, not just the pages: a non-required factor is refused at `send` and `verify` (`FactorNotFound`), and at `POST /mfa/factors` and its confirm (`422`, "Your account can only use …"). Removing a required factor sends the user back to enroll. Users who aren't enforced can use any enabled type. Types that are disabled are ignored; if none of `required_types` is enabled, any factor satisfies enforcement and `mfa:doctor` warns.
 
 **Upgrading from v0.2:** `Mfa::enforceUsing()` is removed. Move its closure into an `enforcement.policy` class as above, with `roles` empty if the closure decided alone.
 
@@ -304,11 +309,11 @@ php artisan mfa:reset jane@example.com             # locked-out user; verify the
 
 ## Trusted browsers
 
-"Don't ask again on this browser for 30 days": an opt-in checkbox on the challenge. The user still signs in with their password (or is logged back in by remember-me); only the MFA step is skipped, on that browser, for that user, until it expires. Anyone else signing in on the same browser is still asked.
+"Don't ask again on this browser for 30 days": an opt-in checkbox on the challenge, on by default. The user still signs in with their password (or is logged back in by remember-me); only the MFA step is skipped, on that browser, for that user, until it expires. Anyone else signing in on the same browser is still asked.
 
 ```php
 'trusted_browsers' => [
-    'enabled' => env('MFA_TRUSTED_BROWSERS', false),
+    'enabled' => env('MFA_TRUSTED_BROWSERS', true),
     'days' => 30,
     'allow_enforced' => false,   // offer it to users enforcement applies to (admins)?
     'cookie' => 'mfa_trusted',   // cookie name prefix
@@ -318,13 +323,54 @@ php artisan mfa:reset jane@example.com             # locked-out user; verify the
 - **What is stored.** The browser gets an http-only cookie (per guard and user, using the session cookie's path, domain, `secure` and `same_site`) holding a random token. The `mfa_trusted_browsers` table keeps only a keyed hash of it, a keyed hash of the user's password hash, a label from the user agent ("Chrome on Mac"), and when it was added, last used and expires. Rows go with the user and are pruned daily after they expire.
 - **When it ends**, besides expiry: the password changes (at once: on Laravel's `PasswordReset` event and whenever the user model, exactly `Mfa::userModel()`, not a subclass, is saved with a new password; a password changed some other way stops counting on the browser's next use). Laravel's rehash on login (`hash.rehash_on_login`, on by default since Laravel 11) counts too: after you change the hashing cost, each user's trusted browsers end at their next sign-in; a sign-in method is added or removed (`mfa:reset` included); a recovery code is used (often a lost device); the user forgets it on the settings page (one browser, or all of them); or the feature is turned off. Logging out does **not** end it: that's the point.
 - **Key rotation.** The cookie's name and token hashes are keyed from `APP_KEY`, with `APP_PREVIOUS_KEYS` honoured, so rotating the key with the old one listed keeps browsers trusted.
-- **Never offered** after signing in with a recovery code, or to enforced users unless `allow_enforced` is on. Turning `allow_enforced` off later makes their existing trust stop counting.
-- **The trade-off.** A trusted browser plus the password is enough to sign in, so stealing the cookie from that browser skips the second factor. That is why it's off by default and opt-in per sign-in. For admins, weigh a shorter `days` before turning on `allow_enforced`.
-- **A reminder before it ends.** Trust is checked when a new session starts, so when it has run out, the next sign-in (say, after lunch, once remember-me logs the user back in) asks for the code again. To avoid that surprise mid-task, in the last `reminder.hours` (12) of a browser's trust the nudge card (`MfaEnableNudge`, [integration step 6](integration.md#6-frontend)) says "Two-factor check coming up … This browser will ask for your sign-in code again in 5 hours." **Verify now** opens the challenge early (`/mfa/challenge?renew=1`), with "don't ask again" already ticked, and returns to the page the user was on; the browser is then trusted for another `days`. **Later** hides it for the rest of the session. It shows only on a verified session running on that browser, never on MFA's own pages, and costs no query (the expiry is kept in the session). `reminder.hours => 0` turns it off; the copy (`reminder.title`, `body` with `:when`, `button`, `dismiss_label`) goes through `__()`. Opening `?renew=1` on a session that isn't on a trusted browser just redirects as before, so it can't be used to re-trust without the code.
+- **Never offered** after signing in with a recovery code, to enforced users unless `allow_enforced` is on, or to users whose [lifetime profile](#verification-lifetime) has an `absolute` window or an `idle` timeout (enforced users by default), whatever `allow_enforced` says: the cookie would verify them again the moment either ends. Turning either off later makes their existing trust stop counting.
+- **The trade-off.** A trusted browser plus the password is enough to sign in, so stealing the cookie from that browser skips the second factor. That is why it's opt-in per sign-in and not offered to users with a fixed window or idle timeout (enforced users by default). Set `MFA_TRUSTED_BROWSERS=false` to turn it off.
+- **A reminder before it ends.** Trust is checked when a new session starts, so when it has run out, the next sign-in (say, after lunch, once remember-me logs the user back in) asks for the code again. To avoid that surprise mid-task, in the last `reminder.hours` (12) of a browser's trust the nudge card (the same "check coming up" reminder as the [lifetime window's](#verification-lifetime)) (`MfaEnableNudge`, [integration step 6](integration.md#6-frontend)) says "Two-factor check coming up … This browser will ask for your sign-in code again in 5 hours." **Verify now** opens the challenge early (`/mfa/challenge?renew=1`), with "don't ask again" already ticked, and returns to the page the user was on; the browser is then trusted for another `days`. **Later** hides it until the next verification. It shows only on a verified session running on that browser, never on MFA's own pages, and costs no query (the expiry is kept in the session). `reminder.hours => 0` turns it off; the copy (`reminder.title`, `body` with `:when`, `button`, `dismiss_label`) goes through `__()`. Opening `?renew=1` on a session that isn't on a trusted browser just redirects as before, so it can't be used to re-trust without the code.
 - **Cost.** Nothing for verified sessions and for browsers without the cookie. A browser that sends one costs one indexed query, once, when its new session starts.
-- **Events.** `BrowserTrusted` (context `trusted_browser_id`, `label`, `expires_at`); signing in on one is `VerificationSucceeded` with `via: trusted_browser`; `TrustedBrowsersForgotten` (context `count`, `cause`: `settings`, `factor_enabled`, `factor_disabled`, `recovery_code_used` or `password_changed`). `mfa:status` shows how many a user has.
+- **Events.** `BrowserTrusted` (context `trusted_browser_id`, `label`, `expires_at`); signing in on one is `VerificationSucceeded` with `via: trusted_browser`; `TrustedBrowsersForgotten` (context `count`, `cause`: `settings`, `factor_enabled`, `factor_disabled`, `recovery_code_used`, `password_changed` or `verifications_revoked`). `mfa:status` shows how many a user has.
 
-**Upgrading:** it adds a migration (`mfa_trusted_browsers`); run `php artisan migrate`. Apps that published the migrations (`--tag=mfa-migrations`, or `Mfa::ignoreMigrations()`) publish the new one too. To offer it, set `MFA_TRUSTED_BROWSERS=true` and republish the challenge and settings pages with their components ([integration step 6](integration.md#6-frontend)).
+**Upgrading:** it adds a migration (`mfa_trusted_browsers`); run `php artisan migrate`. Apps that published the migrations (`--tag=mfa-migrations`, or `Mfa::ignoreMigrations()`) publish the new one too. Republish the challenge and settings pages with their components ([integration step 6](integration.md#6-frontend)). It is on by default since the verification lifetime release; an app whose published `config/mfa.php` still says `env('MFA_TRUSTED_BROWSERS', false)` keeps it off until it sets `MFA_TRUSTED_BROWSERS=true` or edits that default.
+
+## Verification lifetime
+
+How long one passed challenge lasts. By default, users an enforcement rule applies to (admins) are verified for a fixed **4 hours** with a **25-minute idle timeout**; everyone else stays verified until their session ends (as before, and with [trusted browsers](#trusted-browsers) available).
+
+```php
+'lifetime' => [
+    'policy' => null,            // a class implementing Contracts\LifetimePolicy; null = "enforced" for enforced users, else "default"
+    'profiles' => [
+        'default' => ['absolute' => null, 'idle' => null, 'reminder' => null, 'grace' => null, 'on_expiry' => 'challenge'],
+        'enforced' => [
+            'absolute' => env('MFA_ENFORCED_LIFETIME', 240),   // minutes, counted from the challenge; not sliding
+            'idle' => env('MFA_ENFORCED_IDLE', 25),            // minutes without activity
+            'reminder' => 30,                                  // minutes before `absolute` ends
+            'grace' => env('MFA_ENFORCED_GRACE', 10),          // minutes after it, for what the user was doing
+            'on_expiry' => env('MFA_ENFORCED_ON_EXPIRY', 'challenge'), // or 'logout'
+        ],
+    ],
+    'idle_ignore' => [],   // routes or paths that never count as activity (e.g. an autosave POST)
+    'no_grace' => [],      // routes or paths challenged as soon as the window ends (sensitive actions)
+    'reminder' => [ 'title' => …, 'body' => … ':when' …, 'button' => 'Verify now', 'dismiss_label' => 'Later' ],
+],
+```
+
+- **The profile** is picked when a challenge succeeds (the policy runs then, not on every request), and the deadlines go into the session, so a verified request still costs no query. To split differently (support staff 4 hours, admins 8), add a profile and name a class implementing `LifetimePolicy` whose `profile($user)` returns its key. An unknown name falls back to `default`. A user whose role changes keeps the profile they verified with until their next challenge; call `Mfa::revokeVerifications($user)` to make it apply at once.
+- **`absolute`: not sliding.** Activity never extends it. "Verify now" on the reminder, or any new challenge, starts a new window from then; it never stretches the old one.
+- **`grace`: the end never breaks a request in progress.** When the window ends, the next page visit (a top-level navigation, or an Inertia visit that isn't a partial reload or prefetch) asks for the code and returns to that page afterwards. Form submits, uploads and background requests (`fetch`, partial reloads, polls) still go through for `grace` minutes, so a form opened at 3:58 can still be saved at 4:03; after the grace every request is challenged. A request already running is never cut off. Routes in `no_grace` (say, a bulk export) are challenged at once. `grace => null` turns it off. The first page visit in the grace ends the verification for the whole session, so a form submitted from another tab after it is challenged too. What counts as a page visit is read from request headers (`Sec-Fetch-*`, `X-Inertia`, `Purpose`), which the browser controls; whoever holds the session cookie can stretch to the end of the grace, never past it. For profiles where that matters, set `grace => null` or list sensitive GET routes in `no_grace`.
+- **`idle`: an unattended screen.** Activity is a page visit, an Inertia visit or any non-GET request (form submits, `POST /mfa/session/keep-alive`). Background GETs (`fetch`, partial reloads, prefetches, and Inertia reloads of the page the user is on: `router.reload()` and `usePoll()`, recognised by the `Referer` being that page) and `GET /mfa/session` don't count, so polling can't keep a session alive; add other routes to `idle_ignore`. There is no grace after an idle timeout: the idle warning covers it. `session.lifetime` must be longer than `idle`, or the session ends first (`mfa:doctor` warns).
+- **`reminder`.** That long before the window ends, the nudge card ([integration step 6](integration.md#6-frontend)) says "Two-factor check coming up … again in 25 minutes", with **Verify now** (the challenge, early, then back to the page) and **Later** (hidden until the next verification). It also appears on a page opened before the reminder was due, and stays through the grace period.
+- **The idle warning.** `MfaIdleWarning` ([integration step 6](integration.md#6-frontend)) shows "Still there?" two minutes before the idle timeout, with **Stay signed in**. It checks with the server first, so activity in another tab counts.
+- **`on_expiry`.** `challenge` asks for a code again; the user stays logged in. `logout` logs them out instead (Laravel's logout: remember-me forgotten, the session invalidated, so other guards logged in to the same session are logged out too) and sends them to the `login` route; JSON gets `401 mfa_session_ended`. Switch per profile, e.g. for staff who have no code to enter.
+- **Trusted browsers** are never offered to, or honoured for, a profile with an `absolute` window or an `idle` timeout.
+- **Revocation.** An administrator's reset **logs the user out of every session** on its next request, whatever its profile, with no grace, including sessions still waiting at the challenge (someone with only the password): `Mfa::reset($user, 'admin:7')` removes the factors, recovery codes and trusted browsers, ends every login made before it, and gives the user a new remember token so no remember-me cookie logs them back in (`mfa:reset` uses it). The user signs in again with their password, then enrolls if they must. Keeping the factors and the login, `Mfa::revokeVerifications($user)` only makes every session pass MFA again (a role removed); pass `logout: true` to end the logins too (an account suspended). The login time each session needs comes from Laravel's `Login` event (password, Socialite, remember-me, a login swap); a session logged in before this release has none and counts as older than any reset. A reset at second T also ends a login in that same second: sign in again a second later. The time is kept in the `mfa_revocations` table and cached, so the check is one cache read per verified request and survives `cache:clear`; if the cache fails it reads the table, and if that fails too the request fails rather than passing unchecked. A revocation that the cache can neither store nor drop throws, so the reset fails visibly and can be retried. The revoked session also loses its confirmed password and any setup in progress. Use a shared cache on several servers (`mfa:doctor` fails on the `array` store and warns on `file`). Pass `byAdministrator: false` to `revokeVerifications()` when it isn't an administrator's action (the `VerificationsRevoked` event says so).
+- **Outside the gate.** `Mfa::isVerified()`, `isSatisfied()` and the shared context read the session as it is; the lifetime window and revocations are applied by the gate, so on routes in `middleware.except` they may still say verified for a verification that has ended.
+- **Cache outages.** Every request of a logged-in user now reads the MFA cache once (the revocation stamp, fetched together with the factor types in one `many()`). If the store fails, the table answers and a `RevocationCacheUnavailable` is reported, once per request: throttle it in the app (`Exceptions::throttle(fn ($e) => $e instanceof RevocationCacheUnavailable ? Limit::perMinute(1) : null)`). Give the Redis connection used for `mfa.cache.store` a `timeout` and `read_timeout`, or a hanging Redis delays every request. With the `database` cache store this read is a query on the `cache` table.
+- **Clocks.** Revocations, logins and verifications are compared in whole seconds across servers: keep their clocks in sync (NTP), or a session verified on a server running behind can survive a reset made in the same seconds.
+- **Codes per day.** An enforced user can be challenged many times a day (every 4 hours and after each 25 minutes idle), with a code for every required type. If `required_types` includes `email` or `sms`, those count against `factors.{type}.send_per_day` (15 and 5) and the resend cooldown; an authenticator app (the default) sends nothing. Raise the cap, the idle timeout, or keep codes that are sent out of `required_types`.
+- **Events.** `VerificationSucceeded` gains `profile` and `expires_at` for a verification with a window; `VerificationExpired` (context `cause`: `absolute`, `idle` or `revoked`; `profile`, `verified_for` seconds, `on_expiry`; a reset's logout carries only `cause: revoked` and `on_expiry: logout`); `VerificationsRevoked` (context `by`, `by_administrator`, `logout`); `ChallengeStepPassed` when an enforced user passes one of several required types (context `factor_id`, `remaining`). JSON requests get `403 mfa_required` with `reason` when a verification has just ended ([json-mode.md](json-mode.md#detecting-that-mfa-is-needed)).
+- `mfa:status` shows the profile a user gets and when their verifications were last revoked; `mfa:doctor` checks the policy class and each profile.
+
+**Upgrading:** it adds a migration (`mfa_revocations`); run `php artisan migrate` before the new code serves requests: every logged-in request reads it (through the cache), so they fail until it exists (`mfa:doctor` checks it). Apps that published the migrations (`--tag=mfa-migrations`, or `Mfa::ignoreMigrations()`) publish the new one too. The `enforced` profile is on by default: enforced users are asked again after 4 hours, and after 25 minutes idle. For the old behaviour, set `lifetime.profiles.enforced.absolute` and `.idle` to `null` (or `MFA_ENFORCED_LIFETIME=null`, `MFA_ENFORCED_IDLE=null`). Sessions verified before the upgrade are counted from when they were verified, so an enforced user verified more than 4 hours 10 minutes before the deploy is challenged on their first request after it. Sessions logged in before the upgrade have no recorded login time and are logged out by the first `Mfa::reset()` of their user. Republish `mfa-context.ts` and the challenge page, and add the idle warning ([integration step 6](integration.md#6-frontend)).
 
 ## Sessions, remember-me and re-challenges
 
@@ -333,6 +379,9 @@ Verification is stored in the session, so it lasts exactly as long as the sessio
 | What happened | Challenged again? |
 |---|---|
 | A new request in the same session | No (and it costs no MFA queries). |
+| An enforced user's fixed window (4 hours) or idle timeout (25 minutes) ran out | **Yes**; see [Verification lifetime](#verification-lifetime). |
+| An administrator reset their MFA (`Mfa::reset()`, `mfa:reset`) | **Logged out** of every session on its next request; they sign in again (and enroll if they must). A reset also logs out a user who had no factor. |
+| An administrator revoked their verifications (`Mfa::revokeVerifications()`) | **Yes**, on the next request, in every session. |
 | Logged out, then logged in again | Yes. Logging out clears the verification even if the app keeps the session. |
 | Idle longer than `session.lifetime`, logged back in by the remember-me cookie | **Yes.** Laravel restores the login from the recaller cookie into a fresh session, which has no verification in it. (Not on a [trusted browser](#trusted-browsers).) |
 | Browser closed, with `session.expire_on_close` | Yes, on the next visit (remember-me or not). |
@@ -341,7 +390,7 @@ The remember-me case is deliberate: a remember-me cookie is a long-lived passwor
 
 - Accept it. For admins (who are enforced) this is a reasonable cadence; an authenticator code takes seconds.
 - Raise `SESSION_LIFETIME` (e.g. to a working day). The session cookie is then the long-lived credential instead, with the same trade-off as above.
-- Turn on [trusted browsers](#trusted-browsers): after a challenge the user may tick "Don't ask again on this browser for N days". For admins this also needs `allow_enforced`.
+- [Trusted browsers](#trusted-browsers) (on by default): after a challenge the user may tick "Don't ask again on this browser for N days". Not for users with a fixed [lifetime](#verification-lifetime) window (enforced users by default), who are asked again every 4 hours anyway.
 
 ## Blocked requests
 
@@ -364,6 +413,7 @@ So a background poll in a stale tab gets a JSON error it can handle, and never r
 - Codes are single use, expire, and are burned after 5 wrong attempts. TOTP codes can't be replayed. Concurrent requests can't use a code twice.
 - Verification attempts are limited per user per minute and per day; the daily cap stops slow brute force.
 - The session ID changes after verification. Logging out clears verification even if the app doesn't invalidate the session.
+- Enforced users' verification lasts a fixed window with an idle timeout (see [Verification lifetime](#verification-lifetime)), and an administrator's reset ends every session of the user on its next request.
 - Each logged-in guard must pass MFA on its own.
 - The gate runs before route model binding (it is placed ahead of `SubstituteBindings` in the middleware priority, after the session and auth middleware), so an unverified user gets the challenge for every URL, whether the record exists or not, and the app's binding code doesn't run for them. An app that replaces the whole priority list (`->priority([...])` in `bootstrap/app.php`, or `$middlewarePriority` in a Kernel) should list `EnsureMfaVerified` right before `SubstituteBindings` itself.
 - A user who has factors but hasn't verified can't open the MFA settings, so a stolen password can't add a factor.
@@ -387,7 +437,7 @@ Trade-offs we know about and have accepted for now. Each says who it affects, wh
 
 ## Performance
 
-- A verified session costs no MFA queries. Whether a user has MFA is cached and refreshed when their factors change. The cache holds the user's factor types, and the enabled types are applied on each read, so turning a type off or on takes effect at once. Within one request the cache is read once per user (kept on the request, never on a singleton), however often the gate, the shared context and the nudge ask.
+- A verified session costs no MFA queries, only one cache read (the revocation check; one query when that cache entry is cold). Its lifetime window is read from the session. Whether a user has MFA is cached and refreshed when their factors change. The cache holds the user's factor types, and the enabled types are applied on each read, so turning a type off or on takes effect at once. Within one request the cache is read once per user (kept on the request, never on a singleton), however often the gate, the shared context and the nudge ask.
 - The nudge adds nothing for users with MFA, and at most one cache read per page for users without it (none once the session knows it was dismissed).
 - Safe under Octane: no request state is kept between requests.
 - On multiple servers, use a shared cache and session store (Redis or database). `mfa:doctor` warns otherwise.
