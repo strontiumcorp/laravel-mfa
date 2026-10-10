@@ -6,6 +6,8 @@ use StrontiumCorp\LaravelMfa\Support\OtpStore;
 use StrontiumCorp\LaravelMfa\Support\VerificationResult;
 
 beforeEach(function () {
+    // Exact waits: a send at x.999s must not straddle a second boundary.
+    $this->freezeSecond();
     [$this->user, $this->factor] = $this->userWithFactor(FactorType::Sms);
     $this->store = app(OtpStore::class);
     $this->opts = ['length' => 6, 'ttl' => 600, 'max_attempts' => 3,
