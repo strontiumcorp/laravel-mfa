@@ -96,11 +96,12 @@ export default function MfaTotpSetup({
                         Open in authenticator app
                     </a>
                 )}
+                {/* The server's SVG is a fixed 192px: it scales to fit inside the padding. */}
                 {qrSvg && (
                     <div
                         role="img"
                         aria-label="QR code for your authenticator app"
-                        className="w-40 shrink-0 self-center rounded-lg bg-white p-2 ring-1 ring-gray-200 sm:w-44 sm:self-auto dark:ring-gray-700"
+                        className="w-40 shrink-0 self-center rounded-lg bg-white p-2 ring-1 ring-gray-200 sm:w-44 sm:self-auto dark:ring-gray-700 [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
                         dangerouslySetInnerHTML={{ __html: qrSvg }}
                     />
                 )}

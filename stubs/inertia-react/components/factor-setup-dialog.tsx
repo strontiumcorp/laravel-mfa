@@ -573,11 +573,12 @@ export default function MfaFactorSetupDialog({
                                     Open in authenticator app
                                 </a>
                             )}
+                            {/* The server's SVG is a fixed 192px: it scales to fit inside the padding. */}
                             {secret && qrSvg && (
                                 <div
                                     role="img"
                                     aria-label="QR code for your authenticator app"
-                                    className="mx-auto w-48 rounded-xl bg-white p-3 ring-1 ring-gray-200 dark:ring-gray-700"
+                                    className="mx-auto w-48 rounded-xl bg-white p-3 ring-1 ring-gray-200 dark:ring-gray-700 [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
                                     dangerouslySetInnerHTML={{ __html: qrSvg }}
                                 />
                             )}
