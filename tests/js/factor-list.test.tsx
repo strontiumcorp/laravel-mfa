@@ -43,35 +43,28 @@ describe('MfaFactorList', () => {
         expect(screen.getByRole('note')).toHaveTextContent('with: Authenticator app or SMS. Set one up to continue.');
     });
 
-    it('removes a factor after confirming', async () => {
+    it('asks in the row before removing', async () => {
         const onRemove = vi.fn();
-        const confirmRemove = vi.fn(() => true);
-        render(<MfaFactorList factors={[totp, sms]} onRemove={onRemove} confirmRemove={confirmRemove} />);
+        render(<MfaFactorList factors={[totp, sms]} onRemove={onRemove} />);
 
         await userEvent.click(screen.getByRole('button', { name: 'Remove My phone' }));
+        const ask = screen.getByRole('group', { name: 'Remove My phone?' });
+        expect(within(ask).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+        expect(onRemove).not.toHaveBeenCalled();
 
-        expect(confirmRemove).toHaveBeenCalledWith(sms);
+        await userEvent.click(within(ask).getByRole('button', { name: 'Remove' }));
         expect(onRemove).toHaveBeenCalledWith(sms);
     });
 
     it('keeps the factor when the user cancels', async () => {
         const onRemove = vi.fn();
-        render(<MfaFactorList factors={[totp]} onRemove={onRemove} confirmRemove={() => false} />);
-
-        await userEvent.click(screen.getByRole('button', { name: 'Remove Authenticator app' }));
-
-        expect(onRemove).not.toHaveBeenCalled();
-    });
-
-    it('asks with window.confirm by default', async () => {
-        const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-        const onRemove = vi.fn();
         render(<MfaFactorList factors={[totp]} onRemove={onRemove} />);
 
         await userEvent.click(screen.getByRole('button', { name: 'Remove Authenticator app' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-        expect(confirm).toHaveBeenCalledWith('Remove this method?');
-        expect(onRemove).toHaveBeenCalledWith(totp);
+        expect(screen.queryByRole('group')).not.toBeInTheDocument();
+        expect(onRemove).not.toHaveBeenCalled();
     });
 
     it('disables the factor being removed', () => {

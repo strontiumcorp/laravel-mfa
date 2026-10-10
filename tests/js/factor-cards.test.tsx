@@ -32,28 +32,64 @@ describe('MfaFactorCards', () => {
         expect(screen.queryByRole('button', { name: 'Set up Email' })).not.toBeInTheDocument();
     });
 
-    it('removes a method after confirming, and disables it while removing', async () => {
+    it('asks inside the card before removing, and waits while removing', async () => {
         const onRemove = vi.fn();
-        const confirmRemove = vi.fn(() => true);
-        const { rerender } = render(<MfaFactorCards types={types} factors={[email]} onAdd={noop} onRemove={onRemove} confirmRemove={confirmRemove} />);
+        const totp: MfaCardFactor = { ...email, id: 8, type: 'totp', type_label: 'Authenticator app', destination: null };
+        const { rerender } = render(<MfaFactorCards types={types} factors={[email, totp]} onAdd={noop} onRemove={onRemove} />);
 
         await userEvent.click(screen.getByRole('button', { name: 'Remove Email' }));
-        expect(confirmRemove).toHaveBeenCalledWith(email);
+        const ask = within(card('Email')).getByRole('group', { name: 'Remove Email?' });
+        expect(ask).toHaveTextContent("Signing in won't ask for codes from it any more.");
+        expect(within(ask).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+        expect(screen.getByRole('button', { name: 'Remove Email' })).toBeDisabled();
+        expect(onRemove).not.toHaveBeenCalled();
+
+        await userEvent.click(within(ask).getByRole('button', { name: 'Remove' }));
         expect(onRemove).toHaveBeenCalledWith(email);
 
-        rerender(<MfaFactorCards types={types} factors={[email]} onAdd={noop} onRemove={onRemove} removingId={7} />);
-        expect(screen.getByRole('button', { name: 'Remove Email' })).toBeDisabled();
+        rerender(<MfaFactorCards types={types} factors={[email, totp]} onAdd={noop} onRemove={onRemove} removingId={7} />);
+        expect(within(card('Email')).getByRole('button', { name: 'Removing…' })).toBeDisabled();
+        expect(within(card('Email')).getByRole('button', { name: 'Cancel' })).toBeDisabled();
     });
 
-    it('does not remove when the user cancels', async () => {
-        const onRemove = vi.fn();
-        vi.spyOn(window, 'confirm').mockReturnValue(false);
-        render(<MfaFactorCards types={types} factors={[email]} onAdd={noop} onRemove={onRemove} />);
+    it('says when it removes the only method', async () => {
+        render(<MfaFactorCards types={types} factors={[email]} onAdd={noop} onRemove={noop} />);
 
         await userEvent.click(screen.getByRole('button', { name: 'Remove Email' }));
 
-        expect(window.confirm).toHaveBeenCalledWith('Remove this method?');
+        expect(screen.getByRole('group', { name: 'Remove Email?' })).toHaveTextContent("It's your only method, so signing in won't ask for a code until you add one again.");
+    });
+
+    it('does not remove on Cancel or Escape, and puts the focus back on Remove', async () => {
+        const onRemove = vi.fn();
+        render(<MfaFactorCards types={types} factors={[email]} onAdd={noop} onRemove={onRemove} />);
+        const remove = screen.getByRole('button', { name: 'Remove Email' });
+
+        await userEvent.click(remove);
+        await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+        expect(screen.queryByRole('group')).not.toBeInTheDocument();
+        expect(remove).toHaveFocus();
+
+        await userEvent.click(remove);
+        await userEvent.keyboard('{Escape}');
+        expect(screen.queryByRole('group')).not.toBeInTheDocument();
+        expect(remove).toHaveFocus();
         expect(onRemove).not.toHaveBeenCalled();
+    });
+
+    it('swaps the question for the password prompt when the server asks for it', async () => {
+        const { rerender } = render(<MfaFactorCards types={types} factors={[email]} onAdd={noop} onRemove={noop} />);
+        await userEvent.click(screen.getByRole('button', { name: 'Remove Email' }));
+
+        rerender(<MfaFactorCards types={types} factors={[email]} onAdd={noop} onRemove={noop} passwordPrompt={{ at: { factor: 7 }, node: <p>password prompt</p> }} />);
+        expect(screen.queryByRole('group')).not.toBeInTheDocument();
+        expect(within(card('Email')).getByText('password prompt')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Remove Email' })).toBeDisabled();
+
+        // Cancelling the password ends the removal: the question doesn't come back.
+        rerender(<MfaFactorCards types={types} factors={[email]} onAdd={noop} onRemove={noop} />);
+        expect(screen.queryByRole('group')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Remove Email' })).toBeEnabled();
     });
 
     it('lists the recommended method first, and starts an authenticator app at once', async () => {

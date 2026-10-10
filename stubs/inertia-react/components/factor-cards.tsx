@@ -1,8 +1,8 @@
 // Published by strontiumcorp/laravel-mfa. This file is yours — restyle freely.
 //
 // The sign-in methods as one card each: active methods with their details and
-// a Remove button, the others with "Set up" (email and SMS ask for the
-// destination inside their card). A setup in progress renders inside its
+// a Remove button (it asks inside the card before removing), the others with
+// "Set up" (email and SMS ask for the destination inside their card). A setup in progress renders inside its
 // method's card. Needs only React and ./icons (the icon set, swappable in one
 // place); imports no other component and knows nothing about Inertia or routes.
 //
@@ -15,7 +15,7 @@
 //         required={mustEnroll}
 //         requiredTypes={requiredTypes.map((t) => t.type)}
 //     />
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { MfaFactorIcon, MfaIconCheck, MfaIconShieldAlert, MfaIconShieldLock, type MfaFactorType } from './icons';
 
 export type { MfaFactorType };
@@ -47,7 +47,7 @@ export type MfaFactorCardsProps<F extends MfaCardFactor = MfaCardFactor> = {
      * MfaFactorSetupDialog. onAdd is then not called.
      */
     onStart?: (type: MfaFactorType) => void;
-    /** Called after the user confirms the removal. */
+    /** Called once the user confirms the removal inside the method's card. */
     onRemove: (factor: F) => void;
     /** A setup in progress per type (QR code, code entry), shown inside that type's card. */
     setups?: Partial<Record<MfaFactorType, ReactNode>>;
@@ -61,14 +61,12 @@ export type MfaFactorCardsProps<F extends MfaCardFactor = MfaCardFactor> = {
     adding?: boolean;
     /** From adding, e.g. an invalid phone number. */
     error?: string | null;
-    /** The factor being removed; its button is disabled. */
+    /** The factor being removed; its buttons wait. */
     removingId?: number | null;
     /** The account must enroll (an enforcement rule applies). */
     required?: boolean;
     /** The types that satisfy the requirement; empty means any. */
     requiredTypes?: MfaFactorType[];
-    /** Asks before removing; defaults to window.confirm(). */
-    confirmRemove?: (factor: F) => boolean;
     /**
      * A note above the methods for a user who has none yet and isn't
      * required to (the settings page's `nudge`); not shown while `required`.
@@ -139,12 +137,34 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
     removingId = null,
     required = false,
     requiredTypes = [],
-    confirmRemove = () => window.confirm('Remove this method?'),
     notice = null,
 }: MfaFactorCardsProps<F>) {
     // Which email/SMS card is asking for its destination.
     const [entering, setEntering] = useState<Exclude<MfaFactorType, 'totp'> | null>(null);
     const [destination, setDestination] = useState('');
+
+    // Which method's card asks "Remove …?", and the one whose Remove gets the focus back after Cancel.
+    const [confirmingId, setConfirmingId] = useState<number | null>(null);
+    const refocusId = useRef<number | null>(null);
+    const uid = useId();
+    const removeButtonId = (id: number) => `${uid}-remove-${id}`;
+
+    const cancelRemove = (id: number) => {
+        refocusId.current = id;
+        setConfirmingId(null);
+    };
+
+    useEffect(() => {
+        if (refocusId.current === null) return;
+        document.getElementById(removeButtonId(refocusId.current))?.focus();
+        refocusId.current = null;
+    }, [confirmingId]);
+
+    // The server asked for the password: its prompt takes the question's place in the card.
+    const promptFactor = passwordPrompt && 'factor' in passwordPrompt.at ? passwordPrompt.at.factor : null;
+    useEffect(() => {
+        if (promptFactor !== null) setConfirmingId(null);
+    }, [promptFactor]);
 
     const close = () => {
         setEntering(null);
@@ -191,6 +211,8 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
     // never remounts it.
     const factorCard = (f: F) => {
         const name = f.label ?? f.type_label;
+        const removing = removingId === f.id;
+        const asking = confirmingId === f.id && promptFactor !== f.id;
 
         return (
             <article key={`f${f.id}`} className="rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
@@ -215,9 +237,10 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
                     </div>
                     <button
                         type="button"
+                        id={removeButtonId(f.id)}
                         aria-label={`Remove ${name}`}
-                        disabled={removingId === f.id}
-                        onClick={() => confirmRemove(f) && onRemove(f)}
+                        disabled={removing || asking || promptFactor === f.id}
+                        onClick={() => setConfirmingId(f.id)}
                         className={`${ACTION} min-h-11 shrink-0 rounded-lg border border-gray-200 px-4 text-sm font-medium text-red-700 disabled:opacity-50 dark:border-gray-700 dark:text-red-400`}
                     >
                         Remove
@@ -233,6 +256,46 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
                         <dd className="text-gray-900 dark:text-gray-100">{f.last_used_at ? formatDate(f.last_used_at) : 'Never'}</dd>
                     </div>
                 </dl>
+                {asking && (
+                    <div
+                        role="group"
+                        aria-labelledby={`${uid}-ask-${f.id}`}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Escape' && !removing) cancelRemove(f.id);
+                        }}
+                        className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-b-2xl border-t border-red-100 bg-red-50 px-4 py-4 sm:px-6 sm:pl-[6.25rem] dark:border-red-900/60 dark:bg-red-950/40"
+                    >
+                        <div className="min-w-0 flex-1 basis-60 space-y-0.5">
+                            <p id={`${uid}-ask-${f.id}`} className="text-sm font-semibold text-red-900 dark:text-red-200">
+                                Remove {name}?
+                            </p>
+                            <p className="text-sm text-red-800 dark:text-red-300">
+                                {factors.length === 1 ? "It's your only method, so signing in won't ask for a code until you add one again." : "Signing in won't ask for codes from it any more."}
+                            </p>
+                        </div>
+                        {/* Phones: Cancel and Remove side by side, Remove on the right. */}
+                        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
+                            <button
+                                type="button"
+                                autoFocus
+                                disabled={removing}
+                                onClick={() => cancelRemove(f.id)}
+                                className="min-h-11 rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-900 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                disabled={removing}
+                                aria-busy={removing || undefined}
+                                onClick={() => onRemove(f)}
+                                className="min-h-11 rounded-lg bg-red-600 px-5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-red-600 dark:text-white"
+                            >
+                                {removing ? 'Removing…' : 'Remove'}
+                            </button>
+                        </div>
+                    </div>
+                )}
                 {promptIn({ factor: f.id })}
             </article>
         );

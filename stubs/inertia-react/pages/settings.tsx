@@ -4,6 +4,7 @@
 import MfaFactorCards, { type MfaCardFactor, type MfaFactorType } from '@/components/vendor/laravel-mfa/factor-cards';
 import MfaFactorSetupDialog, { type MfaRecoveryCodesFile } from '@/components/vendor/laravel-mfa/factor-setup-dialog';
 import MfaPasswordConfirmForm from '@/components/vendor/laravel-mfa/password-confirm-form';
+import MfaRecoveryCodesDialog from '@/components/vendor/laravel-mfa/recovery-codes-dialog';
 import MfaRecoveryCodesPanel from '@/components/vendor/laravel-mfa/recovery-codes-panel';
 import MfaTrustedBrowsersPanel, { type MfaTrustedBrowser } from '@/components/vendor/laravel-mfa/trusted-browsers-panel';
 import { Head, router, useForm } from '@inertiajs/react';
@@ -89,13 +90,21 @@ export default function MfaSettings(props: Props) {
     const [resendingId, setResendingId] = useState<number | null>(null);
     const [removingId, setRemovingId] = useState<number | null>(null);
     const [regenerating, setRegenerating] = useState(false);
+    // New recovery codes run in their own dialog: confirm, the password when
+    // the server asks, then the codes. Opened again on load when making them
+    // came back as a full page load (the flashed codes are still there).
+    const reloadedCodes = status === 'recovery-codes-generated' && !!recoveryCodes;
+    const [codesOpen, setCodesOpen] = useState(reloadedCodes);
+    const [codesPassword, setCodesPassword] = useState(false);
+    // The codes in the props are this dialog's (not an earlier setup's).
+    const [codesMade, setCodesMade] = useState(reloadedCodes);
     const [forgettingBrowserId, setForgettingBrowserId] = useState<number | null>(null);
     const [forgettingAllBrowsers, setForgettingAllBrowsers] = useState(false);
 
-    // Removing a method and new recovery codes may answer "confirm your
-    // password first" (routes.password_confirmation): ask for it inside the
-    // card where the change started, then retry the change.
-    type PromptAt = { factor: number } | 'recovery';
+    // Removing a method may answer "confirm your password first"
+    // (routes.password_confirmation): ask for it inside the method's card,
+    // then retry the removal.
+    type PromptAt = { factor: number };
     const passwordForm = useForm<{ password?: string }>({});
     const [retry, setRetry] = useState<{ action: () => void; at: PromptAt } | null>(null);
     const askPasswordFor = (at: PromptAt, action: () => void) => (errors: Record<string, string>) => {
@@ -174,8 +183,6 @@ export default function MfaSettings(props: Props) {
     const [passwordAgain, setPasswordAgain] = useState(false);
     // The address or number last sent, to retry it after the password.
     const [lastDestination, setLastDestination] = useState<string | undefined>(undefined);
-    // Codes the dialog already showed, so the panel doesn't show them again.
-    const [shownCodes, setShownCodes] = useState<string[] | null>(null);
 
     // Only a setup that was pending when the page loaded reopens by itself, and only once.
     const [resumeId] = useState(() => pending[0]?.id ?? null);
@@ -233,9 +240,8 @@ export default function MfaSettings(props: Props) {
         continueSetup();
     };
 
-    const endSetup = (complete: boolean) => {
+    const endSetup = () => {
         if (current) setClosedIds((ids) => [...ids, current.id]);
-        if (complete) setShownCodes(recoveryCodes);
         setSetupType(null);
         setConfirming(null);
         setConfirmed(false);
@@ -273,12 +279,28 @@ export default function MfaSettings(props: Props) {
             onError: askPasswordFor({ factor: factor.id }, () => remove(factor)),
         });
 
+    const openCodes = () => {
+        passwordForm.clearErrors();
+        setCodesPassword(false);
+        setCodesMade(false);
+        setCodesOpen(true);
+    };
+
+    const closeCodes = () => {
+        setCodesOpen(false);
+        setCodesPassword(false);
+        setCodesMade(false);
+    };
+
     const regenerate = (): void =>
         router.post(urls.recoveryCodes, {}, {
             preserveScroll: true,
             onStart: () => setRegenerating(true),
             onFinish: () => setRegenerating(false),
-            onError: askPasswordFor('recovery', regenerate),
+            onSuccess: () => setCodesMade(true),
+            onError: (errors) => {
+                if (errors.password_confirmation_required) setCodesPassword(true);
+            },
         });
 
     // Forgetting a trusted browser needs no password: the browser only skipped the code.
@@ -352,7 +374,7 @@ export default function MfaSettings(props: Props) {
                 types={availableTypes}
                 factors={factors}
                 setups={setups}
-                passwordPrompt={retry && retry.at !== 'recovery' ? { at: retry.at, node: passwordPrompt } : null}
+                passwordPrompt={retry ? { at: retry.at, node: passwordPrompt } : null}
                 onAdd={store}
                 onStart={startSetup}
                 onRemove={remove}
@@ -397,24 +419,39 @@ export default function MfaSettings(props: Props) {
                     confirmed={confirmed}
                     recoveryCodes={confirmed ? recoveryCodes : null}
                     recoveryCodesFile={recoveryCodesFile}
-                    onClose={() => endSetup(false)}
-                    onComplete={() => endSetup(true)}
+                    onClose={endSetup}
+                    onComplete={endSetup}
                 />
             )}
 
-            {(factors.length > 0 || recoveryCodes) && (
+            {factors.length > 0 && (
                 <section className="space-y-3">
                     <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">If you lose your device</h2>
-                    <MfaRecoveryCodesPanel
-                        remaining={recoveryCodesRemaining}
-                        total={recoveryCodesTotal}
-                        codes={dialogType || recoveryCodes === shownCodes ? null : recoveryCodes}
-                        onRegenerate={regenerate}
-                        processing={regenerating}
-                        passwordPrompt={retry?.at === 'recovery' ? passwordPrompt : null}
-                    />
+                    <MfaRecoveryCodesPanel remaining={recoveryCodesRemaining} total={recoveryCodesTotal} onNewCodes={openCodes} processing={regenerating} />
                 </section>
             )}
+
+            <MfaRecoveryCodesDialog
+                open={codesOpen}
+                remaining={recoveryCodesRemaining}
+                total={recoveryCodesTotal}
+                onGenerate={regenerate}
+                processing={regenerating}
+                askPassword={codesPassword}
+                onConfirmPassword={(password) =>
+                    confirmPassword(password, () => {
+                        setCodesPassword(false);
+                        regenerate();
+                    })
+                }
+                passwordProcessing={passwordForm.processing}
+                passwordError={passwordForm.errors.password}
+                passwordRetryAfter={passwordRetryAfter}
+                codes={codesMade ? recoveryCodes : null}
+                recoveryCodesFile={recoveryCodesFile}
+                onClose={closeCodes}
+                onComplete={closeCodes}
+            />
 
             {trustedBrowsers && (
                 <section className="space-y-3">

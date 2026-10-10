@@ -54,9 +54,11 @@ export const scenarios: Scenario[] = [
     {
         id: 'new-codes',
         page: 'settings',
-        title: 'Settings · new recovery codes shown',
+        title: 'Settings · new recovery codes shown (dialog)',
         state: () => {
             const s = initialState({ factors: [totp()], recoveryCodesRemaining: 10 });
+            // As after making them: the page opens the dialog on its codes.
+            s.status = 'recovery-codes-generated';
             s.recoveryCodes = ['aaaaa-11111', 'bbbbb-22222', 'ccccc-33333', 'ddddd-44444', 'eeeee-55555', 'fffff-66666', 'ggggg-77777', 'hhhhh-88888', 'iiiii-99999', 'jjjjj-10101'];
             return s;
         },

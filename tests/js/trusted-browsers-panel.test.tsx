@@ -66,10 +66,34 @@ describe('MfaTrustedBrowsersPanel', () => {
 
         await userEvent.click(screen.getByRole('button', { name: 'Forget Unknown browser' }));
         await userEvent.click(screen.getByRole('button', { name: 'Forget this browser' }));
-        await userEvent.click(screen.getByRole('button', { name: 'Forget all' }));
-
         expect(onForget.mock.calls).toEqual([[2], [3]]);
+
+        await userEvent.click(screen.getByRole('button', { name: 'Forget all' }));
+        const ask = screen.getByRole('group', { name: 'Forget all trusted browsers?' });
+        expect(ask).toHaveTextContent('Each of them, this one too, asks for a code at the next sign-in.');
+        expect(onForgetAll).not.toHaveBeenCalled();
+
+        await userEvent.click(within(ask).getByRole('button', { name: 'Forget all' }));
         expect(onForgetAll).toHaveBeenCalledOnce();
+        expect(screen.queryByRole('group')).not.toBeInTheDocument();
+    });
+
+    it('asks before forgetting all, inside the card, and puts the focus back on Cancel or Escape', async () => {
+        const onForgetAll = vi.fn();
+        render(<MfaTrustedBrowsersPanel browsers={browsers} onForget={() => {}} onForgetAll={onForgetAll} />);
+        const forgetAll = screen.getByRole('button', { name: 'Forget all' });
+
+        await userEvent.click(forgetAll);
+        expect(forgetAll).toBeDisabled();
+        expect(within(screen.getByRole('group')).getByRole('button', { name: 'Cancel' })).toHaveFocus();
+        await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+        expect(screen.queryByRole('group')).not.toBeInTheDocument();
+        await vi.waitFor(() => expect(forgetAll).toHaveFocus());
+
+        await userEvent.click(forgetAll);
+        await userEvent.keyboard('{Escape}');
+        expect(screen.queryByRole('group')).not.toBeInTheDocument();
+        expect(onForgetAll).not.toHaveBeenCalled();
     });
 
     it('offers "Forget all" only for more than one browser, when given', () => {

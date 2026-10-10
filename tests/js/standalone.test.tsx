@@ -28,6 +28,7 @@ describe('published components', () => {
             'icons.tsx',
             'password-confirm-form.tsx',
             'recovery-code-form.tsx',
+            'recovery-codes-dialog.tsx',
             'recovery-codes-panel.tsx',
             'send-code-button.tsx',
             'settings-card.tsx',

@@ -73,17 +73,45 @@ describe('settings page', () => {
         ]);
     });
 
-    it('removes a factor and regenerates recovery codes after confirming', async () => {
-        vi.spyOn(window, 'confirm').mockReturnValue(true);
+    it('removes a factor after confirming inside its card', async () => {
         render(<MfaSettings {...props} />);
 
         await userEvent.click(screen.getByRole('button', { name: 'Remove Email' }));
-        await userEvent.click(screen.getByRole('button', { name: 'New codes' }));
+        expect(inertia.requests).toEqual([]);
+        await userEvent.click(within(screen.getByRole('group', { name: 'Remove Email?' })).getByRole('button', { name: 'Remove' }));
 
-        expect(inertia.requests).toEqual([
-            { method: 'delete', url: '/mfa/factors/7', data: null },
-            { method: 'post', url: urls.recoveryCodes, data: {} },
-        ]);
+        expect(inertia.requests).toEqual([{ method: 'delete', url: '/mfa/factors/7', data: null }]);
+    });
+
+    it('makes new recovery codes in a dialog: asks first, then shows them until Complete', async () => {
+        const codes = ['ccccc-33333', 'ddddd-44444'];
+        const user = userEvent.setup();
+        // The mock keeps props as given: recoveryCodes stands for the flash after generating
+        // (and, before that, for codes an earlier setup left in the props, which the dialog must not show).
+        render(<MfaSettings {...props} recoveryCodes={codes} />);
+        expect(screen.queryByRole('list', { name: 'Recovery codes' })).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole('button', { name: 'New codes' }));
+        const ask = screen.getByRole('dialog', { name: 'Generate new recovery codes?' });
+        expect(ask).toHaveTextContent('Your 9 unused codes stop working');
+        expect(inertia.requests).toEqual([]);
+
+        await user.click(within(ask).getByRole('button', { name: 'Generate new codes' }));
+        expect(inertia.requests).toEqual([{ method: 'post', url: urls.recoveryCodes, data: {} }]);
+        const dialog = screen.getByRole('dialog', { name: 'Save your new recovery codes' });
+        expect(within(dialog).getAllByRole('listitem').map((li) => li.textContent)).toEqual(codes);
+
+        await user.click(within(dialog).getByRole('button', { name: 'Copy' }));
+        await user.click(within(dialog).getByRole('button', { name: 'Complete' }));
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(screen.queryByRole('list', { name: 'Recovery codes' })).not.toBeInTheDocument();
+
+        // Opening it again asks again; the codes just saved don't come back.
+        await user.click(screen.getByRole('button', { name: 'New codes' }));
+        expect(screen.getByRole('dialog', { name: 'Generate new recovery codes?' })).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Cancel' }));
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(inertia.requests).toHaveLength(1);
     });
 
     it('tells an enforced user what they must add', () => {
@@ -93,10 +121,11 @@ describe('settings page', () => {
         expect(screen.getByText('Required', { selector: 'header span' })).toBeInTheDocument();
     });
 
-    it('shows new recovery codes even before any factor is listed', () => {
-        render(<MfaSettings {...props} factors={[]} recoveryCodes={['aaaaa-11111']} />);
+    it('reopens the new codes dialog when making them reloaded the page', () => {
+        render(<MfaSettings {...props} status="recovery-codes-generated" recoveryCodes={['aaaaa-11111']} />);
 
-        expect(screen.getByRole('listitem')).toHaveTextContent('aaaaa-11111');
+        const dialog = screen.getByRole('dialog', { name: 'Save your new recovery codes' });
+        expect(within(dialog).getByRole('listitem')).toHaveTextContent('aaaaa-11111');
     });
 
     it('asks for the password first in the dialog when a change needs it', async () => {
@@ -150,21 +179,22 @@ describe('settings page', () => {
         ]);
     });
 
-    it('retries removing a factor and regenerating codes after the password, without asking "are you sure" again', async () => {
-        const sure = vi.spyOn(window, 'confirm').mockReturnValue(true);
-        render(<MfaSettings {...props} />);
+    it('retries removing a factor and making new codes after the password, without asking "are you sure" again', async () => {
+        render(<MfaSettings {...props} recoveryCodes={['ccccc-33333']} />);
 
         inertia.respondWith(passwordRequired);
         await userEvent.click(screen.getByRole('button', { name: 'Remove Email' }));
+        await userEvent.click(within(screen.getByRole('group', { name: 'Remove Email?' })).getByRole('button', { name: 'Remove' }));
         const emailCard = screen.getByRole('heading', { name: 'Email' }).closest('article') as HTMLElement;
         expect(within(emailCard).getByLabelText('Password')).toBeInTheDocument();
+        expect(screen.queryByRole('group', { name: 'Remove Email?' })).not.toBeInTheDocument();
         await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
 
         inertia.respondWith(passwordRequired);
         await userEvent.click(screen.getByRole('button', { name: 'New codes' }));
-        const recoveryCard = screen.getByRole('heading', { name: 'Recovery codes' }).closest('article') as HTMLElement;
-        expect(within(recoveryCard).getByLabelText('Password')).toBeInTheDocument();
-        await userEvent.type(screen.getByLabelText('Password'), 'secret{Enter}');
+        await userEvent.click(screen.getByRole('button', { name: 'Generate new codes' }));
+        const dialog = screen.getByRole('dialog', { name: 'Confirm your password' });
+        await userEvent.type(within(dialog).getByLabelText('Password'), 'secret{Enter}');
 
         expect(inertia.requests.map((r) => `${r.method} ${r.url}`)).toEqual([
             'delete /mfa/factors/7',
@@ -174,7 +204,23 @@ describe('settings page', () => {
             `post ${urls.confirmPassword}`,
             `post ${urls.recoveryCodes}`,
         ]);
-        expect(sure).toHaveBeenCalledTimes(2);
+        expect(screen.getByRole('dialog', { name: 'Save your new recovery codes' })).toHaveTextContent('ccccc-33333');
+    });
+
+    it('drops new codes when the password is cancelled', async () => {
+        render(<MfaSettings {...props} />);
+
+        inertia.respondWith(passwordRequired);
+        await userEvent.click(screen.getByRole('button', { name: 'New codes' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Generate new codes' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(inertia.requests.map((r) => r.url)).toEqual([urls.recoveryCodes]);
+
+        // Opened again, it starts at the question.
+        await userEvent.click(screen.getByRole('button', { name: 'New codes' }));
+        expect(screen.getByRole('dialog', { name: 'Generate new recovery codes?' })).toBeInTheDocument();
     });
 
     it('keeps asking after a wrong password, and drops the change on cancel', async () => {
@@ -209,8 +255,8 @@ describe('settings page', () => {
         await userEvent.click(screen.getByRole('button', { name: 'Close' }));
 
         inertia.respondWith(passwordRequired);
-        vi.spyOn(window, 'confirm').mockReturnValue(true);
         await userEvent.click(screen.getByRole('button', { name: 'Remove Email' }));
+        await userEvent.click(within(screen.getByRole('group', { name: 'Remove Email?' })).getByRole('button', { name: 'Remove' }));
         expect(screen.getByRole('button', { name: 'Try again in 1:00' })).toBeDisabled();
     });
 
@@ -464,6 +510,7 @@ describe('settings page', () => {
 
             await userEvent.click(screen.getByRole('button', { name: 'Forget Firefox on Windows' }));
             await userEvent.click(screen.getByRole('button', { name: 'Forget all' }));
+            await userEvent.click(within(screen.getByRole('group', { name: 'Forget all trusted browsers?' })).getByRole('button', { name: 'Forget all' }));
 
             expect(inertia.requests).toEqual([
                 { method: 'delete', url: '/mfa/trusted-browsers/3', data: null },
