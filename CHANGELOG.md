@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.7.0 - 2026-10-10
+
+_Changes since `v0.6.0`._
+
+### Breaking changes
+
+- **ui:** confirm inside the page instead of window.confirm() (da03f5c)
+
+### Fixes
+
+- **ui:** scale the QR code to fit its padded frame (a0e47e9)
+- **settings:** reopen the recovery codes step after a full page load (48cc230)
+
+### Documentation
+
+- **plan:** log the settings fixes and in-page confirmations (f91e215)
+
 ## v0.6.0 - 2026-10-10
 
 _Changes since `v0.5.2`._
