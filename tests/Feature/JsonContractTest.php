@@ -70,7 +70,8 @@ it('POST /mfa/challenge/send, /mfa/challenge, /mfa/challenge/recover', function 
 
 it('verification lifetime: 403 with the reason, 401 when it logs out, the deadlines and keep-alive', function () {
     $this->freezeSecond();
-    config(['mfa.enforcement.policy' => EnforceForAdmins::class]);
+    // Each answer under its own on_expiry: challenge first, logout below.
+    config(['mfa.enforcement.policy' => EnforceForAdmins::class, 'mfa.lifetime.profiles.enforced.on_expiry' => 'challenge']);
     [$admin, $factor] = $this->userWithFactor(attributes: ['is_admin' => true]);
     $this->loginWithSession($admin)->postJson('/mfa/challenge', ['factor_id' => $factor->id, 'code' => $this->currentTotpCode($factor)])->assertOk();
 

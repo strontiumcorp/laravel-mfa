@@ -356,7 +356,8 @@ it('stops a remember-me cookie from logging the user back in after a reset', fun
 });
 
 it('forgets passed steps when a session is revoked', function () {
-    config(['mfa.enforcement.required_types' => ['totp', 'email']]);
+    // The challenge path (the session stays): what is left of it is the point.
+    config(['mfa.enforcement.required_types' => ['totp', 'email'], 'mfa.lifetime.profiles.enforced.on_expiry' => 'challenge']);
     [$admin, $totp] = $this->userWithFactor(FactorType::Totp, ['is_admin' => true]);
     $this->createMfaFactor($admin, FactorType::Email);
     $this->actingAsMfaVerified($admin);

@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Artisan;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
+use StrontiumCorp\LaravelMfa\Support\VerificationLifetime;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\ExemptSocialLogins;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\PlainUser;
 
@@ -296,8 +297,13 @@ it('shows the lifetime profile and the last revocation in mfa:status', function 
     config(['mfa.enforcement.policy' => EnforceForAdmins::class]);
     [$admin] = $this->userWithFactor(FactorType::Totp, ['is_admin' => true]);
 
+    // As configured: the summary follows the enforced profile.
+    $profile = app(VerificationLifetime::class)->profile('enforced');
+    $summary = "enforced ({$profile['absolute']} min window, {$profile['idle']} min idle, {$profile['grace']} min grace"
+        .($profile['on_expiry'] === 'logout' ? ', logs out' : '').')';
+
     $this->artisan('mfa:status', ['user' => $admin->email])->assertSuccessful()
-        ->expectsOutputToContain('enforced (240 min window, 25 min idle, 10 min grace)')
+        ->expectsOutputToContain($summary)
         ->expectsOutputToContain('never');
 
     Mfa::revokeVerifications($admin);

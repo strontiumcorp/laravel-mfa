@@ -30,8 +30,14 @@ use StrontiumCorp\LaravelMfa\Tests\Fixtures\WriteFailingCacheStore;
 
 beforeEach(function () {
     $this->freezeSecond();
-    // Idle off unless a test is about it: most travel hours at a time.
-    config(['mfa.enforcement.policy' => EnforceForAdmins::class, 'mfa.lifetime.profiles.enforced.idle' => null]);
+    // Idle off unless a test is about it: most travel hours at a time. The
+    // challenge path unless a test is about logging out, whatever the shipped
+    // default (on_expiry): these tests are about when a verification ends.
+    config([
+        'mfa.enforcement.policy' => EnforceForAdmins::class,
+        'mfa.lifetime.profiles.enforced.idle' => null,
+        'mfa.lifetime.profiles.enforced.on_expiry' => 'challenge',
+    ]);
 
     // An enforced admin who just passed the challenge (TOTP).
     $this->verifiedAdmin = function (): array {
@@ -64,7 +70,8 @@ describe('profiles', function () {
         $settings = app(VerificationLifetime::class);
         $defaults = (require __DIR__.'/../../config/mfa.php')['lifetime']['profiles'];
 
-        expect($defaults['enforced'])->toMatchArray(['absolute' => 240, 'idle' => 25, 'reminder' => 30, 'grace' => 10, 'on_expiry' => 'challenge'])
+        expect($defaults['enforced'])->toMatchArray(['absolute' => 240, 'idle' => 25, 'reminder' => 30, 'grace' => 10])
+            ->and($defaults['enforced']['on_expiry'])->toBeIn(['challenge', 'logout'])
             ->and($defaults['default'])->toMatchArray(['absolute' => null, 'idle' => null, 'grace' => null])
             ->and($settings->profileFor($this->makeUser(['is_admin' => true])))->toBe('enforced')
             ->and($settings->profileFor($this->makeUser()))->toBe('default');
@@ -88,6 +95,16 @@ describe('profiles', function () {
 
         config(['mfa.lifetime.profiles.support' => null]);
         expect($settings->profileFor($this->makeUser(['is_admin' => true])))->toBe('default');
+    });
+
+    it('ends an enforced window the way the shipped on_expiry says', function () {
+        $onExpiry = (require __DIR__.'/../../config/mfa.php')['lifetime']['profiles']['enforced']['on_expiry'];
+        config(['mfa.lifetime.profiles.enforced.on_expiry' => $onExpiry]);
+        ($this->verifiedAdmin)();
+        $this->travel(251)->minutes();
+
+        $this->get('/dashboard')->assertRedirect(route($onExpiry === 'logout' ? 'login' : 'mfa.challenge'));
+        expect(Auth::guard('web')->check())->toBe($onExpiry !== 'logout');
     });
 
     it('leaves default users verified for the whole session, as before', function () {
