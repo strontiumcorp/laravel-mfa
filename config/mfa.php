@@ -182,8 +182,9 @@ return [
     |   grace     => after `absolute` ends, page visits are challenged but
     |                form submits and background requests still pass for this
     |                long, so the end never breaks a request in progress.
-    |   on_expiry => "challenge": ask for a code again, still logged in.
-    |                "logout": end the login too (also forgets remember-me).
+    |   on_expiry => "logout": end the login too (also forgets remember-me);
+    |                they sign in again. The enforced profile's default.
+    |                "challenge": ask for a code again, still logged in.
     | idle_ignore => route names or paths that never count as activity
     |                (e.g. an autosave POST).
     | no_grace    => route names or paths that are challenged at once when
@@ -219,7 +220,7 @@ return [
         'no_grace' => [],
         'reminder' => [
             'title' => 'Two-factor check coming up',
-            'body' => "For your security you'll be asked for your sign-in code again :when. Do it now so it doesn't interrupt you.",
+            'body' => "For your security you'll need to verify it's you again :when. Do it now so it doesn't interrupt you.",
             'button' => 'Verify now',
             'dismiss_label' => 'Later',
         ],

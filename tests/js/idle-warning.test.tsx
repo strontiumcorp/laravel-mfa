@@ -69,7 +69,7 @@ describe('MfaIdleWarning', () => {
         await advance(23 * 60_000);
         await advance(2 * 60_000);
 
-        expect(screen.getByRole('region', { name: "Verify it's you" })).toHaveTextContent('You were away for a while.');
+        expect(screen.getByRole('region', { name: "Verify it's you" })).toHaveTextContent("You were away for a while. Continue to verify it's you again.");
         fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
         expect(onContinue).toHaveBeenCalledOnce();
     });

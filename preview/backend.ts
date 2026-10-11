@@ -113,7 +113,7 @@ export const IDLE_SECONDS = 25 * 60;
 
 export const LIFETIME_REMINDER = {
     title: 'Two-factor check coming up',
-    body: "For your security you'll be asked for your sign-in code again :when. Do it now so it doesn't interrupt you.",
+    body: "For your security you'll need to verify it's you again :when. Do it now so it doesn't interrupt you.",
     button: 'Verify now',
     dismissLabel: 'Later',
 };

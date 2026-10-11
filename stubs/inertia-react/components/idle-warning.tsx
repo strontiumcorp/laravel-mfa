@@ -1,11 +1,11 @@
 // Published by strontiumcorp/laravel-mfa. This file is yours — restyle freely.
 //
 // "Still there?": a small floating card shown shortly before the session's
-// idle timeout (config mfa.lifetime, a profile's `idle`) would ask for the
-// sign-in code again. "Stay signed in" tells the app the user is here; it can
-// never extend the fixed window, only the idle timeout. Once the timeout has
-// passed it says so, and "Continue" reloads the page (the app then asks for
-// the code and comes back here). Standalone: needs only React and ./icons,
+// idle timeout (config mfa.lifetime, a profile's `idle`) would sign the user
+// out, or ask for their code again (on_expiry). "Stay signed in" tells the app
+// the user is here; it can never extend the fixed window, only the idle
+// timeout. Once the timeout has passed it says so, and "Continue" reloads the
+// page (the app then signs them in, or asks for the code, and comes back here). Standalone: needs only React and ./icons,
 // and knows nothing about Inertia or routes.
 //
 // In an Inertia app, useMfaIdleWarning() from the MFA pages' mfa-context.ts
@@ -72,10 +72,10 @@ export default function MfaIdleWarning({
     onContinue = () => window.location.reload(),
     warnSeconds = 120,
     title = 'Still there?',
-    body = "For your security, you'll need your sign-in code again in :countdown unless you stay.",
+    body = "For your security, you'll need to verify it's you again in :countdown unless you stay.",
     stayLabel = 'Stay signed in',
     endedTitle = "Verify it's you",
-    endedBody = 'You were away for a while. Enter your sign-in code to continue.',
+    endedBody = "You were away for a while. Continue to verify it's you again.",
     continueLabel = 'Continue',
     position = 'top-center',
     className = '',
