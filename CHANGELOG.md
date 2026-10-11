@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.8.2 - 2026-10-11
+
+_Changes since `v0.8.1`._
+
+### Fixes
+
+- **ui:** say "verify it's you" where the next step may be a sign-in (a46cd55)
+
+### Documentation
+
+- logout is the enforced profile's default on_expiry (b951470)
+
+### Other
+
+- follow the configured on_expiry instead of the shipped default (f278603)
+- default to logout when absolute window session expires (9bd3d23)
+
 ## v0.8.1 - 2026-10-11
 
 _Changes since `v0.8.0`._
