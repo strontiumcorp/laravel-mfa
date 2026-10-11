@@ -803,6 +803,7 @@ describe('responses and controllers', function () {
     });
 
     it('returns retry_after when resending during enrollment', function () {
+        $this->freezeSecond(); // exact waits
         Mfa::fakeSms();
         $user = $this->makeUser();
         $this->loginWithSession($user);

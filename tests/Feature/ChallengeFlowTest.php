@@ -316,6 +316,9 @@ it('tells the page how many digits each factor\'s codes have', function () {
 describe('send state on the challenge page', function () {
     // The page shows each email/SMS factor's outstanding code and cooldown, so
     // a refresh keeps the countdown (and the page doesn't send a second code).
+
+    // Exact waits: a send and the page read after it must not straddle a second.
+    beforeEach(fn () => $this->freezeSecond());
     $sendState = function ($test): array {
         $page = $test->getJson(route('mfa.challenge'))->assertOk();
 

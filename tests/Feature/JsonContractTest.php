@@ -51,6 +51,7 @@ it('POST /mfa/challenge with remember, then the trusted browsers in /mfa/setting
 });
 
 it('POST /mfa/challenge/send, /mfa/challenge, /mfa/challenge/recover', function () {
+    $this->freezeSecond(); // exact waits
     $sms = Mfa::fakeSms();
     [$user, $factor] = $this->userWithFactor(FactorType::Sms);
     $code = app(RecoveryCodes::class)->generate($user)[0];
