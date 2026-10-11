@@ -84,7 +84,8 @@ final class TrustedBrowsers
             'guard' => $guard,
             'token_hash' => $this->hasher->hash($token, self::SCOPE),
             'password_hash' => $this->passwordHash($user),
-            'label' => self::label($request->userAgent()),
+            'label' => self::labelFor($request),
+            'user_agent' => ($agent = $request->userAgent()) === null || $agent === '' ? null : mb_substr($agent, 0, self::USER_AGENT_LENGTH),
             'expires_at' => $expiresAt,
             'created_at' => now(),
         ]);
@@ -223,34 +224,105 @@ final class TrustedBrowsers
         return $request->hasSession() && $request->session()->has(self::SESSION_KEY.'.'.$guard.'.'.$user->getAuthIdentifier());
     }
 
-    /** A short name for the browser, e.g. "Chrome on Mac", from its user agent. */
-    public static function label(?string $userAgent): ?string
+    /** The longest User-Agent kept with a trusted browser. */
+    public const USER_AGENT_LENGTH = 1024;
+
+    /**
+     * A short name for the browser of this request, e.g. "Chrome on Mac":
+     * from the client hints Chromium-based browsers send (they name Brave,
+     * Edge or Opera, and the real platform behind a reduced user agent),
+     * else from the user agent. Both come from the browser, so a browser
+     * that pretends to be another (DevTools' device mode) is named as it
+     * pretends; nothing on the server can tell otherwise.
+     */
+    public static function labelFor(Request $request): ?string
     {
-        if ($userAgent === null || $userAgent === '') {
+        return self::label($request->userAgent(), [
+            'sec-ch-ua' => $request->headers->get('Sec-CH-UA'),
+            'sec-ch-ua-platform' => $request->headers->get('Sec-CH-UA-Platform'),
+        ]);
+    }
+
+    /**
+     * A short name from a user agent and, when given, client hints
+     * (`sec-ch-ua`, `sec-ch-ua-platform` header values), which win.
+     *
+     * @param  array<string, string|null>  $clientHints
+     */
+    public static function label(?string $userAgent, array $clientHints = []): ?string
+    {
+        $browser = self::browserFromHints((string) ($clientHints['sec-ch-ua'] ?? ''));
+        $os = self::platformFromHints((string) ($clientHints['sec-ch-ua-platform'] ?? ''));
+
+        if (($userAgent === null || $userAgent === '') && $browser === null) {
             return null;
         }
 
-        $browser = match (true) {
-            str_contains($userAgent, 'Edg/') => 'Edge',
-            str_contains($userAgent, 'OPR/') => 'Opera',
-            str_contains($userAgent, 'Firefox/') || str_contains($userAgent, 'FxiOS/') => 'Firefox',
-            str_contains($userAgent, 'Chrome/') || str_contains($userAgent, 'CriOS/') => 'Chrome',
-            str_contains($userAgent, 'Safari/') => 'Safari',
+        $agent = (string) $userAgent;
+        $browser ??= match (true) {
+            str_contains($agent, 'SamsungBrowser/') => 'Samsung Internet',
+            str_contains($agent, 'Edg/') || str_contains($agent, 'EdgA/') || str_contains($agent, 'EdgiOS/') => 'Edge',
+            str_contains($agent, 'OPR/') || str_contains($agent, 'OPiOS/') => 'Opera',
+            str_contains($agent, 'YaBrowser/') => 'Yandex Browser',
+            str_contains($agent, 'Vivaldi/') => 'Vivaldi',
+            str_contains($agent, 'Firefox/') || str_contains($agent, 'FxiOS/') => 'Firefox',
+            str_contains($agent, 'Chrome/') || str_contains($agent, 'CriOS/') => 'Chrome',
+            str_contains($agent, 'Safari/') => 'Safari',
             default => 'A browser',
         };
 
-        $os = match (true) {
-            str_contains($userAgent, 'iPhone') => 'iPhone',
-            str_contains($userAgent, 'iPad') => 'iPad',
-            str_contains($userAgent, 'Android') => 'Android',
-            str_contains($userAgent, 'Windows') => 'Windows',
-            str_contains($userAgent, 'Macintosh') || str_contains($userAgent, 'Mac OS X') => 'Mac',
-            str_contains($userAgent, 'CrOS') => 'ChromeOS',
-            str_contains($userAgent, 'Linux') => 'Linux',
+        $os ??= match (true) {
+            str_contains($agent, 'iPhone') => 'iPhone',
+            str_contains($agent, 'iPad') => 'iPad',
+            str_contains($agent, 'Android') => 'Android',
+            str_contains($agent, 'Windows') => 'Windows',
+            str_contains($agent, 'Macintosh') || str_contains($agent, 'Mac OS X') => 'Mac',
+            str_contains($agent, 'CrOS') => 'ChromeOS',
+            str_contains($agent, 'Linux') => 'Linux',
             default => null,
         };
 
         return $os === null ? $browser : "{$browser} on {$os}";
+    }
+
+    /** The browser named in a `Sec-CH-UA` brand list, skipping Chromium itself and the GREASE brand; null if none. */
+    private static function browserFromHints(string $brands): ?string
+    {
+        if ($brands === '' || strlen($brands) > 512 || preg_match_all('/"([^"]{1,64})";\s*v="[^"]{0,32}"/', $brands, $matches) === 0) {
+            return null;
+        }
+
+        $names = array_values(array_filter(
+            $matches[1],
+            // GREASE: a made-up brand ("Not)A;Brand", "Not A(Brand") that only tests parsers.
+            fn (string $name) => preg_match('/^Not.?A.?Brand$/i', $name) !== 1,
+        ));
+        $named = array_values(array_filter($names, fn (string $name) => $name !== 'Chromium'));
+
+        $name = $named[0] ?? ($names === [] ? null : 'Chromium');
+
+        return match ($name) {
+            null => null,
+            'Google Chrome' => 'Chrome',
+            'Microsoft Edge' => 'Edge',
+            'Opera', 'Opera GX' => 'Opera',
+            'YaBrowser', 'Yandex' => 'Yandex Browser',
+            default => preg_match('/^[\w .-]+$/u', $name) === 1 ? $name : null,
+        };
+    }
+
+    /** The platform from `Sec-CH-UA-Platform`; null when absent or unknown. */
+    private static function platformFromHints(string $platform): ?string
+    {
+        return match (trim($platform, '" ')) {
+            'Windows' => 'Windows',
+            'macOS' => 'Mac',
+            'Linux' => 'Linux',
+            'Android' => 'Android',
+            'Chrome OS', 'ChromeOS', 'Chromium OS' => 'ChromeOS',
+            'iOS' => 'iPhone',
+            default => null,
+        };
     }
 
     private function remember(Request $request, string $guard, MultiFactorAuthenticatable $user, MfaTrustedBrowser $browser): void

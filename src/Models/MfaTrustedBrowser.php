@@ -18,6 +18,7 @@ use StrontiumCorp\LaravelMfa\Mfa;
  * @property string $token_hash
  * @property string $password_hash
  * @property string|null $label
+ * @property string|null $user_agent
  * @property Carbon $expires_at
  * @property Carbon|null $last_used_at
  * @property Carbon|null $created_at

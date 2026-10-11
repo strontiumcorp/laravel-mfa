@@ -382,7 +382,93 @@ it('names browsers from their user agent', function (?string $agent, ?string $la
     ['Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36', 'Chrome on Android'],
     ['curl/8.0', 'A browser'],
     [null, null],
+    // Browsers built on Chrome that name themselves in the user agent.
+    ['Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/26.0 Chrome/122.0.0.0 Mobile Safari/537.36', 'Samsung Internet on Android'],
+    ['Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36 EdgA/129.0', 'Edge on Android'],
+    ['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 EdgiOS/129.0 Mobile/15E148 Safari/605.1.15', 'Edge on iPhone'],
+    ['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/129.0 Mobile/15E148 Safari/604.1', 'Chrome on iPhone'],
+    ['Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/131.0 Mobile/15E148 Safari/605.1.15', 'Firefox on iPad'],
+    ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36 OPR/114.0', 'Opera on Windows'],
+    ['Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36 Vivaldi/6.9', 'Vivaldi on Linux'],
+    ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 YaBrowser/24.10 Safari/537.36', 'Yandex Browser on Windows'],
+    ['Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36', 'Chrome on ChromeOS'],
+    ['Mozilla/5.0 (X11; Ubuntu; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36', 'Chrome on Linux'],
+    ['Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15', 'Safari on Mac'],
 ]);
+
+it('prefers the client hints Chrome-based browsers send over the user agent string', function (string $agent, array $hints, string $label) {
+    expect(TrustedBrowsers::label($agent, $hints))->toBe($label);
+})->with([
+    // Brave and other Chromium browsers send Chrome's user agent; only the hints name them.
+    'Brave' => [
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
+        ['sec-ch-ua' => '"Brave";v="152", "Chromium";v="152", "Not)A;Brand";v="99"', 'sec-ch-ua-platform' => '"Linux"'],
+        'Brave on Linux',
+    ],
+    'Chrome on a reduced user agent' => [
+        'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Mobile Safari/537.36',
+        ['sec-ch-ua' => '"Not)A;Brand";v="8", "Chromium";v="152", "Google Chrome";v="152"', 'sec-ch-ua-platform' => '"Android"'],
+        'Chrome on Android',
+    ],
+    'Edge on a Mac' => [
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 Edg/152.0',
+        ['sec-ch-ua' => '"Microsoft Edge";v="152", "Chromium";v="152", "Not-A.Brand";v="24"', 'sec-ch-ua-platform' => '"macOS"'],
+        'Edge on Mac',
+    ],
+    'ChromeOS' => [
+        'Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
+        ['sec-ch-ua' => '"Google Chrome";v="152", "Chromium";v="152"', 'sec-ch-ua-platform' => '"Chrome OS"'],
+        'Chrome on ChromeOS',
+    ],
+    'Chromium alone' => [
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
+        ['sec-ch-ua' => '"Chromium";v="152", "Not A(Brand";v="24"', 'sec-ch-ua-platform' => '"Linux"'],
+        'Chromium on Linux',
+    ],
+    'unknown platform: the user agent decides' => [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
+        ['sec-ch-ua' => '"Google Chrome";v="152"', 'sec-ch-ua-platform' => '"Unknown"'],
+        'Chrome on Windows',
+    ],
+    'garbage hints are ignored' => [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
+        ['sec-ch-ua' => '<script>', 'sec-ch-ua-platform' => '"'.str_repeat('x', 200).'"'],
+        'Chrome on Windows',
+    ],
+]);
+
+it('names a trusted browser from the request, client hints included', function () {
+    [$user, $factor] = $this->userWithFactor();
+    $this->loginWithSession($user)->withHeaders([
+        'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
+        'Sec-CH-UA' => '"Brave";v="152", "Chromium";v="152", "Not)A;Brand";v="99"',
+        'Sec-CH-UA-Platform' => '"Linux"',
+    ])->postJson('/mfa/challenge', ['factor_id' => $factor->id, 'code' => $this->currentTotpCode($factor), 'remember' => true])->assertOk();
+
+    expect(MfaTrustedBrowser::query()->sole()->label)->toBe('Brave on Linux');
+});
+
+it('adds the user_agent column to a table made by the old create migration, and nothing when it is there', function () {
+    $migration = require __DIR__.'/../../database/migrations/2026_10_11_000001_add_user_agent_to_mfa_trusted_browsers_table.php';
+
+    $migration->up(); // fresh install: the create migration made it already
+    expect(Schema::hasColumn('mfa_trusted_browsers', 'user_agent'))->toBeTrue();
+
+    Schema::table('mfa_trusted_browsers', fn ($table) => $table->dropColumn('user_agent')); // as before this release
+    $migration->up();
+    expect(Schema::hasColumn('mfa_trusted_browsers', 'user_agent'))->toBeTrue();
+});
+
+it('keeps the raw user agent with the browser, capped in length', function () {
+    [$user, $factor] = $this->userWithFactor();
+    $agent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36 '.str_repeat('x', 2000);
+    $this->loginWithSession($user)->withHeader('User-Agent', $agent)
+        ->postJson('/mfa/challenge', ['factor_id' => $factor->id, 'code' => $this->currentTotpCode($factor), 'remember' => true])->assertOk();
+
+    $browser = MfaTrustedBrowser::query()->sole();
+    expect($browser->user_agent)->toBe(mb_substr($agent, 0, 1024))
+        ->and($browser->label)->toBe('Chrome on Linux');
+});
 
 describe('review fixes', function () {
     it('keeps trusting browsers after an APP_KEY rotation that lists the old key in APP_PREVIOUS_KEYS', function () {

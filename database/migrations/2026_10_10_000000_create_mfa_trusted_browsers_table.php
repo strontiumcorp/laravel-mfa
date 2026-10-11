@@ -22,6 +22,7 @@ return new class extends Migration
             $table->string('token_hash', 64)->unique();
             $table->string('password_hash', 64);        // keyed hash of the password hash: a password change revokes
             $table->string('label', 100)->nullable();   // e.g. "Chrome on Mac"
+            $table->string('user_agent', 1024)->nullable(); // the User-Agent it was trusted with
             $table->timestamp('expires_at');
             $table->timestamp('last_used_at')->nullable();
             $table->timestamp('created_at')->nullable();
