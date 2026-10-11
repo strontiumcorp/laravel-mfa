@@ -94,7 +94,7 @@ The worker needs no `--tries`: the job sets its own tries and backoff (`delivery
 | `routes.confirm_middleware` | `[]` (default). `['password.confirm']` sends users to the app's own confirm-password page instead of MFA's prompt. |
 | `enrollment_verification` | Keep the default: an enforced user proves they own the account with a code emailed to them before adding their first method, so a leaked password alone can't enroll the attacker's authenticator. For users without an email address, or roles whose mailbox can't be trusted (`email => false`), support issues a one-time link with `php artisan mfa:enrollment-link <email>`. See [configuration.md](configuration.md#enrollment-verification). |
 | `trusted_browsers` | On by default (`MFA_TRUSTED_BROWSERS`): "Don't ask again on this browser for 30 days" on the challenge. Never offered to users with a fixed lifetime window or idle timeout (enforced users by default). See [configuration.md](configuration.md#trusted-browsers). |
-| `lifetime` | Keep the defaults: enforced users are verified for 4 hours (`MFA_ENFORCED_LIFETIME`), asked again after 25 minutes idle (`MFA_ENFORCED_IDLE`), reminded 30 minutes before the end, with a 10-minute grace (`MFA_ENFORCED_GRACE`) so the end never breaks a form submit; everyone else stays verified until their session ends. `session.lifetime` must be longer than the idle timeout. See [configuration.md](configuration.md#verification-lifetime). |
+| `lifetime` | Keep the defaults: enforced users are logged out after 4 hours (`MFA_ENFORCED_LIFETIME`) or 25 minutes idle (`MFA_ENFORCED_IDLE`), or asked for a code instead with `MFA_ENFORCED_ON_EXPIRY=challenge`; they are reminded 30 minutes before the end, with a 10-minute grace (`MFA_ENFORCED_GRACE`) so the end never breaks a form submit; everyone else stays verified until their session ends. `session.lifetime` must be longer than the idle timeout. See [configuration.md](configuration.md#verification-lifetime). |
 | `notifications` | On by default: owners are emailed when a method is added or removed, recovery codes are created or used, and when codes keep being requested. Needs a working mailer; turn off any you already send. See [configuration.md](configuration.md#security-notifications). |
 | `middleware.except` | Routes a logged-in user must reach before passing MFA (e.g. a language switcher). Requests without a session login, such as webhooks, already pass. |
 
@@ -193,7 +193,7 @@ The published files are the app's own: restyle and rearrange them freely. `mfa:i
   <MfaIdleWarning {...useMfaIdleWarning()} />
   ```
 
-  Two minutes before the [idle timeout](configuration.md#verification-lifetime) it floats a "Still there?" card (top centre by default) with **Stay signed in**, after asking the server for the current deadline (another tab may have been active). Staying POSTs to `/mfa/session/keep-alive` with `fetch()` and the `XSRF-TOKEN` cookie as the header, as axios does. Once the timeout has passed it says so, and **Continue** reloads the page, which asks for the code and comes back.
+  Two minutes before the [idle timeout](configuration.md#verification-lifetime) it floats a "Still there?" card (top centre by default) with **Stay signed in**, after asking the server for the current deadline (another tab may have been active). Staying POSTs to `/mfa/session/keep-alive` with `fetch()` and the `XSRF-TOKEN` cookie as the header, as axios does. Once the timeout has passed it says so, and **Continue** reloads the page, which signs the admin in again (or, with `on_expiry: challenge`, asks for the code) and comes back. The copy says "verify it's you" so it fits either; pass `body`, `endedBody` etc. to change it.
 
   While an admin impersonates a user, pass your app's own "is impersonating" state as `disabled`, e.g. `<MfaEnableNudge {...useMfaNudge()} disabled={isImpersonating} />`. The admin can still close it for the page they're on, but nothing is saved, so they can't hide the user's nudge on the user's devices.
 
@@ -321,7 +321,7 @@ Manual check:
 - An admin without MFA is sent to enroll, gets an email code before adding a method, and gets a "method added" email afterwards.
 - A tab left open on a page that polls the backend lands on the challenge (or enrollment) after the session ends, and verifying returns to the page, not to the polled URL.
 - Impersonation, webhooks and API keys still work.
-- An admin (enforced): the "Two-factor check coming up" card 30 minutes before the 4-hour window ends, "Still there?" two minutes before the idle timeout, and a form submitted just after the window ended still saves (shorten `MFA_ENFORCED_LIFETIME` and `MFA_ENFORCED_IDLE` locally to see them).
+- An admin (enforced): the "Two-factor check coming up" card 30 minutes before the 4-hour window ends, "Still there?" two minutes before the idle timeout, a form submitted just after the window ended still saves, and the next page visit signs the admin out (shorten `MFA_ENFORCED_LIFETIME` and `MFA_ENFORCED_IDLE` locally to see them).
 - `php artisan mfa:reset <email>` signs that user out of every session, and support's admin panel does the same with `Mfa::reset($user)`.
 - `php artisan mfa:status <email>` shows the attempts.
 

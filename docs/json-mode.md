@@ -29,7 +29,7 @@ HTTP/1.1 403 Forbidden
 
 When an earlier verification of this session has just ended, the body also has `"reason"`: `"absolute"` (the [lifetime](configuration.md#verification-lifetime) window and its grace ran out), `"idle"` (no activity for the profile's `idle` minutes) or `"revoked"` (an administrator's `Mfa::reset()` / `mfa:reset`, or `Mfa::revokeVerifications()`). Only the request that ends it carries it; the next ones are plain `mfa_required`.
 
-A profile with `on_expiry: "logout"` logs the user out instead:
+A profile with `on_expiry: "logout"` (the enforced profile's default) logs the user out instead, and an administrator's reset always does:
 
 ```http
 HTTP/1.1 401 Unauthorized

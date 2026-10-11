@@ -188,7 +188,7 @@ All taken by the maintainer:
 
 1. `[x]` "Revoke within 10 minutes" means the **grace period** (§3), 10 minutes by default, `grace => null` turns it off (2026-10-11). Delayed revocation of *other* sessions was rejected as a security gap: an administrator's MFA reset must end every session **immediately** (§6).
 2. `[x]` The `enforced` profile ships **active by default** (`feat!`, opt-out in the release notes) (2026-10-11).
-3. `[x]` On expiry: a config value per profile, `on_expiry` (`challenge` | `logout`, env `MFA_ENFORCED_ON_EXPIRY`), default **challenge** (2026-10-10). `logout` must be fully implemented and tested now, so switching later is a config change only.
+3. `[x]` On expiry: a config value per profile, `on_expiry` (`challenge` | `logout`, env `MFA_ENFORCED_ON_EXPIRY`), default **challenge** (2026-10-10); the enforced profile's default changed to **logout** by the maintainer after v0.8.1 (2026-10-11). `logout` must be fully implemented and tested now, so switching later is a config change only.
 4. `[x]` Idle timeout: **25 minutes** by default (2026-10-10).
 5. `[x]` Rename `trustReminder` → `reverifyReminder` (breaking for published stubs, upgrade note in integration.md) (2026-10-11).
 6. `[x]` Old trusted-browser rows of enforced users: nothing to clean up, trusted browsers haven't reached production (2026-10-11).
