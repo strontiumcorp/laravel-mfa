@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.8.1 - 2026-10-11
+
+_Changes since `v0.8.0`._
+
+### Fixes
+
+- name trusted browsers from client hints and keep the raw user agent (6c515a6)
+
+### Documentation
+
+- **plan:** log the trusted browser names fix and the temporary migration (e639ed2)
+
+### Other
+
+- freeze the clock wherever a test asserts an exact retry_after (989957a)
+
 ## v0.8.0 - 2026-10-11
 
 _Changes since `v0.7.0`._
