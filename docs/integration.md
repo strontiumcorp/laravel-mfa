@@ -16,7 +16,7 @@ The repository is public, but the package isn't on Packagist, so add it as a VCS
 composer require strontiumcorp/laravel-mfa:^0.5
 ```
 
-No credentials are needed, locally, in CI or on servers. Below 1.0 a caret only allows patch releases (`^0.5` takes 0.5.x, not 0.6), so raise the constraint when you upgrade to a new minor version. If Composer hits GitHub's limit for anonymous API requests (busy CI runners), give it a token: `composer config --global github-oauth.github.com <token>`.
+No credentials are needed, locally, in CI or on servers. Once the repository is private, every place that runs Composer needs read access: use a `git` repository over SSH with a read-only deploy key, as described in [Installing from a private repository](private-repositories.md) (developer machines, GitHub Actions, Docker builds, servers). Below 1.0 a caret only allows patch releases (`^0.5` takes 0.5.x, not 0.6), so raise the constraint when you upgrade to a new minor version. If Composer hits GitHub's limit for anonymous API requests (busy CI runners), give it a token: `composer config --global github-oauth.github.com <token>`.
 
 ## 2. Publish and migrate
 

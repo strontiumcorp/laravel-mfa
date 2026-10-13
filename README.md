@@ -20,6 +20,8 @@ php artisan mfa:install
 php artisan migrate
 ```
 
+Once the repository is private, install over SSH with a deploy key instead: [docs/private-repositories.md](docs/private-repositories.md).
+
 Add the contract and trait to the User model:
 
 ```php
