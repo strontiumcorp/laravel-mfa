@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.9.0 - 2026-10-19
+
+_Changes since `v0.8.2`._
+
+### Breaking changes
+
+- **config:** require no factor type by default (a969bcf)
+
+### Features
+
+- **trusted-browsers:** keep the current browser trusted on "sign out of other devices" (9332cfc)
+- **ui:** theme the accent from the app's shadcn/ui primary (4dbdd9c)
+- **trusted-browsers:** pre-tick "don't ask again" after a remember-me sign-in (d442b1e)
+
+### Fixes
+
+- **ui:** hide a wrong code's error once the code is edited (e65a1a9)
+
+### Documentation
+
+- install from a private repository with deploy keys (c4bc814)
+
+### Other
+
+- **trusted-browsers:** skip the challenge every day of the trust (13fb300)
+- **trusted-browsers:** trust across real sign-ins and expired sessions (f023ada)
+
 ## v0.8.2 - 2026-10-11
 
 _Changes since `v0.8.1`._
