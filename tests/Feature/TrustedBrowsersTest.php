@@ -374,9 +374,9 @@ describe('across real sign-ins: a password login, the session expiring, remember
     }
 
     /** The app's login form: Auth::attempt() with or without "remember me". */
-    function signIn($test, array &$jar, $user, bool $remember): void
+    function signIn($test, array &$jar, $user, bool $remember, string $password = 'password'): void
     {
-        fromBrowser($test, $jar, fn ($t) => $t->post('/test-login', ['email' => $user->email, 'password' => 'password', 'remember' => $remember]))->assertOk();
+        fromBrowser($test, $jar, fn ($t) => $t->post('/test-login', ['email' => $user->email, 'password' => $password, 'remember' => $remember]))->assertOk();
     }
 
     /** Pass the challenge, ticking "don't ask again" or not. */
@@ -402,6 +402,18 @@ describe('across real sign-ins: a password login, the session expiring, remember
             request()->session()->regenerate();
 
             return 'signed in';
+        });
+        // The profile page's "Sign out of other devices" (Laravel re-hashes the password for it).
+        Route::middleware(['web', 'auth'])->post('/test-sign-out-other-devices', function () {
+            Auth::guard('web')->logoutOtherDevices(request('password'));
+
+            return 'signed out elsewhere';
+        });
+        // The profile page's password change.
+        Route::middleware(['web', 'auth'])->post('/test-change-password', function () {
+            Auth::user()->forceFill(['password' => request('password')])->save();
+
+            return 'changed';
         });
     });
 
@@ -509,6 +521,76 @@ describe('across real sign-ins: a password login, the session expiring, remember
         signIn($this, $jar, $user, remember: false);
         fromBrowser($this, $jar, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
         expect($jar)->not->toHaveKey($name); // and the server deletes it
+    });
+
+    describe('"sign out of other devices"', function () {
+        /** Two browsers the user trusted: $laptop, then $phone (the one they act from), on day 0. */
+        function twoTrustedBrowsers($test, $user, MfaFactor $factor, ?array &$laptop, ?array &$phone, bool $trustPhone = true): void
+        {
+            $laptop = $phone = [];
+            signIn($test, $laptop, $user, remember: false);
+            passChallenge($test, $laptop, $user, $factor, trust: true);
+            sessionExpires($test, $laptop);
+            signIn($test, $phone, $user, remember: false);
+            passChallenge($test, $phone, $user, $factor, trust: $trustPhone);
+        }
+
+        it('keeps trusting the browser that pressed it, and only that one', function () {
+            $this->freezeSecond();
+            Event::fake([BrowserTrusted::class, TrustedBrowsersForgotten::class]);
+            [$user, $factor] = $this->userWithFactor();
+            twoTrustedBrowsers($this, $user, $factor, $laptop, $phone);
+            $trustedAt = now()->toImmutable();
+
+            fromBrowser($this, $phone, fn ($t) => $t->post('/test-sign-out-other-devices', ['password' => 'password']))->assertOk();
+            Event::assertDispatched(TrustedBrowsersForgotten::class, fn ($e) => $e->context['count'] === 2 && $e->context['cause'] === 'password_changed');
+            Event::assertDispatched(BrowserTrusted::class, fn ($e) => ($e->context['via'] ?? null) === 'other_devices_signed_out');
+            expect(MfaTrustedBrowser::query()->count())->toBe(1);
+
+            // The next day: the phone still skips the code, the laptop is asked.
+            $this->travelTo($trustedAt->addDay());
+            sessionExpires($this, $phone);
+            signIn($this, $phone, $user, remember: false);
+            fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertOk();
+
+            sessionExpires($this, $laptop);
+            signIn($this, $laptop, $user, remember: false);
+            fromBrowser($this, $laptop, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
+
+            // Not extended: it ends when it would have.
+            $this->travelTo($trustedAt->addDays(30)->subMinute());
+            sessionExpires($this, $phone);
+            signIn($this, $phone, $user, remember: false);
+            fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertOk();
+            $this->travelTo($trustedAt->addDays(30));
+            sessionExpires($this, $phone);
+            signIn($this, $phone, $user, remember: false);
+            fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
+        });
+
+        it('trusts no browser when the one that pressed it was not trusted', function () {
+            [$user, $factor] = $this->userWithFactor();
+            twoTrustedBrowsers($this, $user, $factor, $laptop, $phone, trustPhone: false);
+
+            fromBrowser($this, $phone, fn ($t) => $t->post('/test-sign-out-other-devices', ['password' => 'password']))->assertOk();
+
+            expect(MfaTrustedBrowser::query()->count())->toBe(0);
+            sessionExpires($this, $phone);
+            signIn($this, $phone, $user, remember: false);
+            fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
+        });
+
+        it('still ends every browser, the current one too, on a real password change', function () {
+            [$user, $factor] = $this->userWithFactor();
+            twoTrustedBrowsers($this, $user, $factor, $laptop, $phone);
+
+            fromBrowser($this, $phone, fn ($t) => $t->post('/test-change-password', ['password' => 'a-new-password']))->assertOk();
+
+            expect(MfaTrustedBrowser::query()->count())->toBe(0);
+            sessionExpires($this, $phone);
+            signIn($this, $phone, $user, remember: false, password: 'a-new-password');
+            fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
+        });
     });
 
     it('still challenges the same user in a browser without the cookie (cleared cookies, a private window)', function () {

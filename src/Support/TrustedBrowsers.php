@@ -40,6 +40,9 @@ final class TrustedBrowsers
     /** Session: the trusted browser this session runs on, per guard and user ({id, expires_at}). */
     public const SESSION_KEY = 'mfa.trusted_until';
 
+    /** Request attribute: this request's browser, set aside while the password changes (setAsideCurrent()). */
+    private const SET_ASIDE = 'mfa.trusted_browser_set_aside';
+
     public function __construct(
         private readonly Mfa $mfa,
         private readonly CodeHasher $hasher,
@@ -228,6 +231,69 @@ final class TrustedBrowsers
     }
 
     /**
+     * Before a password change ends every trusted browser: note the one this
+     * request comes from, if it was trusted under the old password, so that
+     * Laravel's "sign out of other devices" can keep it (keepCurrent()). That
+     * action re-hashes an unchanged password; a real change or a reset never
+     * keeps it. Kept on the request, not here (Octane).
+     */
+    public function setAsideCurrent(MultiFactorAuthenticatable $user, string $oldPasswordHash): void
+    {
+        $request = $this->liveRequest();
+
+        if ($request === null || ! $this->offeredTo($user)) {
+            return;
+        }
+
+        foreach (MfaTrustedBrowser::query()->where('user_id', $user->getAuthIdentifier())->distinct()->pluck('guard') as $guard) {
+            $cookie = $this->sentCookie($request, (string) $guard, $user);
+            $browser = $cookie === null ? null : $this->find($user, (string) $guard, $cookie['token']);
+
+            if ($browser !== null && $this->hasher->matches($oldPasswordHash, $browser->password_hash, $this->passwordScope($user))) {
+                $request->attributes->set(self::SET_ASIDE.'.'.$guard.'.'.$user->getAuthIdentifier(), $browser->only([
+                    'guard', 'token_hash', 'label', 'user_agent', 'expires_at', 'last_used_at', 'created_at',
+                ]));
+            }
+        }
+    }
+
+    /**
+     * After "sign out of other devices" (Laravel's OtherDeviceLogout): trust
+     * the browser that asked for it again, as it was set aside (same cookie,
+     * same expiry, so never extended), under the new password hash.
+     */
+    public function keepCurrent(MultiFactorAuthenticatable $user, string $guard): void
+    {
+        $request = $this->liveRequest();
+        $key = self::SET_ASIDE.'.'.$guard.'.'.$user->getAuthIdentifier();
+        $kept = $request?->attributes->get($key);
+
+        if ($request === null || ! is_array($kept)) {
+            return;
+        }
+
+        $request->attributes->remove($key);
+
+        /** @var MfaTrustedBrowser $browser */
+        $browser = MfaTrustedBrowser::query()->create([
+            ...$kept,
+            'user_id' => $user->getAuthIdentifier(),
+            'password_hash' => $this->passwordHash($user),
+        ]);
+
+        if ($request->hasSession()) {
+            $this->remember($request, $guard, $user, $browser);
+        }
+
+        $this->events->dispatch(new BrowserTrusted($user, null, null, [
+            'trusted_browser_id' => $browser->getKey(),
+            'label' => $browser->label,
+            'expires_at' => $browser->expires_at->toIso8601String(),
+            'via' => 'other_devices_signed_out',
+        ]));
+    }
+
+    /**
      * The renewal reminder's window (trusted_browsers.reminder): when this
      * session runs on a trusted browser, [when its trust ends, when the
      * reminder starts], else null. Read from the session first, so most
@@ -365,10 +431,17 @@ final class TrustedBrowsers
 
     private function liveSession(): ?Session
     {
+        $request = $this->liveRequest();
+
+        return $request !== null && $request->hasSession() ? $request->session() : null;
+    }
+
+    private function liveRequest(): ?Request
+    {
         $container = Container::getInstance();
         $request = $container->bound('request') ? $container->make('request') : null;
 
-        return $request instanceof Request && $request->hasSession() ? $request->session() : null;
+        return $request instanceof Request ? $request : null;
     }
 
     private function find(MultiFactorAuthenticatable $user, string $guard, string $token): ?MfaTrustedBrowser
