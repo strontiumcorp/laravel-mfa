@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.9.1 - 2026-10-19
+
+_Changes since `v0.9.0`._
+
+### Other
+
+- nest no describe() (Pest 3.0 drops the outer beforeEach) (8d265a9)
+
 ## v0.9.0 - 2026-10-19
 
 _Changes since `v0.8.2`._
