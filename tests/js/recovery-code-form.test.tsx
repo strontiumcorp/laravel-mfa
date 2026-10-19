@@ -78,12 +78,31 @@ describe('MfaRecoveryCodeForm', () => {
 
     it('shows the error and keeps the code for correcting', async () => {
         const { rerender } = render(<MfaRecoveryCodeForm onSubmit={() => {}} />);
-        await userEvent.type(screen.getByRole('textbox', { name: 'Recovery code' }), 'abcde-1234');
+        await userEvent.type(screen.getByRole('textbox', { name: 'Recovery code' }), 'abcde-1234{Enter}');
 
+        rerender(<MfaRecoveryCodeForm onSubmit={() => {}} processing />);
         rerender(<MfaRecoveryCodeForm onSubmit={() => {}} error="Invalid recovery code." />);
 
         expect(screen.getByRole('alert')).toHaveTextContent('Invalid recovery code.');
         expect(screen.getByRole('textbox', { name: 'Recovery code' })).toHaveValue('abcde-1234');
+    });
+
+    it('hides the error once the code is edited and while the next one is checked, until it fails too', async () => {
+        const input = () => screen.getByRole('textbox', { name: 'Recovery code' });
+        const { rerender } = render(<MfaRecoveryCodeForm onSubmit={() => {}} error="Invalid recovery code." />);
+        expect(screen.getByRole('alert')).toHaveTextContent('Invalid recovery code.');
+
+        await userEvent.type(input(), 'abcde-12345');
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(input()).not.toHaveAttribute('aria-invalid');
+
+        await userEvent.type(input(), '{Enter}');
+        rerender(<MfaRecoveryCodeForm onSubmit={() => {}} processing error="Invalid recovery code." />);
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+        rerender(<MfaRecoveryCodeForm onSubmit={() => {}} error="Invalid recovery code." />);
+        expect(screen.getByRole('alert')).toHaveTextContent('Invalid recovery code.');
+        expect(input()).toHaveAttribute('aria-invalid', 'true');
     });
 
     it('is its own titled step', () => {

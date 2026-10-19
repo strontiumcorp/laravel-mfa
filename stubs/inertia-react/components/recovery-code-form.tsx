@@ -5,7 +5,7 @@
 // and knows nothing about Inertia or routes.
 //
 //     <MfaRecoveryCodeForm onSubmit={(code) => recover(code)} processing={processing} error={errors.code} onTryAnotherWay={back} />
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { MfaIconKey } from './icons';
 
 export type MfaRecoveryCodeFormProps = {
@@ -50,6 +50,20 @@ function firstOfSeveral(text: string): string | null {
 export default function MfaRecoveryCodeForm({ onSubmit, processing = false, error = null, onTryAnotherWay, onUseVerificationCode, onSignOut }: MfaRecoveryCodeFormProps) {
     const [code, setCode] = useState('');
     const id = useId();
+    // The error describes the code that failed: hidden once the user edits it,
+    // and while the next one is checked (the page keeps the old error until the
+    // answer comes, so a right code would look wrong until the redirect).
+    const [edited, setEdited] = useState(false);
+    const wasProcessing = useRef(processing);
+    useEffect(() => {
+        if (wasProcessing.current && !processing && error) setEdited(false);
+        wasProcessing.current = processing;
+    }, [processing, error]);
+    const showError = Boolean(error) && !edited && !processing;
+    const change = (value: string) => {
+        setCode(value);
+        setEdited(true);
+    };
     const input = useRef<HTMLInputElement>(null);
     // Where the caret goes after a paste was cut down to one code.
     const caret = useRef<number | null>(null);
@@ -70,7 +84,7 @@ export default function MfaRecoveryCodeForm({ onSubmit, processing = false, erro
         const { value, selectionStart, selectionEnd } = e.currentTarget;
         const start = selectionStart ?? value.length;
         caret.current = start + first.length;
-        setCode(value.slice(0, start) + first + value.slice(selectionEnd ?? start));
+        change(value.slice(0, start) + first + value.slice(selectionEnd ?? start));
     };
     const back = onTryAnotherWay ? (
         <button type="button" onClick={onTryAnotherWay} className={QUIET}>
@@ -105,21 +119,21 @@ export default function MfaRecoveryCodeForm({ onSubmit, processing = false, erro
                         type="text"
                         aria-label="Recovery code"
                         aria-describedby={`${id}-description`}
-                        aria-invalid={error ? true : undefined}
+                        aria-invalid={showError ? true : undefined}
                         ref={input}
                         value={code}
                         onPaste={paste}
-                        onChange={(e) => setCode(firstOfSeveral(e.target.value) ?? e.target.value)}
+                        onChange={(e) => change(firstOfSeveral(e.target.value) ?? e.target.value)}
                         placeholder="xxxxx-xxxxx"
                         autoComplete="off"
                         autoCapitalize="none"
                         spellCheck={false}
                         autoFocus
                         className={`${FIELD} min-h-12 w-full px-3 py-0 text-center font-mono text-base tracking-wider ${
-                            error ? FIELD_BORDER_ERROR : FIELD_BORDER
+                            showError ? FIELD_BORDER_ERROR : FIELD_BORDER
                         }`}
                     />
-                    {error && (
+                    {showError && (
                         <p role="alert" className="text-center text-sm text-red-600 dark:text-red-400">
                             {error}
                         </p>

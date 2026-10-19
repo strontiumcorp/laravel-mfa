@@ -234,6 +234,11 @@ export default function MfaChallengeForm({
         if (view === 'methods') listHeading.current?.focus();
     }, [view]);
 
+    // The error describes the code that failed: hidden once the user edits it,
+    // and while the next one is checked (the page keeps the old error until the
+    // answer comes, so a right code would look wrong until the redirect).
+    const showError = Boolean(error) && !edited && !processing;
+
     const submit = (e: { preventDefault(): void }) => {
         e.preventDefault();
         if (code.length !== length || processing) return;
@@ -348,11 +353,11 @@ export default function MfaChallengeForm({
                             setEdited(true);
                         }}
                         length={length}
-                        invalid={Boolean(error) && !edited}
+                        invalid={showError}
                         input={input}
                         describedBy={`${titleId}-description`}
                     />
-                    {error && (
+                    {showError && (
                         <p role="alert" className="text-center text-sm text-red-600 dark:text-red-400">
                             {error}
                         </p>

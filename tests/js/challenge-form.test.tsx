@@ -173,6 +173,30 @@ describe('MfaChallengeForm', () => {
             expect([input.selectionStart, input.selectionEnd]).toEqual([0, 6]);
         });
 
+        it('hides the error once the code is edited and while the next one is checked, until it fails too', async () => {
+            const { rerender } = setup();
+            const input = codeInput();
+            await userEvent.type(input, '111111');
+            rerender({ processing: true });
+            rerender({ error: 'Invalid code.' });
+            expect(screen.getByRole('alert')).toHaveTextContent('Invalid code.');
+
+            // A new code: the old error no longer describes what's in the boxes.
+            await userEvent.clear(input);
+            await userEvent.type(input, '22222');
+            expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+            expect(input).not.toHaveAttribute('aria-invalid');
+
+            // Checking it: the page still holds the old error until the answer comes.
+            rerender({ processing: true, error: 'Invalid code.' });
+            expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+            // Wrong again: shown again.
+            rerender({ error: 'Invalid code.' });
+            expect(screen.getByRole('alert')).toHaveTextContent('Invalid code.');
+            expect(input).toHaveAttribute('aria-invalid', 'true');
+        });
+
         it('selects the code again after a second failure with the same message', async () => {
             const { rerender } = setup({ error: 'Invalid code.' });
             const input = codeInput();
