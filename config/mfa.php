@@ -65,15 +65,16 @@ return [
     |                   each (recovery codes still pass it alone), and the
     |                   settings page offers only these. Their other factors
     |                   don't count: an enforced user with only email is sent
-    |                   to add an authenticator app. Types that are disabled
-    |                   are ignored; [] means any one enabled type.
+    |                   to add an authenticator app when ['totp'] is
+    |                   listed. Types that are disabled are ignored; [] (the
+    |                   default) means any one enabled type.
     |
     */
 
     'enforcement' => [
         'roles' => [],
         'policy' => null,
-        'required_types' => ['totp'],
+        'required_types' => [],
     ],
 
     /*

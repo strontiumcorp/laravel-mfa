@@ -29,9 +29,9 @@ Everything is in `config/mfa.php`, with comments. This page covers the parts tha
 
 ```php
 'enforcement' => [
-    'roles' => ['admin', 'support'],          // from $user->getMfaRoles()
-    'policy' => \App\Mfa\MyPolicy::class,     // a Contracts\EnforcementPolicy (optional)
-    'required_types' => ['totp'],             // what enforced users must use, every one listed; [] = any
+    'roles' => ['admin', 'support'],          // from $user->getMfaRoles(); default [] (nobody)
+    'policy' => \App\Mfa\MyPolicy::class,     // a Contracts\EnforcementPolicy (optional; default null)
+    'required_types' => ['totp'],             // what enforced users must use, every one listed; default [] = any one
 ],
 ```
 
@@ -51,7 +51,7 @@ class EnforceForStaff implements \StrontiumCorp\LaravelMfa\Contracts\Enforcement
 
 `Policies\EnforceForAdmins` (users whose `isAdmin()` is true) ships as an example.
 
-**Required types.** Enforced users must have a factor of **every** type in `required_types` (default: an authenticator app), and pass **each** of them at the challenge, one code each. Their other factors don't count:
+**Required types.** Enforced users must have a factor of **every** type in `required_types` (none by default: `[]` accepts any one enabled type; `['totp']` requires an authenticator app), and pass **each** of them at the challenge, one code each. Their other factors don't count:
 
 | Enforced user has | At the challenge | After passing it |
 |---|---|---|

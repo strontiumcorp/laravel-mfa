@@ -50,12 +50,12 @@ it('starts on the most recently used method when there is no authenticator app',
 });
 
 it('starts on the authenticator app only when it is one of the methods the challenge accepts', function () {
-    config(['mfa.enforcement.policy' => EnforceForAdmins::class]);
+    config(['mfa.enforcement.policy' => EnforceForAdmins::class, 'mfa.enforcement.required_types' => ['totp']]);
     [$admin, $totp] = $this->userWithFactor(FactorType::Totp, ['is_admin' => true]);
     $email = $this->createMfaFactor($admin, FactorType::Email);
     $email->forceFill(['last_used_at' => now()])->save();
 
-    // Required type totp (the default): only the authenticator app is offered.
+    // Required type totp: only the authenticator app is offered.
     $this->loginWithSession($admin)->getJson(route('mfa.challenge'))->assertOk()
         ->assertJsonPath('defaultFactorId', $totp->id)
         ->assertJsonPath('factors.*.id', [$totp->id]);

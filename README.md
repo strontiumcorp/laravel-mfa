@@ -71,7 +71,7 @@ The middleware is added to the `web` group, so every web route is protected. It 
 | Enforced users (admins) | Verified for a fixed 4 hours with a 25-minute idle timeout, then logged out; a reminder before it ends, and a grace period so the end never breaks a form submit (see [Verification lifetime](docs/configuration.md#verification-lifetime)) |
 | An administrator resets a user's MFA (`Mfa::reset()`, `mfa:reset`) | Every session of that user is logged out on its next request |
 
-Users without factors aren't challenged, unless `enforcement` requires them to enroll. Enforced users must use an authenticator app by default (`enforcement.required_types`), and prove they own the account with an emailed code (or an administrator's link) before adding their first method, so a leaked password alone can't enroll. Owners are emailed when their methods or recovery codes change.
+Users without factors aren't challenged, unless `enforcement` requires them to enroll. Nobody is enforced by default (`enforcement.roles`, `enforcement.policy`); enforced users may use any method unless `enforcement.required_types` lists some (e.g. `['totp']`), and prove they own the account with an emailed code (or an administrator's link) before adding their first method, so a leaked password alone can't enroll. Owners are emailed when their methods or recovery codes change.
 
 ## Documentation
 

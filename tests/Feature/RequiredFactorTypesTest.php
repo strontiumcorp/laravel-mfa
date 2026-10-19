@@ -13,10 +13,19 @@ use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
 use StrontiumCorp\LaravelMfa\Support\ChallengeSteps;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
 
-// enforcement.required_types (default ['totp']): what enforced users must set
-// up and sign in with, every one of them. Their other factors don't count.
+// enforcement.required_types (default []: any one type): what enforced users
+// must set up and sign in with, every one of them. Their other factors don't
+// count. These tests require an authenticator app, as an app would configure it.
 
-beforeEach(fn () => config(['mfa.enforcement.policy' => EnforceForAdmins::class]));
+beforeEach(fn () => config(['mfa.enforcement.policy' => EnforceForAdmins::class, 'mfa.enforcement.required_types' => ['totp']]));
+
+it('ships with nobody enforced and no type required', function () {
+    $shipped = (require __DIR__.'/../../config/mfa.php')['enforcement'];
+
+    expect($shipped['roles'])->toBe([])
+        ->and($shipped['policy'])->toBeNull()
+        ->and($shipped['required_types'])->toBe([]);
+});
 
 function requiredTypesVerifyByEmail($test, MfaFactor $factor): void
 {
