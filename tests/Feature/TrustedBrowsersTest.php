@@ -523,74 +523,72 @@ describe('across real sign-ins: a password login, the session expiring, remember
         expect($jar)->not->toHaveKey($name); // and the server deletes it
     });
 
-    describe('"sign out of other devices"', function () {
-        /** Two browsers the user trusted: $laptop, then $phone (the one they act from), on day 0. */
-        function twoTrustedBrowsers($test, $user, MfaFactor $factor, ?array &$laptop, ?array &$phone, bool $trustPhone = true): void
-        {
-            $laptop = $phone = [];
-            signIn($test, $laptop, $user, remember: false);
-            passChallenge($test, $laptop, $user, $factor, trust: true);
-            sessionExpires($test, $laptop);
-            signIn($test, $phone, $user, remember: false);
-            passChallenge($test, $phone, $user, $factor, trust: $trustPhone);
-        }
+    /** Two browsers the user trusted: $laptop, then $phone (the one they act from), on day 0. */
+    function twoTrustedBrowsers($test, $user, MfaFactor $factor, ?array &$laptop, ?array &$phone, bool $trustPhone = true): void
+    {
+        $laptop = $phone = [];
+        signIn($test, $laptop, $user, remember: false);
+        passChallenge($test, $laptop, $user, $factor, trust: true);
+        sessionExpires($test, $laptop);
+        signIn($test, $phone, $user, remember: false);
+        passChallenge($test, $phone, $user, $factor, trust: $trustPhone);
+    }
 
-        it('keeps trusting the browser that pressed it, and only that one', function () {
-            $this->freezeSecond();
-            Event::fake([BrowserTrusted::class, TrustedBrowsersForgotten::class]);
-            [$user, $factor] = $this->userWithFactor();
-            twoTrustedBrowsers($this, $user, $factor, $laptop, $phone);
-            $trustedAt = now()->toImmutable();
+    it('keeps trusting the browser that pressed "sign out of other devices", and only that one', function () {
+        $this->freezeSecond();
+        Event::fake([BrowserTrusted::class, TrustedBrowsersForgotten::class]);
+        [$user, $factor] = $this->userWithFactor();
+        twoTrustedBrowsers($this, $user, $factor, $laptop, $phone);
+        $trustedAt = now()->toImmutable();
 
-            fromBrowser($this, $phone, fn ($t) => $t->post('/test-sign-out-other-devices', ['password' => 'password']))->assertOk();
-            Event::assertDispatched(TrustedBrowsersForgotten::class, fn ($e) => $e->context['count'] === 2 && $e->context['cause'] === 'password_changed');
-            Event::assertDispatched(BrowserTrusted::class, fn ($e) => ($e->context['via'] ?? null) === 'other_devices_signed_out');
-            expect(MfaTrustedBrowser::query()->count())->toBe(1);
+        fromBrowser($this, $phone, fn ($t) => $t->post('/test-sign-out-other-devices', ['password' => 'password']))->assertOk();
+        Event::assertDispatched(TrustedBrowsersForgotten::class, fn ($e) => $e->context['count'] === 2 && $e->context['cause'] === 'password_changed');
+        Event::assertDispatched(BrowserTrusted::class, fn ($e) => ($e->context['via'] ?? null) === 'other_devices_signed_out');
+        expect(MfaTrustedBrowser::query()->count())->toBe(1);
 
-            // The next day: the phone still skips the code, the laptop is asked.
-            $this->travelTo($trustedAt->addDay());
-            sessionExpires($this, $phone);
-            signIn($this, $phone, $user, remember: false);
-            fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertOk();
+        // The next day: the phone still skips the code, the laptop is asked.
+        $this->travelTo($trustedAt->addDay());
+        sessionExpires($this, $phone);
+        signIn($this, $phone, $user, remember: false);
+        fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertOk();
 
-            sessionExpires($this, $laptop);
-            signIn($this, $laptop, $user, remember: false);
-            fromBrowser($this, $laptop, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
+        sessionExpires($this, $laptop);
+        signIn($this, $laptop, $user, remember: false);
+        fromBrowser($this, $laptop, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
 
-            // Not extended: it ends when it would have.
-            $this->travelTo($trustedAt->addDays(30)->subMinute());
-            sessionExpires($this, $phone);
-            signIn($this, $phone, $user, remember: false);
-            fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertOk();
-            $this->travelTo($trustedAt->addDays(30));
-            sessionExpires($this, $phone);
-            signIn($this, $phone, $user, remember: false);
-            fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
-        });
+        // Not extended: it ends when it would have.
+        $this->travelTo($trustedAt->addDays(30)->subMinute());
+        sessionExpires($this, $phone);
+        signIn($this, $phone, $user, remember: false);
+        fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertOk();
+        $this->travelTo($trustedAt->addDays(30));
+        sessionExpires($this, $phone);
+        signIn($this, $phone, $user, remember: false);
+        fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
+    });
 
-        it('trusts no browser when the one that pressed it was not trusted', function () {
-            [$user, $factor] = $this->userWithFactor();
-            twoTrustedBrowsers($this, $user, $factor, $laptop, $phone, trustPhone: false);
+    it('trusts no browser after "sign out of other devices" when the one that pressed it was not trusted', function () {
+        [$user, $factor] = $this->userWithFactor();
+        twoTrustedBrowsers($this, $user, $factor, $laptop, $phone, trustPhone: false);
 
-            fromBrowser($this, $phone, fn ($t) => $t->post('/test-sign-out-other-devices', ['password' => 'password']))->assertOk();
+        fromBrowser($this, $phone, fn ($t) => $t->post('/test-sign-out-other-devices', ['password' => 'password']))->assertOk();
 
-            expect(MfaTrustedBrowser::query()->count())->toBe(0);
-            sessionExpires($this, $phone);
-            signIn($this, $phone, $user, remember: false);
-            fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
-        });
+        expect(MfaTrustedBrowser::query()->count())->toBe(0);
+        sessionExpires($this, $phone);
+        signIn($this, $phone, $user, remember: false);
+        fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
+    });
 
-        it('still ends every browser, the current one too, on a real password change', function () {
-            [$user, $factor] = $this->userWithFactor();
-            twoTrustedBrowsers($this, $user, $factor, $laptop, $phone);
+    it('still ends every browser, the current one too, on a real password change (not "sign out of other devices")', function () {
+        [$user, $factor] = $this->userWithFactor();
+        twoTrustedBrowsers($this, $user, $factor, $laptop, $phone);
 
-            fromBrowser($this, $phone, fn ($t) => $t->post('/test-change-password', ['password' => 'a-new-password']))->assertOk();
+        fromBrowser($this, $phone, fn ($t) => $t->post('/test-change-password', ['password' => 'a-new-password']))->assertOk();
 
-            expect(MfaTrustedBrowser::query()->count())->toBe(0);
-            sessionExpires($this, $phone);
-            signIn($this, $phone, $user, remember: false, password: 'a-new-password');
-            fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
-        });
+        expect(MfaTrustedBrowser::query()->count())->toBe(0);
+        sessionExpires($this, $phone);
+        signIn($this, $phone, $user, remember: false, password: 'a-new-password');
+        fromBrowser($this, $phone, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
     });
 
     it('still challenges the same user in a browser without the cookie (cleared cookies, a private window)', function () {

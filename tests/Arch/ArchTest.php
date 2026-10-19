@@ -35,3 +35,19 @@ arch('SMS drivers implement the contract')
     ->classes()
     ->toImplement(SmsSender::class)
     ->ignoring([SmsManager::class, 'StrontiumCorp\LaravelMfa\Sms\Aws']); // Sms\Aws holds signing helpers
+
+it('nests no describe() in the PHP tests', function () {
+    // Pest 3.0 (the lowest the package allows) keeps one describe name, not a
+    // stack: a nested describe's tests, and the outer tests after it, lose the
+    // outer beforeEach. Use one level and name the tests instead.
+    $nested = [];
+    $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(dirname(__DIR__), FilesystemIterator::SKIP_DOTS));
+
+    foreach ($files as $file) {
+        if ($file->getExtension() === 'php' && preg_match('/^[ \t]+describe\(/m', (string) file_get_contents($file->getPathname())) === 1) {
+            $nested[] = str_replace(dirname(__DIR__).'/', '', $file->getPathname());
+        }
+    }
+
+    expect($nested)->toBe([]);
+});
