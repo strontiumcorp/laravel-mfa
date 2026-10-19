@@ -82,6 +82,12 @@ export const scenarios: Scenario[] = [
         state: () => initialState({ factors: [totp(), email()], recoveryCodesRemaining: 8, trustBrowserDays: 30 }),
     },
     {
+        id: 'challenge-remembered',
+        page: 'challenge',
+        title: 'Challenge · signed in with "remember me": "don\'t ask again" starts ticked',
+        state: () => initialState({ factors: [totp(), email()], recoveryCodesRemaining: 8, trustBrowserDays: 30, remembered: true }),
+    },
+    {
         id: 'challenge-all',
         page: 'challenge',
         title: 'Challenge · email first, with an authenticator app, SMS and recovery codes',

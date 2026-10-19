@@ -13,8 +13,11 @@ type Props = {
     hasRecoveryCodes: boolean;
     status: string | null;
     retryAfter: number | null;
-    /** "Don't ask again on this browser" is offered for this many days; null = not offered. */
-    trustBrowser: { days: number } | null;
+    /**
+     * "Don't ask again on this browser" is offered for this many days; null = not offered.
+     * checked: the box starts ticked (the user signed in with "remember me").
+     */
+    trustBrowser: { days: number; checked?: boolean } | null;
     /**
      * Verifying early (?renew=1, from the "check coming up" reminder): the user
      * is already verified and comes back to start a new window, or to keep
@@ -179,7 +182,7 @@ export default function MfaChallenge({ factors, defaultFactorId, hasRecoveryCode
                         expired={expired && !send.processing}
                         waiting={waiting}
                         trustBrowserDays={trustBrowser?.days ?? null}
-                        trustBrowserDefault={renew}
+                        trustBrowserDefault={renew || Boolean(trustBrowser?.checked)}
                         onCancel={goBack}
                     >
                         {delivered && (

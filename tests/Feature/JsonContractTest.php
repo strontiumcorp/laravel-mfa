@@ -27,7 +27,7 @@ it('GET /mfa/challenge', function () {
     ]);
 
     config(['mfa.trusted_browsers.enabled' => true, 'mfa.trusted_browsers.days' => 14]);
-    $this->getJson('/mfa/challenge')->assertJsonPath('trustBrowser', ['days' => 14]);
+    $this->getJson('/mfa/challenge')->assertJsonPath('trustBrowser', ['days' => 14, 'checked' => false]);
 });
 
 it('POST /mfa/challenge with remember, then the trusted browsers in /mfa/settings and forgetting them', function () {

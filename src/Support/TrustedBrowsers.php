@@ -2,10 +2,13 @@
 
 namespace StrontiumCorp\LaravelMfa\Support;
 
+use Illuminate\Auth\Recaller;
+use Illuminate\Auth\SessionGuard;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Session\Session;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Str;
 use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
@@ -59,6 +62,32 @@ final class TrustedBrowsers
         return (config('mfa.trusted_browsers.allow_enforced') || ! $enforced)
             // A window or idle timeout (mfa.lifetime) would be undone by the cookie the moment it ends.
             && ! $this->mfa->lifetime()->hasWindow($user, $enforced);
+    }
+
+    /**
+     * Whether the challenge's "don't ask again" box starts ticked: when
+     * trusted_browsers.default_when_remembered is on and this browser holds
+     * $user's remember-me cookie for $guard. Signing in with "remember me"
+     * already asked to stay signed in on this browser; without trust, every
+     * new session it starts (after session.lifetime) is challenged again.
+     * Only the box's default: the user still sees it and can untick it.
+     */
+    public function checkedByDefault(Request $request, MultiFactorAuthenticatable $user, string $guard): bool
+    {
+        if (! config('mfa.trusted_browsers.default_when_remembered')) {
+            return false;
+        }
+
+        $auth = Auth::guard($guard);
+        $cookie = $auth instanceof SessionGuard ? $request->cookies->get($auth->getRecallerName()) : null;
+
+        if (! is_string($cookie)) {
+            return false;
+        }
+
+        $recaller = new Recaller($cookie);
+
+        return $recaller->valid() && $recaller->id() === (string) $user->getAuthIdentifier();
     }
 
     /** How long a browser stays trusted. */

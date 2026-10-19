@@ -60,6 +60,8 @@ export type State = {
     codeUsedAt: Record<number, number>;
     /** Trusted browsers (mfa.trusted_browsers): days a ticked "don't ask again" lasts; null = the feature is off. */
     trustBrowserDays: number | null;
+    /** The browser holds the user's remember-me cookie: the challenge's "don't ask again" box starts ticked. */
+    remembered: boolean;
     /** Newest first. */
     trustedBrowsers: TrustedBrowser[];
     /** This browser's trust ends in this many minutes (the app pages show the reminder); null = not a trusted browser. */
@@ -194,6 +196,7 @@ export function initialState(overrides: Partial<State> = {}): State {
         codeSentAt: {},
         codeUsedAt: {},
         trustBrowserDays: null,
+        remembered: false,
         trustedBrowsers: [],
         trustEndsInMinutes: null,
         lifetimeEndsAt: null,
@@ -458,7 +461,7 @@ export function challengeProps(s: State) {
         status: s.status,
         retryAfter: s.retryAfter,
         // null when off (the package also withholds it from enforced users unless trusted_browsers.allow_enforced).
-        trustBrowser: s.trustBrowserDays === null ? null : { days: s.trustBrowserDays },
+        trustBrowser: s.trustBrowserDays === null ? null : { days: s.trustBrowserDays, checked: s.remembered },
         renew: s.renew,
         urls: urls.challenge,
     };

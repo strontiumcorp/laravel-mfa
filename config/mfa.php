@@ -136,6 +136,11 @@ return [
     | allow_enforced => offer it to users enforcement applies to (admins).
     |                   Weigh it: a stolen trusted browser plus the password
     |                   then skips their second factor.
+    | default_when_remembered => the box starts ticked when the browser
+    |                   holds the user's remember-me cookie: they asked to
+    |                   stay signed in there, and without trust every new
+    |                   session remember-me starts (after session.lifetime)
+    |                   asks for a code again. They can still untick it.
     | cookie         => cookie name prefix (one cookie per guard and user).
     | reminder       => in the last `hours` of a browser's trust, the nudge
     |                   card (MfaEnableNudge) says the challenge is coming,
@@ -150,6 +155,7 @@ return [
         'enabled' => env('MFA_TRUSTED_BROWSERS', true),
         'days' => 30,
         'allow_enforced' => false,
+        'default_when_remembered' => true,
         'cookie' => 'mfa_trusted',
         'reminder' => [
             'hours' => 12,

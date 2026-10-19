@@ -411,6 +411,20 @@ describe('challenge page', () => {
             ]);
         });
 
+        it('starts ticked when the server says so (signed in with "remember me"), and can be unticked', async () => {
+            render(<MfaChallenge {...props} trustBrowser={{ days: 30, checked: true }} />);
+            expect(checkbox()).toBeChecked();
+
+            await userEvent.type(screen.getByRole('textbox', { name: 'Verification code' }), '111111{Enter}');
+            await userEvent.click(checkbox()!);
+            await userEvent.click(screen.getByRole('button', { name: 'Verify' }));
+
+            expect(inertia.requests).toEqual([
+                { method: 'post', url: urls.verify, data: { factor_id: 1, code: '111111', remember: true } },
+                { method: 'post', url: urls.verify, data: { factor_id: 1, code: '111111' } },
+            ]);
+        });
+
         it('is never sent with a recovery code', async () => {
             render(<MfaChallenge {...props} trustBrowser={{ days: 30 }} />);
             await userEvent.click(checkbox()!);

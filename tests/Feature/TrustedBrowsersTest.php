@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Testing\TestResponse;
 use PragmaRX\Google2FA\Google2FA;
 use StrontiumCorp\LaravelMfa\Contracts\EnforcementPolicy;
 use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
@@ -57,6 +58,13 @@ function newSession($test, $user, array $cookies = []): void
     foreach ($cookies as $name => $value) {
         $test->withUnencryptedCookie($name, $value);
     }
+}
+
+/** The remember-me cookie Laravel sets for $user ("id|token|password hash"). */
+function rememberMeCookie($test, $user, string $guard = 'web'): void
+{
+    // withCredentials(): JSON test requests send no cookies without it.
+    $test->withCredentials()->withCookie(Auth::guard($guard)->getRecallerName(), $user->getAuthIdentifier().'|'.str_repeat('t', 60).'|'.$user->getAuthPassword());
 }
 
 it('is on by default', function () {
@@ -213,6 +221,47 @@ it('is not offered to enforced users unless allow_enforced is on', function () {
     config(['mfa.trusted_browsers.allow_enforced' => false]);
     newSession($this, $user, [$name => $token]);
     $this->get('/dashboard')->assertRedirect(route('mfa.challenge'));
+});
+
+describe('a browser that remembers the user (remember me)', function () {
+    it('starts with "don\'t ask again" ticked, so a remembered sign-in is not challenged again the next day', function () {
+        [$user] = $this->userWithFactor();
+        $this->loginWithSession($user);
+
+        $this->getJson('/mfa/challenge')->assertJsonPath('trustBrowser', ['days' => 30, 'checked' => false]);
+
+        rememberMeCookie($this, $user);
+        $this->getJson('/mfa/challenge')->assertJsonPath('trustBrowser', ['days' => 30, 'checked' => true]);
+    });
+
+    it('is not ticked for another user\'s remember-me cookie, a malformed one, or when turned off', function () {
+        [$user] = $this->userWithFactor();
+        $other = $this->makeUser();
+        $this->loginWithSession($user);
+
+        rememberMeCookie($this, $other);
+        $this->getJson('/mfa/challenge')->assertJsonPath('trustBrowser.checked', false);
+
+        $this->withCredentials()->withCookie(Auth::guard('web')->getRecallerName(), 'not-a-recaller');
+        $this->getJson('/mfa/challenge')->assertJsonPath('trustBrowser.checked', false);
+
+        config(['mfa.trusted_browsers.default_when_remembered' => false]);
+        rememberMeCookie($this, $user);
+        $this->getJson('/mfa/challenge')->assertJsonPath('trustBrowser.checked', false);
+    });
+
+    it('is still not offered where trust isn\'t (enforced users)', function () {
+        config(['mfa.enforcement.policy' => EnforceForEveryone::class]);
+        [$user] = $this->userWithFactor();
+        $this->loginWithSession($user);
+        rememberMeCookie($this, $user);
+
+        $this->getJson('/mfa/challenge')->assertJsonPath('trustBrowser', null);
+    });
+
+    it('ships on', function () {
+        expect((require __DIR__.'/../../config/mfa.php')['trusted_browsers']['default_when_remembered'])->toBeTrue();
+    });
 });
 
 it('still holds an enforced user without a required type on the settings page', function () {

@@ -352,7 +352,7 @@ describe('the reminder and verifying early', function () {
 describe('trusted browsers', function () {
     it('are offered to default users and never to users with a fixed window', function () {
         [$user, $factor] = $this->userWithFactor();
-        $this->loginWithSession($user)->getJson('/mfa/challenge')->assertJsonPath('trustBrowser', ['days' => 30]);
+        $this->loginWithSession($user)->getJson('/mfa/challenge')->assertJsonPath('trustBrowser', ['days' => 30, 'checked' => false]);
 
         $this->flushSession();
         Auth::forgetGuards();

@@ -68,7 +68,8 @@ describe('UI preview', () => {
     it('remembers a browser on request, and forgets one or all', () => {
         const s = initialState({ factors: [], trustBrowserDays: 30 });
         expect(settingsProps(s).trustedBrowsers).toEqual([]);
-        expect(challengeProps(s).trustBrowser).toEqual({ days: 30 });
+        expect(challengeProps(s).trustBrowser).toEqual({ days: 30, checked: false });
+        expect(challengeProps(initialState({ trustBrowserDays: 30, remembered: true })).trustBrowser).toEqual({ days: 30, checked: true });
         expect(challengeProps(initialState()).trustBrowser).toBeNull();
         expect(settingsProps(initialState()).trustedBrowsers).toBeNull();
 

@@ -79,7 +79,10 @@ class ChallengeController extends Controller
             'defaultFactorId' => $factors->first()?->id, // @pest-mutate-ignore: RemoveNullSafeOperator
             'hasRecoveryCodes' => $recoveryCodes->remaining($user) > 0,
             // "Don't ask again on this browser for N days" (trusted_browsers); null = not offered.
-            'trustBrowser' => $this->trustedBrowsers->offeredTo($user) ? ['days' => $this->trustedBrowsers->days()] : null,
+            // checked: the box starts ticked (signed in with "remember me", trusted_browsers.default_when_remembered).
+            'trustBrowser' => $this->trustedBrowsers->offeredTo($user)
+                ? ['days' => $this->trustedBrowsers->days(), 'checked' => $this->trustedBrowsers->checkedByDefault($request, $user, $guard)]
+                : null,
             // Renewing a trusted browser: the page ticks "don't ask again" and offers to go back instead of signing out.
             'renew' => $renew,
             // An enforced user who must pass several types: how many, and which are done. null = any one method.
