@@ -349,21 +349,24 @@ it('is pruned after it expires, goes with the user, and shows in mfa:status', fu
 
 describe('across real sign-ins: a password login, the session expiring, remember-me', function () {
     /**
-     * A request from a browser holding $jar (name => raw cookie value as the
-     * server set it); the cookies the response sets or deletes update $jar.
+     * A request from a browser holding $jar (name => [raw value as the server
+     * set it, expiry timestamp or 0 for a session cookie]). Like a browser, it
+     * drops cookies whose expiry has passed (on the travelled clock) before
+     * sending; the cookies the response sets or deletes update $jar.
      */
     function fromBrowser($test, array &$jar, Closure $request): TestResponse
     {
+        $jar = array_filter($jar, fn (array $cookie) => $cookie['expires'] === 0 || $cookie['expires'] > now()->getTimestamp());
         (fn () => $this->unencryptedCookies = [])->call($test);
         // A real request starts with nothing queued; the test app keeps one cookie jar across requests.
         app('cookie')->flushQueuedCookies();
-        $response = $request($test->withCredentials()->withUnencryptedCookies($jar));
+        $response = $request($test->withCredentials()->withUnencryptedCookies(array_map(fn (array $cookie) => $cookie['value'], $jar)));
 
         foreach ($response->headers->getCookies() as $cookie) {
             if ($cookie->isCleared()) {
                 unset($jar[$cookie->getName()]);
             } else {
-                $jar[$cookie->getName()] = $cookie->getValue();
+                $jar[$cookie->getName()] = ['value' => $cookie->getValue(), 'expires' => $cookie->getExpiresTime()];
             }
         }
 
@@ -451,6 +454,61 @@ describe('across real sign-ins: a password login, the session expiring, remember
         $this->travel(1)->day();
         sessionExpires($this, $jar);
         fromBrowser($this, $jar, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
+    });
+
+    it('skips the challenge on every day of the trust, then asks again when it ends', function (int $days, bool $remember) {
+        config(['mfa.trusted_browsers.days' => $days]);
+        $this->freezeSecond();
+        Event::fake([BrowserTrusted::class, VerificationSucceeded::class]);
+        [$user, $factor] = $this->userWithFactor();
+        $jar = [];
+
+        signIn($this, $jar, $user, $remember);
+        passChallenge($this, $jar, $user, $factor, trust: true);
+        $trustedAt = now()->toImmutable();
+
+        // The next session, $at after trusting: logged back in by remember-me, or with the password.
+        $nextSession = function ($at) use (&$jar, $user, $remember): TestResponse {
+            $this->travelTo($at);
+            sessionExpires($this, $jar);
+            if (! $remember) {
+                signIn($this, $jar, $user, remember: false);
+            }
+
+            return fromBrowser($this, $jar, fn ($t) => $t->get('/dashboard'));
+        };
+
+        for ($day = 1; $day < $days; $day++) {
+            $nextSession($trustedAt->addDays($day))->assertOk();
+        }
+        // The last minute of it still counts...
+        $nextSession($trustedAt->addDays($days)->subMinute())->assertOk();
+        Event::assertDispatchedTimes(VerificationSucceeded::class, 1 + $days);
+        Event::assertDispatchedTimes(BrowserTrusted::class, 1); // never renewed behind the user's back
+
+        // ...and when it ends, the code is asked again.
+        $nextSession($trustedAt->addDays($days))->assertRedirect(route('mfa.challenge'));
+    })->with([
+        '30 days (the default), password each day' => [30, false],
+        '30 days (the default), remember-me' => [30, true],
+        'trusted_browsers.days = 7, password each day' => [7, false],
+    ]);
+
+    it('ends on the server too, if the browser keeps sending the cookie after it expired', function () {
+        $this->freezeSecond();
+        [$user, $factor] = $this->userWithFactor();
+        $jar = [];
+
+        signIn($this, $jar, $user, remember: false);
+        passChallenge($this, $jar, $user, $factor, trust: true);
+        $name = app(TrustedBrowsers::class)->cookieName('web', $user);
+        $jar[$name]['expires'] = 0; // a browser (or a copied cookie) that ignores its expiry
+
+        $this->travel(30)->days();
+        sessionExpires($this, $jar);
+        signIn($this, $jar, $user, remember: false);
+        fromBrowser($this, $jar, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
+        expect($jar)->not->toHaveKey($name); // and the server deletes it
     });
 
     it('still challenges the same user in a browser without the cookie (cleared cookies, a private window)', function () {
