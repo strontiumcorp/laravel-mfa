@@ -204,13 +204,13 @@ function useSelectOnFailure(processing: boolean, error: string | null) {
     return input;
 }
 
-const PRIMARY = 'min-h-11 rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900';
+const PRIMARY = 'min-h-11 rounded-lg bg-[color:var(--mfa-primary,#111827)] px-5 text-sm font-semibold text-[color:var(--mfa-primary-foreground,#ffffff)] disabled:opacity-50 dark:bg-[color:var(--mfa-primary,#f3f4f6)] dark:text-[color:var(--mfa-primary-foreground,#111827)]';
 const SECONDARY =
     'min-h-11 rounded-lg border border-gray-300 bg-white px-4 text-sm font-medium text-gray-900 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100';
 // Text fields set every part of their look (type, border, padding, colours, focus ring), so a host's
 // form styles (@tailwindcss/forms, a global `input {}` rule) can't change them.
 const FIELD =
-    'appearance-none rounded-lg border border-gray-300 bg-white text-gray-900 shadow-none placeholder:text-gray-400 focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:ring-offset-0 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-600 dark:focus:border-gray-100 dark:focus:ring-gray-100/20';
+    'appearance-none rounded-lg border border-gray-300 bg-white text-gray-900 shadow-none placeholder:text-gray-400 focus:border-[color:var(--mfa-primary,#111827)] focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_oklab,var(--mfa-primary,#111827)_10%,transparent)] focus:ring-offset-0 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-600 dark:focus:border-[color:var(--mfa-primary,#f3f4f6)] dark:focus:ring-[color:color-mix(in_oklab,var(--mfa-primary,#f3f4f6)_20%,transparent)]';
 const INPUT = `${FIELD} min-h-11 w-full px-3 py-0 text-sm`;
 
 const TILE: Record<MfaFactorType, string> = {
@@ -474,7 +474,7 @@ export default function MfaFactorSetupDialog({
 
                 <div aria-hidden className="flex gap-1.5 px-5 pt-4 sm:px-6">
                     {steps.map((s, i) => (
-                        <span key={s} className={`h-1 grow rounded-full ${i < stepNumber ? 'bg-gray-900 dark:bg-gray-100' : 'bg-gray-200 dark:bg-gray-700'}`} />
+                        <span key={s} className={`h-1 grow rounded-full ${i < stepNumber ? 'bg-[color:var(--mfa-primary,#111827)] dark:bg-[color:var(--mfa-primary,#f3f4f6)]' : 'bg-gray-200 dark:bg-gray-700'}`} />
                     ))}
                 </div>
 

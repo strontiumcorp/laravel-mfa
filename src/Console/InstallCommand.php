@@ -13,12 +13,22 @@ class InstallCommand extends Command
     protected $signature = 'mfa:install
         {--no-ui : Do not publish the React/Inertia pages and components}
         {--force : Overwrite existing files}
-        {--js-path= : Frontend source directory (default: resources/js)}';
+        {--js-path= : Frontend source directory (default: resources/js)}
+        {--css-path= : Stylesheet directory, for the theme (default: resources/css)}
+        {--tailwind= : The app\'s Tailwind major, 3 or 4, for the theme (default: from package.json, else 4)}';
 
     protected $description = 'Publish the MFA config, UI pages and components, and print the remaining integration steps';
 
     public function handle(Filesystem $files): int
     {
+        $tailwind = $this->option('tailwind');
+        if ($tailwind !== null && ! in_array($tailwind, ['3', '4'], true)) {
+            $this->components->error('--tailwind must be 3 or 4.');
+
+            return self::FAILURE;
+        }
+        $tailwind = (int) ($tailwind ?? self::tailwindMajor(is_file(base_path('package.json')) ? (string) file_get_contents(base_path('package.json')) : null) ?? 4);
+
         $this->call('vendor:publish', ['--tag' => 'mfa-config', '--force' => (bool) $this->option('force')]);
 
         $base = rtrim((string) ($this->option('js-path') ?: resource_path('js')), '/');
@@ -26,6 +36,7 @@ class InstallCommand extends Command
 
         if (! $this->option('no-ui')) {
             $this->publishUi($files, $base, $pagesDir);
+            $this->publishTheme($files, rtrim((string) ($this->option('css-path') ?: resource_path('css')), '/'), $tailwind);
         }
 
         $this->newLine();
@@ -58,7 +69,10 @@ class InstallCommand extends Command
         $this->line('       <fg=gray>import</> MfaIdleWarning <fg=gray>from</> \'@/'.self::COMPONENTS_DIR.'/idle-warning\';');
         $this->line("       <fg=gray>import</> { useMfaIdleWarning } <fg=gray>from</> '@/{$pagesDir}/mfa/mfa-context';");
         $this->line('       <MfaIdleWarning {...useMfaIdleWarning()} />');
-        $this->line('  5. php artisan mfa:doctor   <fg=gray># verifies the integration</>');
+        $this->line('  5. Give the MFA screens your primary colour: import the theme from resources/css/app.css'.($tailwind < 4 ? ', before the @tailwind directives:' : ':'));
+        $this->line("       @import './vendor/laravel-mfa/theme.css';");
+        $this->line('     It follows your shadcn/ui --primary and --primary-foreground; edit it to differ.');
+        $this->line('  6. php artisan mfa:doctor   <fg=gray># verifies the integration</>');
 
         return self::SUCCESS;
     }
@@ -88,21 +102,45 @@ class InstallCommand extends Command
         }
     }
 
+    /**
+     * The theme for the app's Tailwind: shadcn/ui keeps its colours as HSL
+     * channels on Tailwind 3 and as full colours on 4.
+     */
+    private function publishTheme(Filesystem $files, string $css, int $tailwind): void
+    {
+        $stub = __DIR__.'/../../stubs/inertia-react/css/'.($tailwind < 4 ? 'theme.tailwind-3.css' : 'theme.css');
+
+        $this->publishFile($files, $stub, "{$css}/vendor/laravel-mfa/theme.css");
+    }
+
+    /** The Tailwind major in package.json's dependencies (null if none, or not a version). */
+    public static function tailwindMajor(?string $packageJson): ?int
+    {
+        $package = json_decode((string) $packageJson, true);
+        $version = is_array($package) ? ($package['devDependencies']['tailwindcss'] ?? $package['dependencies']['tailwindcss'] ?? null) : null;
+
+        return is_string($version) && preg_match('/\d+/', $version, $match) ? (int) $match[0] : null;
+    }
+
     private function publishDirectory(Filesystem $files, string $from, string $target): void
     {
         $files->ensureDirectoryExists($target);
 
         foreach ($files->files($from) as $stub) {
-            $destination = $target.'/'.$stub->getFilename();
-
-            if ($files->exists($destination) && ! $this->option('force')) {
-                $this->components->warn("Skipped (exists): {$target}/{$stub->getFilename()}");
-
-                continue;
-            }
-
-            $files->copy($stub->getPathname(), $destination);
-            $this->components->task("{$target}/{$stub->getFilename()}");
+            $this->publishFile($files, $stub->getPathname(), $target.'/'.$stub->getFilename());
         }
+    }
+
+    private function publishFile(Filesystem $files, string $from, string $to): void
+    {
+        if ($files->exists($to) && ! $this->option('force')) {
+            $this->components->warn("Skipped (exists): {$to}");
+
+            return;
+        }
+
+        $files->ensureDirectoryExists(dirname($to));
+        $files->copy($from, $to);
+        $this->components->task($to);
     }
 }

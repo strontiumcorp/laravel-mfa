@@ -327,7 +327,7 @@ export default function MfaSettings(props: Props) {
                 <button
                     type="button"
                     onClick={() => startSetup(p.type)}
-                    className="min-h-11 w-full rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white sm:w-auto dark:bg-gray-100 dark:text-gray-900"
+                    className="min-h-11 w-full rounded-lg bg-[color:var(--mfa-primary,#111827)] px-5 text-sm font-semibold text-[color:var(--mfa-primary-foreground,#ffffff)] sm:w-auto dark:bg-[color:var(--mfa-primary,#f3f4f6)] dark:text-[color:var(--mfa-primary-foreground,#111827)]"
                 >
                     Continue setup
                 </button>

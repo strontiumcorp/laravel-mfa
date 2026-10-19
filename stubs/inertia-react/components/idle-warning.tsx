@@ -191,7 +191,7 @@ export default function MfaIdleWarning({
                     <button
                         type="button"
                         onClick={onContinue}
-                        className="inline-flex min-h-11 items-center rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white dark:bg-gray-100 dark:text-gray-900"
+                        className="inline-flex min-h-11 items-center rounded-lg bg-[color:var(--mfa-primary,#111827)] px-5 text-sm font-semibold text-[color:var(--mfa-primary-foreground,#ffffff)] dark:bg-[color:var(--mfa-primary,#f3f4f6)] dark:text-[color:var(--mfa-primary-foreground,#111827)]"
                     >
                         {continueLabel}
                     </button>
@@ -200,7 +200,7 @@ export default function MfaIdleWarning({
                         type="button"
                         onClick={stay}
                         disabled={staying}
-                        className="inline-flex min-h-11 items-center rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900"
+                        className="inline-flex min-h-11 items-center rounded-lg bg-[color:var(--mfa-primary,#111827)] px-5 text-sm font-semibold text-[color:var(--mfa-primary-foreground,#ffffff)] disabled:opacity-60 dark:bg-[color:var(--mfa-primary,#f3f4f6)] dark:text-[color:var(--mfa-primary-foreground,#111827)]"
                     >
                         {stayLabel}
                     </button>

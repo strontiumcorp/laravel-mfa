@@ -71,10 +71,10 @@ export type MfaChallengeFormProps = {
 };
 
 const CARD = 'w-full rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900';
-const PRIMARY = 'min-h-11 w-full rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900';
+const PRIMARY = 'min-h-11 w-full rounded-lg bg-[color:var(--mfa-primary,#111827)] px-5 text-sm font-semibold text-[color:var(--mfa-primary-foreground,#ffffff)] disabled:opacity-50 dark:bg-[color:var(--mfa-primary,#f3f4f6)] dark:text-[color:var(--mfa-primary-foreground,#111827)]';
 // The "don't ask again" box draws itself: a host's form styles (e.g. @tailwindcss/forms) can't recolour it.
 const CHECKBOX =
-    'm-0 size-5 shrink-0 cursor-pointer appearance-none rounded-md border border-gray-400 bg-white bg-none p-0 text-gray-900 shadow-none checked:border-gray-900 checked:bg-gray-900 checked:bg-none focus:outline-none focus:ring-0 focus:ring-offset-0 focus-visible:ring-2 focus-visible:ring-gray-900/30 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100 dark:checked:border-gray-100 dark:checked:bg-gray-100 dark:focus-visible:ring-gray-100/40';
+    'm-0 size-5 shrink-0 cursor-pointer appearance-none rounded-md border border-gray-400 bg-white bg-none p-0 text-gray-900 shadow-none checked:border-[color:var(--mfa-primary,#111827)] checked:bg-[color:var(--mfa-primary,#111827)] checked:bg-none focus:outline-none focus:ring-0 focus:ring-offset-0 focus-visible:ring-2 focus-visible:ring-[color:color-mix(in_oklab,var(--mfa-primary,#111827)_30%,transparent)] disabled:opacity-50 dark:border-gray-600 dark:bg-gray-950 dark:text-gray-100 dark:checked:border-[color:var(--mfa-primary,#f3f4f6)] dark:checked:bg-[color:var(--mfa-primary,#f3f4f6)] dark:focus-visible:ring-[color:color-mix(in_oklab,var(--mfa-primary,#f3f4f6)_40%,transparent)]';
 const QUIET =
     'inline-flex min-h-11 items-center gap-1 rounded-lg px-2 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100';
 
@@ -133,7 +133,7 @@ function CodeBoxes({
                     const border = invalid
                         ? 'border-red-500 dark:border-red-500'
                         : current || (focused && allSelected)
-                          ? 'border-gray-900 ring-2 ring-gray-900/10 dark:border-gray-100 dark:ring-gray-100/20'
+                          ? 'border-[color:var(--mfa-primary,#111827)] ring-2 ring-[color:color-mix(in_oklab,var(--mfa-primary,#111827)_10%,transparent)] dark:border-[color:var(--mfa-primary,#f3f4f6)] dark:ring-[color:color-mix(in_oklab,var(--mfa-primary,#f3f4f6)_20%,transparent)]'
                           : digit
                             ? 'border-gray-400 dark:border-gray-600'
                             : 'border-gray-300 dark:border-gray-700';
@@ -368,7 +368,7 @@ export default function MfaChallengeForm({
                                     onChange={(e) => setTrustBrowser(e.target.checked)}
                                     className={CHECKBOX}
                                 />
-                                {trustBrowser && <MfaIconCheck size={14} className="pointer-events-none absolute text-white dark:text-gray-900" />}
+                                {trustBrowser && <MfaIconCheck size={14} className="pointer-events-none absolute text-[color:var(--mfa-primary-foreground,#ffffff)] dark:text-[color:var(--mfa-primary-foreground,#111827)]" />}
                             </span>
                             <span>
                                 Don't ask again on this browser for{' '}

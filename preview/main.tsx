@@ -1,5 +1,5 @@
 // The preview: `make preview`, then open the URL it prints. The shell picks a
-// scenario, a theme and device widths; each frame is an iframe of this same
+// scenario, a theme, a brand and device widths; each frame is an iframe of this same
 // page (?frame=…), so Tailwind's breakpoints (sm:, md:) see the frame's width.
 import { type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -11,6 +11,7 @@ import MfaChallenge from '../stubs/inertia-react/pages/challenge';
 import { mfaApiKeyNoticeProps, mfaSettingsCardProps, useMfaNudge, type MfaContext } from '../stubs/inertia-react/pages/mfa-context';
 import MfaSettings from '../stubs/inertia-react/pages/settings';
 import { CODE, IDLE_SECONDS, LIFETIME_REMINDER, NUDGE, PASSWORD, RECOVERY_CODE, TRUST_REMINDER, challengeProps, handle, settingsProps, urls, type State } from './backend';
+import { applyBrand, brands, type Brand } from './brands';
 import { boot, Link, toasts, useBackendState } from './inertia';
 import { scenarios } from './scenarios';
 
@@ -158,6 +159,7 @@ function Shell() {
     const [scenario, setScenario] = useState(params.get('scenario') ?? scenarios[0].id);
     const [device, setDevice] = useState<Device>((params.get('device') as Device) ?? 'all');
     const [theme, setTheme] = useState<Theme>((params.get('theme') as Theme) ?? 'system');
+    const [brand, setBrand] = useState<Brand>((params.get('brand') as Brand) ?? 'none');
     const [position, setPosition] = useState<MfaEnableNudgePosition>((params.get('position') as MfaEnableNudgePosition) ?? 'bottom-right');
     // The shell loads Tailwind once (index.html), so a change reloads it; the frames follow the URL.
     const forms = params.get('forms') === '1';
@@ -166,8 +168,8 @@ function Shell() {
 
     useEffect(() => {
         applyTheme(theme);
-        history.replaceState(null, '', `?scenario=${scenario}&device=${device}&theme=${theme}&position=${position}${forms ? '&forms=1' : ''}`);
-    }, [scenario, device, theme, position, forms]);
+        history.replaceState(null, '', `?scenario=${scenario}&device=${device}&theme=${theme}&brand=${brand}&position=${position}${forms ? '&forms=1' : ''}`);
+    }, [scenario, device, theme, brand, position, forms]);
 
     const toggleForms = () => {
         const next = new URLSearchParams(location.search);
@@ -177,7 +179,7 @@ function Shell() {
     };
 
     const widths = device === 'all' ? Object.entries(DEVICES) : [[device, DEVICES[device]] as const];
-    const src = `?frame=1&scenario=${scenario}&theme=${theme}&position=${position}${forms ? '&forms=1' : ''}`;
+    const src = `?frame=1&scenario=${scenario}&theme=${theme}&brand=${brand}&position=${position}${forms ? '&forms=1' : ''}`;
     const select = 'rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900';
 
     return (
@@ -201,6 +203,13 @@ function Shell() {
                     <option value="system">System theme</option>
                     <option value="light">Light</option>
                     <option value="dark">Dark</option>
+                </select>
+                <select aria-label="Brand" value={brand} onChange={(e) => setBrand(e.target.value as Brand)} className={select}>
+                    {Object.entries(brands).map(([id, b]) => (
+                        <option key={id} value={id}>
+                            {b.label}
+                        </option>
+                    ))}
                 </select>
                 {isApp && (
                     <select aria-label="Position" value={position} onChange={(e) => setPosition(e.target.value as MfaEnableNudgePosition)} className={select}>
@@ -242,6 +251,7 @@ if (params.has('frame')) {
     const found = scenarios.find((s) => s.id === params.get('scenario')) ?? scenarios[0];
     const theme = (params.get('theme') as Theme) ?? 'system';
     applyTheme(theme);
+    applyBrand((params.get('brand') as Brand) ?? 'none');
     boot(found.state(), (s) => ({ mfa: contextFor(s) }));
     root.render(<Frame page={found.page} />);
 } else {

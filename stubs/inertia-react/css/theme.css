@@ -1,0 +1,26 @@
+/*
+ * Theme for the MFA pages and components (laravel-mfa), Tailwind 4.
+ *
+ * Published into the app, so it's yours. The accent (primary buttons and
+ * calls to action, the "don't ask again" tick, setup steps, the focused code
+ * input) follows the app's shadcn/ui token of the same name, so MFA carries
+ * the app's branding with no changes. The rest keeps the package's neutral
+ * greys. Where the app has no such token, or this file isn't imported, the
+ * built-in near-black (light) and near-white (dark) look stays. To differ,
+ * set a value here, e.g.
+ *
+ *     --mfa-primary: #7042f3;
+ *
+ * Import it from resources/css/app.css:
+ *
+ *     @import './vendor/laravel-mfa/theme.css';
+ *
+ * Dark mode follows the app's own `.dark` values of these tokens (set again
+ * under .dark, so it works wherever the app puts the class).
+ */
+
+:root,
+.dark {
+    --mfa-primary: var(--primary); /* primary buttons, ticks, steps, focus; hover is a shade of it */
+    --mfa-primary-foreground: var(--primary-foreground); /* text and icons on it */
+}

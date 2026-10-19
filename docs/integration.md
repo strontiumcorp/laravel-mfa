@@ -21,11 +21,11 @@ No credentials are needed, locally, in CI or on servers. Once the repository is 
 ## 2. Publish and migrate
 
 ```bash
-php artisan mfa:install    # config/mfa.php, pages, components
+php artisan mfa:install    # config/mfa.php, pages, components, theme
 php artisan migrate
 ```
 
-`mfa:install` publishes into `resources/js/` (`--js-path` for another layout):
+`mfa:install` publishes into `resources/js/` (`--js-path` for another layout), and the theme into `resources/css/` (`--css-path`):
 
 ```
 resources/js/
@@ -36,6 +36,8 @@ resources/js/
 └── components/vendor/laravel-mfa/     always this lowercase path
     ├── challenge-form.tsx             plain React components, see step 6
     └── ...
+resources/css/vendor/laravel-mfa/
+└── theme.css                          the app's primary colour for MFA, see step 6
 ```
 
 Existing files are skipped; `--force` overwrites them, **`config/mfa.php` included**: every value you changed goes back to the package default (for example `enforcement.roles` returns to `[]`, so admins are no longer forced to enroll). After `--force`, run `git diff config/mfa.php` and restore your values. Settings that come from `.env` are unaffected. To keep `--force` from touching your layouts too, set the pages' layouts outside the published files (step 6). The pages import the components through the `@/` alias for `resources/js/`, which the Laravel starter kits set up in `tsconfig.json` and `vite.config`.
@@ -128,6 +130,14 @@ It throws if the target has MFA and the admin hasn't passed MFA in this session,
 ## 6. Frontend
 
 The published files are the app's own: restyle and rearrange them freely. `mfa:install` never overwrites them without `--force`.
+
+- Give MFA the app's primary colour: import the published theme from `resources/css/app.css` (on Tailwind 3, before the `@tailwind` directives):
+
+  ```css
+  @import './vendor/laravel-mfa/theme.css';
+  ```
+
+  The primary buttons and calls to action, the "don't ask again" tick, the setup steps, the suggested method's outline and the focused code input then use the app's shadcn/ui `--primary` and `--primary-foreground`, light and `.dark`. Everything else keeps the package's neutral greys. Without the import, or in an app without those tokens, they keep the built-in near-black (near-white in dark mode). To use another colour, set it in the published file (`--mfa-primary: #7042f3;`). `mfa:install` publishes the file for the app's Tailwind version, read from `package.json` (`--tailwind=3|4` to choose), since shadcn/ui keeps its colours as HSL channels on Tailwind 3 (`hsl(var(--primary))`) and as full colours on 4 (`var(--primary)`). `make preview` has a Brand menu to check it.
 
 - Put the published pages in the app's layouts. Set the layouts from the page resolver rather than editing the pages, so `mfa:install --force` doesn't undo them. The page names are `ui.pages` in the config (`mfa/challenge`, `mfa/settings`):
 
@@ -255,6 +265,8 @@ The settings page adds every method through `factor-setup-dialog`. It asks for t
 **Host styles.** The components set their own control styles: every `<input>` and `<button>` has an explicit `type`, and each text field states its border, radius, padding, background and text colours (light and dark), placeholder colour and focus ring. So they look the same in an app that uses `@tailwindcss/forms` (whose base styles restyle text inputs and add a blue focus ring) or a global `input {}` rule in its Tailwind base layer. The challenge's code boxes are drawn by spans over one invisible `<input>`, which resets border, padding, shadow and ring. They still rely on the app's Tailwind (v3 or v4) compiling the classes, its preflight (`box-sizing: border-box`, no default margins), the `dark` class strategy for dark mode, and the app's font. CSS outside any layer (e.g. a theme stylesheet with plain `input { … }` rules, loaded after Tailwind v4) wins over Tailwind utilities, so scope such rules to the app's own forms. `make preview` has a "Host forms plugin" toggle (`?forms=1`) to check this. Components published at v0.4.0 or earlier don't have this: re-publish `challenge-form`, `recovery-code-form`, `factor-setup-dialog`, `factor-cards`, `password-confirm-form`, `totp-setup`, `destination-setup` and `add-factor-form` (`php artisan mfa:install --force`, which overwrites customised files, or copy them from `stubs/inertia-react/`).
 
 **Adding the nudge (after v0.3.6).** New: the `enable-nudge` component, `MfaIconShieldLock` in `icons.tsx`, `mfaNudgeProps()` and `useMfaNudge()` in `mfa-context.ts` (the context gains `nudge`), and a `notice` prop on `factor-cards` that the settings page fills from its new `nudge` prop. Run `php artisan mfa:install` for the new component; take `icons.tsx`, `factor-cards.tsx`, `mfa-context.ts` and `settings.tsx` with `--force` or copy them from `stubs/inertia-react/`. Then mount it in the layout as above. Set `MFA_NUDGE_ENABLED=false` to keep it off.
+
+**Upgrading for the theme (after v0.8.2).** The components take their accent from `--mfa-primary` and `--mfa-primary-foreground`, with today's colours as fallbacks. Re-publish them with the pages (`php artisan mfa:install --force`, or copy them from `stubs/inertia-react/`); a plain `php artisan mfa:install` adds `resources/css/vendor/laravel-mfa/theme.css`. Then import it as above. Components published earlier keep their near-black accent.
 
 **Upgrading for "remember me" pre-ticking "don't ask again" (after v0.8.2).** The challenge prop `trustBrowser` gains `checked` (the box starts ticked when the browser holds the user's remember-me cookie; config `trusted_browsers.default_when_remembered`, on). Only the challenge page changed: re-publish it (`php artisan mfa:install --force`, or copy `stubs/inertia-react/pages/challenge.tsx`). An older page ignores `checked` and keeps the box unticked.
 

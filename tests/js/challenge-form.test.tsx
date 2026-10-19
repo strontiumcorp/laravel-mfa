@@ -119,7 +119,7 @@ describe('MfaChallengeForm', () => {
             const { container } = setup();
             await userEvent.type(codeInput(), '12');
 
-            const marked = [...container.querySelectorAll('[data-box]')].map((b) => b.className.includes('border-gray-900'));
+            const marked = [...container.querySelectorAll('[data-box]')].map((b) => b.className.includes('border-[color:var(--mfa-primary,#111827)]'));
             expect(marked).toEqual([false, false, true, false, false, false]);
         });
 

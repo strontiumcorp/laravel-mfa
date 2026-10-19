@@ -115,14 +115,14 @@ const formatDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, 
 
 // On phones the action gets its own full-width row under the text.
 const ACTION = 'col-span-2 w-full sm:col-span-1 sm:w-auto';
-const PRIMARY = `${ACTION} min-h-11 shrink-0 rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900`;
+const PRIMARY = `${ACTION} min-h-11 shrink-0 rounded-lg bg-[color:var(--mfa-primary,#111827)] px-5 text-sm font-semibold text-[color:var(--mfa-primary-foreground,#ffffff)] disabled:opacity-50 dark:bg-[color:var(--mfa-primary,#f3f4f6)] dark:text-[color:var(--mfa-primary-foreground,#111827)]`;
 const SECONDARY =
     `${ACTION} min-h-11 shrink-0 rounded-lg border border-gray-300 bg-white px-5 text-sm font-medium text-gray-900 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100`;
 
 // Text fields set every part of their look (type, border, padding, colours, focus ring), so a host's
 // form styles (@tailwindcss/forms, a global `input {}` rule) can't change them.
 const FIELD =
-    'appearance-none rounded-lg border border-gray-300 bg-white text-gray-900 shadow-none placeholder:text-gray-400 focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:ring-offset-0 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-600 dark:focus:border-gray-100 dark:focus:ring-gray-100/20';
+    'appearance-none rounded-lg border border-gray-300 bg-white text-gray-900 shadow-none placeholder:text-gray-400 focus:border-[color:var(--mfa-primary,#111827)] focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_oklab,var(--mfa-primary,#111827)_10%,transparent)] focus:ring-offset-0 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-600 dark:focus:border-[color:var(--mfa-primary,#f3f4f6)] dark:focus:ring-[color:color-mix(in_oklab,var(--mfa-primary,#f3f4f6)_20%,transparent)]';
 
 export default function MfaFactorCards<F extends MfaCardFactor>({
     types,
@@ -319,7 +319,7 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
             <article
                 key={`t${type}`}
                 className={`rounded-2xl bg-white dark:bg-gray-900 ${
-                    highlight ? 'border-[1.5px] border-gray-900 ring-4 ring-gray-900/5 dark:border-gray-100 dark:ring-gray-100/10' : 'border border-dashed border-gray-300 dark:border-gray-700'
+                    highlight ? 'border-[1.5px] border-[color:var(--mfa-primary,#111827)] ring-4 ring-[color:color-mix(in_oklab,var(--mfa-primary,#111827)_5%,transparent)] dark:border-[color:var(--mfa-primary,#f3f4f6)] dark:ring-[color:color-mix(in_oklab,var(--mfa-primary,#f3f4f6)_10%,transparent)]' : 'border border-dashed border-gray-300 dark:border-gray-700'
                 }`}
             >
                 <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-3 p-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-x-5 sm:gap-y-4 sm:p-5 sm:px-6">
@@ -374,7 +374,7 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
                                 <li className={`flex items-center gap-2 ${setup ? 'text-green-700 dark:text-green-400' : 'font-medium text-gray-900 dark:text-gray-100'}`}>
                                     <span
                                         className={`flex size-6 items-center justify-center rounded-full text-xs ${
-                                            setup ? 'bg-green-100 dark:bg-green-900/50' : 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                                            setup ? 'bg-green-100 dark:bg-green-900/50' : 'bg-[color:var(--mfa-primary,#111827)] text-[color:var(--mfa-primary-foreground,#ffffff)] dark:bg-[color:var(--mfa-primary,#f3f4f6)] dark:text-[color:var(--mfa-primary-foreground,#111827)]'
                                         }`}
                                     >
                                         {setup ? (
@@ -388,7 +388,7 @@ export default function MfaFactorCards<F extends MfaCardFactor>({
                                 <li className={`flex items-center gap-2 ${setup ? 'font-medium text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
                                     <span
                                         className={`flex size-6 items-center justify-center rounded-full text-xs ${
-                                            setup ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900' : 'bg-gray-100 dark:bg-gray-800'
+                                            setup ? 'bg-[color:var(--mfa-primary,#111827)] text-[color:var(--mfa-primary-foreground,#ffffff)] dark:bg-[color:var(--mfa-primary,#f3f4f6)] dark:text-[color:var(--mfa-primary-foreground,#111827)]' : 'bg-gray-100 dark:bg-gray-800'
                                         }`}
                                     >
                                         2

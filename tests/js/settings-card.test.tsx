@@ -66,9 +66,9 @@ describe('MfaSettingsCard', () => {
     it('puts the action under the text, as a primary button only when there is something to set up', () => {
         const { rerender } = render(<MfaSettingsCard settingsUrl="/mfa/settings" hasMfa />);
         expect(screen.getByRole('link', { name: 'Manage' })).toHaveClass('border');
-        expect(screen.getByRole('link', { name: 'Manage' })).not.toHaveClass('bg-gray-900');
+        expect(screen.getByRole('link', { name: 'Manage' })).not.toHaveClass('bg-[color:var(--mfa-primary,#111827)]');
 
         rerender(<MfaSettingsCard settingsUrl="/mfa/settings" />);
-        expect(screen.getByRole('link', { name: 'Set up' })).toHaveClass('bg-gray-900', 'dark:bg-gray-100');
+        expect(screen.getByRole('link', { name: 'Set up' })).toHaveClass('bg-[color:var(--mfa-primary,#111827)]', 'dark:bg-[color:var(--mfa-primary,#f3f4f6)]');
     });
 });

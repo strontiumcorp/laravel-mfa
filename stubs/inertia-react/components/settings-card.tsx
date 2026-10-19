@@ -38,8 +38,8 @@ export type MfaSettingsCardProps = {
 // The card's own surface; className adds to it.
 const SURFACE = 'rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:p-8 dark:border-gray-800 dark:bg-gray-900';
 const ACTION =
-    'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 dark:focus-visible:ring-gray-100 dark:focus-visible:ring-offset-gray-900';
-const PRIMARY = `${ACTION} bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white`;
+    'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm font-semibold no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--mfa-primary,#111827)] focus-visible:ring-offset-2 dark:focus-visible:ring-[color:var(--mfa-primary,#f3f4f6)] dark:focus-visible:ring-offset-gray-900';
+const PRIMARY = `${ACTION} bg-[color:var(--mfa-primary,#111827)] text-[color:var(--mfa-primary-foreground,#ffffff)] hover:bg-[color:color-mix(in_oklab,var(--mfa-primary,#111827)_90%,transparent)] dark:bg-[color:var(--mfa-primary,#f3f4f6)] dark:text-[color:var(--mfa-primary-foreground,#111827)] dark:hover:bg-[color:color-mix(in_oklab,var(--mfa-primary,#f3f4f6)_90%,transparent)]`;
 const SECONDARY = `${ACTION} border border-gray-300 bg-white text-gray-900 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800`;
 
 const defaultLink = ({ href, className, children }: MfaSettingsCardLink) => (

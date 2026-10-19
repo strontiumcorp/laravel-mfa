@@ -5,6 +5,7 @@ use Illuminate\Filesystem\Filesystem;
 use Illuminate\Foundation\Auth\User;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Support\Facades\Artisan;
+use StrontiumCorp\LaravelMfa\Console\InstallCommand;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
@@ -60,7 +61,7 @@ it('publishes the pages into the app\'s pages directory and the components into 
     $names = fn (string $path) => collect($files->files($path))->map->getFilename()->sort()->values()->all();
 
     try {
-        $this->artisan('mfa:install', ['--js-path' => $js])
+        $this->artisan('mfa:install', ['--js-path' => $js, '--css-path' => "{$js}/css"])
             ->assertSuccessful()
             ->expectsOutputToContain("{$js}/{$dir}/mfa/challenge.tsx")
             ->expectsOutputToContain("{$js}/components/vendor/laravel-mfa/challenge-form.tsx")
@@ -97,7 +98,7 @@ it('points at the files left by an earlier version', function () {
     Artisan::command('vendor:publish {--tag=} {--force}', fn () => null);
 
     try {
-        $this->artisan('mfa:install', ['--js-path' => $js])
+        $this->artisan('mfa:install', ['--js-path' => $js, '--css-path' => "{$js}/css"])
             ->assertSuccessful()
             ->expectsOutputToContain("Found files from an earlier version in {$js}/Components/mfa/");
 
@@ -118,7 +119,7 @@ it('does not overwrite customised pages or components unless forced, and can ski
     Artisan::command('vendor:publish {--tag=} {--force}', fn () => null);
 
     try {
-        $this->artisan('mfa:install', ['--js-path' => $js])
+        $this->artisan('mfa:install', ['--js-path' => $js, '--css-path' => "{$js}/css"])
             ->assertSuccessful()
             ->expectsOutputToContain("Skipped (exists): {$js}/pages/mfa/challenge.tsx")
             ->expectsOutputToContain("Skipped (exists): {$js}/components/vendor/laravel-mfa/challenge-form.tsx");
@@ -126,18 +127,85 @@ it('does not overwrite customised pages or components unless forced, and can ski
             ->and(file_get_contents("{$js}/components/vendor/laravel-mfa/challenge-form.tsx"))->toBe('customised')
             ->and("{$js}/components/vendor/laravel-mfa/totp-setup.tsx")->toBeFile();
 
-        $this->artisan('mfa:install', ['--js-path' => $js, '--force' => true])->assertSuccessful();
+        $this->artisan('mfa:install', ['--js-path' => $js, '--css-path' => "{$js}/css", '--force' => true])->assertSuccessful();
         expect(file_get_contents("{$js}/pages/mfa/challenge.tsx"))->not->toBe('customised')
             ->and(file_get_contents("{$js}/components/vendor/laravel-mfa/challenge-form.tsx"))->not->toBe('customised');
 
         $files->deleteDirectory("{$js}/pages/mfa");
         $files->deleteDirectory("{$js}/components");
-        $this->artisan('mfa:install', ['--js-path' => $js, '--no-ui' => true])->assertSuccessful();
+        $files->deleteDirectory("{$js}/css");
+        $this->artisan('mfa:install', ['--js-path' => $js, '--css-path' => "{$js}/css", '--no-ui' => true])->assertSuccessful();
         expect("{$js}/pages/mfa")->not->toBeDirectory()
-            ->and("{$js}/components")->not->toBeDirectory();
+            ->and("{$js}/components")->not->toBeDirectory()
+            ->and("{$js}/css")->not->toBeDirectory();
     } finally {
         $files->deleteDirectory($js);
     }
+});
+
+describe('the theme', function () {
+    it('publishes the theme for the app\'s Tailwind version and says how to import it', function (?string $tailwind, string $stub, string $where) {
+        $files = new Filesystem;
+        $tmp = sys_get_temp_dir().'/mfa-install-'.uniqid();
+        Artisan::command('vendor:publish {--tag=} {--force}', fn () => null);
+
+        try {
+            $this->artisan('mfa:install', array_filter(['--js-path' => "{$tmp}/js", '--css-path' => "{$tmp}/css", '--tailwind' => $tailwind]))
+                ->assertSuccessful()
+                ->expectsOutputToContain("{$tmp}/css/vendor/laravel-mfa/theme.css")
+                ->expectsOutputToContain("@import './vendor/laravel-mfa/theme.css';")
+                ->expectsOutputToContain($where);
+
+            expect(file_get_contents("{$tmp}/css/vendor/laravel-mfa/theme.css"))
+                ->toBe(file_get_contents(__DIR__."/../../stubs/inertia-react/css/{$stub}"));
+        } finally {
+            $files->deleteDirectory($tmp);
+        }
+    })->with([
+        'no Tailwind found: 4' => [null, 'theme.css', 'resources/css/app.css'],
+        'Tailwind 4' => ['4', 'theme.css', 'resources/css/app.css'],
+        'Tailwind 3 (artistly)' => ['3', 'theme.tailwind-3.css', 'before the @tailwind directives'],
+    ]);
+
+    it('keeps a customised theme unless forced', function () {
+        $files = new Filesystem;
+        $tmp = sys_get_temp_dir().'/mfa-install-'.uniqid();
+        $files->ensureDirectoryExists("{$tmp}/css/vendor/laravel-mfa");
+        $files->put("{$tmp}/css/vendor/laravel-mfa/theme.css", ':root { --mfa-primary: #7042f3; }');
+        Artisan::command('vendor:publish {--tag=} {--force}', fn () => null);
+
+        try {
+            $this->artisan('mfa:install', ['--js-path' => "{$tmp}/js", '--css-path' => "{$tmp}/css"])
+                ->assertSuccessful()
+                ->expectsOutputToContain("Skipped (exists): {$tmp}/css/vendor/laravel-mfa/theme.css");
+            expect(file_get_contents("{$tmp}/css/vendor/laravel-mfa/theme.css"))->toBe(':root { --mfa-primary: #7042f3; }');
+
+            $this->artisan('mfa:install', ['--js-path' => "{$tmp}/js", '--css-path' => "{$tmp}/css", '--force' => true])->assertSuccessful();
+            expect(file_get_contents("{$tmp}/css/vendor/laravel-mfa/theme.css"))->toContain('--mfa-primary: var(--primary);');
+        } finally {
+            $files->deleteDirectory($tmp);
+        }
+    });
+
+    it('refuses an unknown --tailwind', function () {
+        Artisan::command('vendor:publish {--tag=} {--force}', fn () => null);
+
+        $this->artisan('mfa:install', ['--no-ui' => true, '--tailwind' => '2'])
+            ->assertFailed()
+            ->expectsOutputToContain('--tailwind must be 3 or 4');
+    });
+
+    it('reads the Tailwind major from package.json', function (?string $json, ?int $major) {
+        expect(InstallCommand::tailwindMajor($json))->toBe($major);
+    })->with([
+        'artistly' => ['{"devDependencies": {"tailwindcss": "^3.2.1"}}', 3],
+        'clone-voice' => ['{"devDependencies": {"tailwindcss": "^4.0.0"}}', 4],
+        'in dependencies' => ['{"dependencies": {"tailwindcss": "~4.1.16"}}', 4],
+        'no Tailwind' => ['{"devDependencies": {"react": "^19.0.0"}}', null],
+        'not a version' => ['{"devDependencies": {"tailwindcss": "latest"}}', null],
+        'not JSON' => ['{', null],
+        'no package.json' => [null, null],
+    ]);
 });
 
 it('registers in php artisan about', function () {

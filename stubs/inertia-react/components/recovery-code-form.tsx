@@ -22,7 +22,7 @@ export type MfaRecoveryCodeFormProps = {
 };
 
 const CARD = 'w-full rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900';
-const PRIMARY = 'min-h-11 w-full rounded-lg bg-gray-900 px-5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900';
+const PRIMARY = 'min-h-11 w-full rounded-lg bg-[color:var(--mfa-primary,#111827)] px-5 text-sm font-semibold text-[color:var(--mfa-primary-foreground,#ffffff)] disabled:opacity-50 dark:bg-[color:var(--mfa-primary,#f3f4f6)] dark:text-[color:var(--mfa-primary-foreground,#111827)]';
 const QUIET =
     'inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100';
 
@@ -30,8 +30,8 @@ const QUIET =
 // form styles (@tailwindcss/forms, a global `input {}` rule) can't change them.
 // The border colour depends on the error, so it's not part of FIELD (two colour classes would clash).
 const FIELD =
-    'appearance-none rounded-lg border bg-white text-gray-900 shadow-none placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:ring-offset-0 dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-600 dark:focus:ring-gray-100/20';
-const FIELD_BORDER = 'border-gray-300 focus:border-gray-900 dark:border-gray-700 dark:focus:border-gray-100';
+    'appearance-none rounded-lg border bg-white text-gray-900 shadow-none placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[color:color-mix(in_oklab,var(--mfa-primary,#111827)_10%,transparent)] focus:ring-offset-0 dark:bg-gray-950 dark:text-gray-100 dark:placeholder:text-gray-600 dark:focus:ring-[color:color-mix(in_oklab,var(--mfa-primary,#f3f4f6)_20%,transparent)]';
+const FIELD_BORDER = 'border-gray-300 focus:border-[color:var(--mfa-primary,#111827)] dark:border-gray-700 dark:focus:border-[color:var(--mfa-primary,#f3f4f6)]';
 const FIELD_BORDER_ERROR = 'border-red-500 focus:border-red-500 dark:border-red-500 dark:focus:border-red-500';
 
 // A whole code on its own: groups joined by dashes ("ab3de-fg7hk"), or a long enough run of letters and digits.
