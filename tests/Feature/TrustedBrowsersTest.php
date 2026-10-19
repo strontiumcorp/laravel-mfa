@@ -347,6 +347,126 @@ it('is pruned after it expires, goes with the user, and shows in mfa:status', fu
     expect(MfaTrustedBrowser::query()->count())->toBe(0);
 });
 
+describe('across real sign-ins: a password login, the session expiring, remember-me', function () {
+    /**
+     * A request from a browser holding $jar (name => raw cookie value as the
+     * server set it); the cookies the response sets or deletes update $jar.
+     */
+    function fromBrowser($test, array &$jar, Closure $request): TestResponse
+    {
+        (fn () => $this->unencryptedCookies = [])->call($test);
+        // A real request starts with nothing queued; the test app keeps one cookie jar across requests.
+        app('cookie')->flushQueuedCookies();
+        $response = $request($test->withCredentials()->withUnencryptedCookies($jar));
+
+        foreach ($response->headers->getCookies() as $cookie) {
+            if ($cookie->isCleared()) {
+                unset($jar[$cookie->getName()]);
+            } else {
+                $jar[$cookie->getName()] = $cookie->getValue();
+            }
+        }
+
+        return $response;
+    }
+
+    /** The app's login form: Auth::attempt() with or without "remember me". */
+    function signIn($test, array &$jar, $user, bool $remember): void
+    {
+        fromBrowser($test, $jar, fn ($t) => $t->post('/test-login', ['email' => $user->email, 'password' => 'password', 'remember' => $remember]))->assertOk();
+    }
+
+    /** Pass the challenge, ticking "don't ask again" or not. */
+    function passChallenge($test, array &$jar, $user, MfaFactor $factor, bool $trust): void
+    {
+        $test->travel(31)->seconds(); // a new TOTP step: each code works once
+        fromBrowser($test, $jar, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
+        fromBrowser($test, $jar, fn ($t) => $t->postJson('/mfa/challenge', ['factor_id' => $factor->id, 'code' => $t->currentTotpCode($factor), 'remember' => $trust]))->assertOk();
+        fromBrowser($test, $jar, fn ($t) => $t->get('/dashboard'))->assertOk();
+    }
+
+    /** Idle past session.lifetime: the server-side session is gone (the browser's other cookies stay). */
+    function sessionExpires($test, array &$jar): void
+    {
+        $test->flushSession();
+        Auth::forgetGuards();
+        unset($jar[config('session.cookie')]);
+    }
+
+    beforeEach(function () {
+        Route::middleware('web')->post('/test-login', function () {
+            abort_unless(Auth::attempt(request()->only('email', 'password'), request()->boolean('remember')), 422);
+            request()->session()->regenerate();
+
+            return 'signed in';
+        });
+    });
+
+    it('skips the challenge when signing in again with the password on a trusted browser, without remember-me', function () {
+        Event::fake([VerificationSucceeded::class]);
+        [$user, $factor] = $this->userWithFactor();
+        $jar = [];
+
+        signIn($this, $jar, $user, remember: false);
+        passChallenge($this, $jar, $user, $factor, trust: true);
+        expect($jar)->not->toHaveKey(Auth::guard('web')->getRecallerName());
+
+        // Two hours idle: logged out, so the password is asked again...
+        $this->travel(3)->hours();
+        sessionExpires($this, $jar);
+        fromBrowser($this, $jar, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('login'));
+
+        // ...but not the code.
+        signIn($this, $jar, $user, remember: false);
+        fromBrowser($this, $jar, fn ($t) => $t->get('/dashboard'))->assertOk();
+        Event::assertDispatched(VerificationSucceeded::class, fn ($e) => ($e->context['via'] ?? null) === 'trusted_browser');
+
+        // The next day too.
+        $this->travel(1)->day();
+        sessionExpires($this, $jar);
+        signIn($this, $jar, $user, remember: false);
+        fromBrowser($this, $jar, fn ($t) => $t->get('/dashboard'))->assertOk();
+    });
+
+    it('skips the challenge when remember-me logs the user back in on a trusted browser', function () {
+        [$user, $factor] = $this->userWithFactor();
+        $jar = [];
+
+        signIn($this, $jar, $user, remember: true);
+        passChallenge($this, $jar, $user, $factor, trust: true);
+
+        $this->travel(1)->day();
+        sessionExpires($this, $jar);
+        fromBrowser($this, $jar, fn ($t) => $t->get('/dashboard'))->assertOk();
+    });
+
+    it('challenges each new remember-me session when "don\'t ask again" was unticked (why it starts ticked)', function () {
+        [$user, $factor] = $this->userWithFactor();
+        $jar = [];
+
+        signIn($this, $jar, $user, remember: true);
+        fromBrowser($this, $jar, fn ($t) => $t->getJson('/mfa/challenge'))->assertJsonPath('trustBrowser.checked', true);
+        passChallenge($this, $jar, $user, $factor, trust: false);
+
+        $this->travel(1)->day();
+        sessionExpires($this, $jar);
+        fromBrowser($this, $jar, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
+    });
+
+    it('still challenges the same user in a browser without the cookie (cleared cookies, a private window)', function () {
+        [$user, $factor] = $this->userWithFactor();
+        $jar = [];
+
+        signIn($this, $jar, $user, remember: false);
+        passChallenge($this, $jar, $user, $factor, trust: true);
+
+        sessionExpires($this, $jar);
+        $jar = [];
+        signIn($this, $jar, $user, remember: false);
+        fromBrowser($this, $jar, fn ($t) => $t->get('/dashboard'))->assertRedirect(route('mfa.challenge'));
+    });
+});
+
 describe('the reminder before a trusted browser expires', function () {
     beforeEach(function () {
         Route::middleware(['web', 'auth'])->get('/app-page', fn () => Mfa::context()->reverifyReminder);
