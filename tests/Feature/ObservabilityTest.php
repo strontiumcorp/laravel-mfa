@@ -4,12 +4,16 @@ use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Schema;
 use StrontiumCorp\LaravelMfa\Contracts\MetricsRecorder;
 use StrontiumCorp\LaravelMfa\Contracts\MfaActivity;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
+use StrontiumCorp\LaravelMfa\Notifications\OtpCodeNotification;
+use StrontiumCorp\LaravelMfa\Support\CodeHasher;
+use StrontiumCorp\LaravelMfa\Support\DestinationFingerprint;
 
 function captureMfaLogs(): Collection
 {
@@ -219,4 +223,102 @@ describe('refusals by a limit', function () {
         expect($rows())->toBe(['verification_failed:send'])
             ->and(array_filter($recorder->counters, fn ($c) => ($c[1]['reason'] ?? null) === 'rate_limited'))->toHaveCount(3);
     });
+});
+
+/** Audit context of the destination events, keyed by event name. */
+function destinationAudit(int $userId): array
+{
+    return MfaAuditLog::query()->where('user_id', $userId)
+        ->whereIn('event', ['factor_enrollment_started', 'challenge_sent', 'factor_enabled'])
+        ->orderBy('id')->get()
+        ->mapWithKeys(fn (MfaAuditLog $row) => [$row->event => $row->context])
+        ->all();
+}
+
+function lastEmailedCode(): string
+{
+    $code = null;
+    Notification::assertSentOnDemand(OtpCodeNotification::class, function (OtpCodeNotification $n) use (&$code) {
+        $code = $n->code;
+
+        return true;
+    });
+
+    return $code;
+}
+
+it('fingerprints an email destination and flags that it is the account email, without logging the address', function () {
+    Notification::fake();
+    $logs = captureMfaLogs();
+    $user = $this->makeUser(['email' => 'owner@example.com']);
+    $this->loginWithSession($user);
+
+    // Case and spacing don't matter: it is still the account's own address.
+    $id = $this->postJson(route('mfa.factors.store'), ['type' => 'email', 'destination' => '  Owner@EXAMPLE.com '])->assertOk()->json('factor.id');
+    $this->postJson(route('mfa.factors.confirm', $id), ['code' => lastEmailedCode()])->assertOk();
+
+    $audit = destinationAudit($user->id);
+    expect(array_keys($audit))->toEqualCanonicalizing(['factor_enrollment_started', 'challenge_sent', 'factor_enabled']);
+    foreach ($audit as $context) {
+        expect($context['destination_is_account_email'])->toBeTrue()
+            ->and($context['destination_fingerprint'])->toMatch('/^fp_[0-9a-f]{16}$/');
+    }
+    expect(array_unique(array_column($audit, 'destination_fingerprint')))->toHaveCount(1);
+
+    $everything = json_encode(MfaAuditLog::all()->toArray()).$logs->map(fn ($e) => json_encode($e->context).$e->message)->implode('');
+    expect(strtolower($everything))->not->toContain('owner@')->not->toContain('example.com');
+});
+
+it('flags an email destination that is not the account email, with the same fingerprint for the same address on any account', function () {
+    Notification::fake();
+    $prints = [];
+
+    foreach (['first@example.com', 'second@example.com'] as $email) {
+        $user = $this->makeUser(['email' => $email]);
+        $this->loginWithSession($user);
+        $this->postJson(route('mfa.factors.store'), ['type' => 'email', 'destination' => 'Someone.Else@Elsewhere.test'])->assertOk();
+
+        $context = destinationAudit($user->id)['factor_enrollment_started'];
+        expect($context['destination_is_account_email'])->toBeFalse();
+        $prints[] = $context['destination_fingerprint'];
+    }
+
+    // One address used on two accounts links them, without storing it.
+    expect($prints[0])->toBe($prints[1])
+        ->and(json_encode(MfaAuditLog::all()->toArray()))->not->toContain('elsewhere');
+});
+
+it('fingerprints an SMS destination but makes no account-email claim', function () {
+    Mfa::fakeSms();
+    $user = $this->makeUser();
+    $this->loginWithSession($user);
+
+    $this->postJson(route('mfa.factors.store'), ['type' => 'sms', 'destination' => '+1 555 555 0199'])->assertOk();
+
+    $audit = destinationAudit($user->id);
+    foreach (['factor_enrollment_started', 'challenge_sent'] as $event) {
+        expect($audit[$event]['destination_fingerprint'])->toMatch('/^fp_[0-9a-f]{16}$/')
+            ->and($audit[$event])->not->toHaveKey('destination_is_account_email');
+    }
+    expect(json_encode(MfaAuditLog::all()->toArray()))->not->toContain('5550199');
+});
+
+it('adds no destination signal for an authenticator app', function () {
+    $user = $this->makeUser();
+    $this->loginWithSession($user);
+
+    $this->postJson(route('mfa.factors.store'), ['type' => 'totp'])->assertOk();
+
+    expect(destinationAudit($user->id)['factor_enrollment_started'])
+        ->not->toHaveKey('destination_fingerprint')
+        ->not->toHaveKey('destination_is_account_email');
+});
+
+it('keys the fingerprint from APP_KEY, so it changes when the key does', function () {
+    [$user, $factor] = $this->userWithFactor(FactorType::Sms);
+    $print = fn (string $key) => (new DestinationFingerprint(new CodeHasher([$key])))->context($factor, $user)['destination_fingerprint'];
+    $a = 'base64:'.base64_encode(str_repeat('a', 32));
+    $b = 'base64:'.base64_encode(str_repeat('b', 32));
+
+    expect($print($a))->toBe($print($a))->not->toBe($print($b));
 });

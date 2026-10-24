@@ -2,6 +2,7 @@
 
 namespace StrontiumCorp\LaravelMfa\Factors;
 
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Contracts\Events\Dispatcher as Events;
 use Illuminate\Support\Facades\Context;
@@ -16,6 +17,7 @@ use StrontiumCorp\LaravelMfa\Jobs\DeliverOtp;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Support\ChallengeState;
 use StrontiumCorp\LaravelMfa\Support\DeliveryQueue;
+use StrontiumCorp\LaravelMfa\Support\DestinationFingerprint;
 use StrontiumCorp\LaravelMfa\Support\Mask;
 use StrontiumCorp\LaravelMfa\Support\OtpStore;
 use StrontiumCorp\LaravelMfa\Support\RequestContext;
@@ -147,6 +149,8 @@ abstract class OtpFactor implements Factor
         $this->events->dispatch(new ChallengeSent($factor->user, $this->type(), null, [
             'factor_id' => $factor->getKey(),
             'queued' => $queued,
+            // Resolved per send (not injected) so custom factors' constructors are unchanged.
+            ...Container::getInstance()->make(DestinationFingerprint::class)->context($factor, $factor->user),
         ]));
 
         // Equivalent mutant(s): unverified_sends is computed as an int.

@@ -22,6 +22,7 @@ final class EnrollmentService
         private readonly ChallengeService $challenges,
         private readonly RecoveryCodes $recoveryCodes,
         private readonly Dispatcher $events,
+        private readonly DestinationFingerprint $destinations,
     ) {}
 
     /**
@@ -38,7 +39,10 @@ final class EnrollmentService
 
         $enrollment = $this->mfa->factor($type)->enroll($user, $input);
 
-        $this->events->dispatch(new FactorEnrollmentStarted($user, $type, null, ['factor_id' => $enrollment['factor']->getKey()]));
+        $this->events->dispatch(new FactorEnrollmentStarted($user, $type, null, [
+            'factor_id' => $enrollment['factor']->getKey(),
+            ...$this->destinations->context($enrollment['factor'], $user),
+        ]));
 
         return $enrollment;
     }
@@ -64,7 +68,10 @@ final class EnrollmentService
 
         $factor->forceFill(['confirmed_at' => now()])->save();
 
-        $this->events->dispatch(new FactorEnabled($user, $factor->type, null, ['factor_id' => $factor->getKey()]));
+        $this->events->dispatch(new FactorEnabled($user, $factor->type, null, [
+            'factor_id' => $factor->getKey(),
+            ...$this->destinations->context($factor, $user),
+        ]));
 
         // "initial": the set that comes with the account's first method (its
         // FactorEnabled email says so), not a new set after all were used.

@@ -477,7 +477,9 @@ describe('factors', function () {
 
         $this->loginWithSession($user)->postJson('/mfa/challenge/send', ['factor_id' => $factor->id]);
 
-        Event::assertDispatched(Events\ChallengeSent::class, fn ($e) => $e->context === ['factor_id' => $factor->id, 'queued' => false]);
+        Event::assertDispatched(Events\ChallengeSent::class, fn ($e) => array_keys($e->context) === ['factor_id', 'queued', 'destination_fingerprint']
+            && $e->context['factor_id'] === $factor->id && $e->context['queued'] === false
+            && preg_match('/^fp_[0-9a-f]{16}$/', $e->context['destination_fingerprint']) === 1);
     });
 
     it('normalises email destinations', function () {

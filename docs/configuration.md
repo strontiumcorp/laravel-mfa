@@ -299,6 +299,13 @@ Every action fires an event (`StrontiumCorp\LaravelMfa\Events\*`), which goes to
 
 All events of one login attempt share a `flow_id`, which also appears in the app's own log lines for that request.
 
+**Where email and SMS codes go, without the address.** `FactorEnrollmentStarted`, `ChallengeSent` and `FactorEnabled` for an email or SMS factor carry:
+
+- `destination_fingerprint`: `fp_` plus 16 hex characters, a keyed HMAC of the normalised address (lowercased, trimmed). The same address gives the same value on any account, so one address used on several accounts shows up in the audit table, but it can't be turned back into the address without `APP_KEY`. It's computed with the current key only, so values from before an `APP_KEY` rotation don't match values after it.
+- `destination_is_account_email` (email factors only): whether the address is the account's own (`getMfaEmail()`). For incident response: a factor confirmed for the account's own address means whoever confirmed it could read that inbox; one on another address points at an address someone added.
+
+Authenticator apps carry neither.
+
 Support commands:
 
 ```bash
