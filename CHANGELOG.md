@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.10.0 - 2026-10-26
+
+_Changes since `v0.9.1`._
+
+### Breaking changes
+
+- **recovery-codes:** save new codes only after they are downloaded (81c8624)
+
+### Features
+
+- **install:** --ui-only, and replace published files the app never changed (d79a6cc)
+- **observability:** fingerprint email/SMS destinations in audit events (57f15e9)
+
+### Fixes
+
+- **trusted-browsers:** stop expires_at updating itself on MySQL 5.7 and MariaDB < 10.10 (0371866)
+
+### Documentation
+
+- **plan:** log the SDAP-791 trust fix and recovery codes download-to-finish (39140c4)
+
 ## v0.9.1 - 2026-10-19
 
 _Changes since `v0.9.0`._
