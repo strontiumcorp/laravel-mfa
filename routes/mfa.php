@@ -37,6 +37,10 @@ Route::prefix(config('mfa.routes.prefix'))
         Route::delete('trusted-browsers', [SettingsController::class, 'forgetTrustedBrowsers'])->name('trusted-browsers.destroy-all');
         Route::delete('trusted-browsers/{browser}', [SettingsController::class, 'forgetTrustedBrowsers'])->whereNumber('browser')->name('trusted-browsers.destroy');
         Route::post('recovery-codes', [SettingsController::class, 'regenerateRecoveryCodes'])->middleware($confirm)->name('recovery-codes.store');
+        // A new set is saved only after it was downloaded (a first method stays off until then).
+        Route::get('recovery-codes/download', [SettingsController::class, 'downloadRecoveryCodes'])->name('recovery-codes.download');
+        Route::post('recovery-codes/finish', [SettingsController::class, 'finishRecoveryCodes'])->name('recovery-codes.finish');
+        Route::delete('recovery-codes/pending', [SettingsController::class, 'discardRecoveryCodes'])->name('recovery-codes.discard');
 
         Route::post('enrollment-verification/send', [EnrollmentVerificationController::class, 'send'])->name('enrollment-verification.send');
         Route::post('enrollment-verification', [EnrollmentVerificationController::class, 'verify'])->name('enrollment-verification.verify');

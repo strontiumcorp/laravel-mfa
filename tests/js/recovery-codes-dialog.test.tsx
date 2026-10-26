@@ -18,7 +18,7 @@ describe('MfaRecoveryCodesDialog', () => {
         const { unmount } = render(<MfaRecoveryCodesDialog {...base} onGenerate={onGenerate} />);
 
         expect(screen.getByRole('dialog', { name: 'Generate new recovery codes?' })).toHaveAttribute('aria-modal', 'true');
-        expect(dialog()).toHaveTextContent("Your 8 unused codes stop working as soon as the new ones are made. You'll get 10 new codes to copy or download.");
+        expect(dialog()).toHaveTextContent("Your 8 unused codes stop working once you've downloaded the new ones and pressed Finish. You'll get 10 new codes to download.");
         expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
         expect(document.body.style.overflow).toBe('hidden');
 
@@ -34,7 +34,7 @@ describe('MfaRecoveryCodesDialog', () => {
         expect(dialog()).toHaveTextContent('Your 1 unused code stops working');
 
         rerender(<MfaRecoveryCodesDialog {...base} remaining={0} total={null} />);
-        expect(dialog()).toHaveTextContent("You've used all your codes. You'll get a new set of codes to copy or download.");
+        expect(dialog()).toHaveTextContent("You've used all your codes. You'll get a new set of codes to download.");
     });
 
     it('waits while generating, and shows why it failed', () => {
@@ -78,41 +78,40 @@ describe('MfaRecoveryCodesDialog', () => {
         expect(screen.getByRole('button', { name: 'Try again in 1:05' })).toBeDisabled();
     });
 
-    it('shows the new codes once, with no way out until they are copied', async () => {
+    it('shows the new codes with Download only, and Finish once they are downloaded', async () => {
         const onComplete = vi.fn();
-        const onClose = vi.fn();
+        const onDownload = vi.fn();
         const user = userEvent.setup();
-        render(<MfaRecoveryCodesDialog {...base} codes={codes} onComplete={onComplete} onClose={onClose} />);
+        const { rerender } = render(<MfaRecoveryCodesDialog {...base} codes={codes} onDownload={onDownload} onComplete={onComplete} />);
 
-        expect(screen.getByRole('dialog', { name: 'Save your new recovery codes' })).toHaveTextContent('Your old codes no longer work.');
+        expect(screen.getByRole('dialog', { name: 'Save your new recovery codes' })).toHaveTextContent('until then your old codes keep working');
         expect(within(dialog()).getAllByRole('listitem').map((li) => li.textContent)).toEqual(codes);
-        expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
-        const complete = screen.getByRole('button', { name: 'Complete' });
-        expect(complete).toBeDisabled();
-        await user.keyboard('{Escape}');
-        expect(onClose).not.toHaveBeenCalled();
+        expect(screen.queryByRole('button', { name: /copy/i })).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
 
-        await user.click(screen.getByRole('button', { name: 'Copy' }));
-        expect(await navigator.clipboard.readText()).toBe('aaaaa-11111\nbbbbb-22222');
-        await user.click(complete);
+        await user.click(screen.getByRole('button', { name: 'Download recovery codes' }));
+        expect(onDownload).toHaveBeenCalledOnce();
+
+        rerender(<MfaRecoveryCodesDialog {...base} codes={codes} onDownload={onDownload} downloaded onComplete={onComplete} />);
+        await user.click(screen.getByRole('button', { name: 'Finish' }));
         expect(onComplete).toHaveBeenCalledOnce();
     });
 
-    it('downloads the codes as a file named after the app and account', async () => {
-        const createObjectURL = vi.fn((_blob: Blob) => 'blob:codes');
-        Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
-        let name = '';
-        vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
-            name = this.download;
-        });
-        render(<MfaRecoveryCodesDialog {...base} codes={codes} recoveryCodesFile={{ app: 'Acme', slug: 'acme', account: 'jane@example.com' }} />);
+    it('can be closed on the codes (the page drops the new set; the old one stays)', async () => {
+        const onClose = vi.fn();
+        const user = userEvent.setup();
+        render(<MfaRecoveryCodesDialog {...base} codes={codes} onClose={onClose} />);
 
-        await userEvent.click(screen.getByRole('button', { name: 'Download' }));
+        await user.keyboard('{Escape}');
+        await user.click(screen.getByRole('button', { name: 'Close' }));
+        expect(onClose).toHaveBeenCalledTimes(2);
+    });
 
-        expect(name).toMatch(/^acme-recovery-codes-jane@example\.com-\d{4}-\d{2}-\d{2}\.txt$/);
-        const text = await createObjectURL.mock.calls[0][0].text();
-        expect(text).toContain('Acme two-factor recovery codes\nAccount: jane@example.com\n');
-        expect(text).toContain('aaaaa-11111\nbbbbb-22222\n');
-        expect(screen.getByRole('button', { name: 'Complete' })).toBeEnabled();
+    it('shows a download error and Finish saving', () => {
+        const { rerender } = render(<MfaRecoveryCodesDialog {...base} codes={codes} downloadError="Couldn't download the codes." />);
+        expect(screen.getByRole('alert')).toHaveTextContent("Couldn't download the codes.");
+
+        rerender(<MfaRecoveryCodesDialog {...base} codes={codes} downloaded completing />);
+        expect(screen.getByRole('button', { name: 'Finishing…' })).toBeDisabled();
     });
 });

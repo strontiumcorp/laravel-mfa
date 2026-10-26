@@ -1,10 +1,12 @@
 // Published by strontiumcorp/laravel-mfa. This file is yours — restyle freely.
 //
 // New recovery codes, as one dialog:
-//   1. "Generate new recovery codes?": the unused codes stop working.
+//   1. "Generate new recovery codes?": the unused ones stop working once
+//      the new ones are saved.
 //   2. Confirm your password (only when the server asks for it).
-//   3. The new codes (Complete unlocks once they're copied or downloaded; no
-//      way out before that, since they're shown once).
+//   3. The new codes: Download (the page gets the file from the server,
+//      which records it), then Finish, which replaces the old set. No Copy.
+//      Closing here drops the new set and keeps the old one.
 // The steps follow the props: `askPassword` shows the password, `codes` the
 // codes. A bottom sheet on phones, a centred dialog from `sm` up, styled like
 // MfaFactorSetupDialog. Needs only React and ./icons; imports no other
@@ -12,9 +14,9 @@
 //
 //     <MfaRecoveryCodesDialog open remaining={8} total={10} onGenerate={regenerate} processing={regenerating}
 //         askPassword={passwordAsked} onConfirmPassword={confirmPassword}
-//         codes={newCodes} recoveryCodesFile={file} onClose={close} onComplete={close} />
+//         codes={newCodes} onDownload={download} downloaded={downloaded} onClose={discard} onComplete={finish} />
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
-import { MfaIconClose, MfaIconCopy, MfaIconDownload, MfaIconKey } from './icons';
+import { MfaIconCheck, MfaIconClose, MfaIconDownload, MfaIconKey } from './icons';
 
 export type MfaRecoveryCodesDialogProps = {
     open: boolean;
@@ -36,78 +38,24 @@ export type MfaRecoveryCodesDialogProps = {
     /** Seconds until another password attempt is allowed. */
     passwordRetryAfter?: number | null;
 
-    /** The new codes: shows the last step. */
+    /** The new codes, waiting to be saved: shows the last step. */
     codes?: string[] | null;
-    /** Cancel or close before the codes are made. */
+    /** Download: the page fetches the file from the server (which notes it) and saves it. */
+    onDownload?: () => void;
+    downloading?: boolean;
+    /** The file was downloaded: unlocks Finish. */
+    downloaded?: boolean;
+    /** Why the download or Finish failed. */
+    downloadError?: string | null;
+    /** Cancel or close; on the codes step it drops the new set (the old one stays). */
     onClose: () => void;
-    /** Complete, once the codes are copied or downloaded. */
+    /** Finish, once the codes are downloaded: they replace the old set. */
     onComplete: () => void;
-    /**
-     * Who and what the downloaded codes are for (the settings prop
-     * recoveryCodesFile): the file is named "{slug}-recovery-codes-{account}-{date}.txt",
-     * with the browser's local date, and its text names the app and account.
-     */
-    recoveryCodesFile?: { app: string; slug: string; account: string } | null;
-    /** The downloaded file's name, instead of the one built from recoveryCodesFile. */
-    downloadName?: string;
+    /** Finish is saving. */
+    completing?: boolean;
 };
 
 type Step = 'confirm' | 'password' | 'codes';
-
-const pad = (n: number) => String(n).padStart(2, '0');
-// Characters Windows, macOS or Linux won't take in a file name, and control characters.
-// eslint-disable-next-line no-control-regex
-const unsafeInFileName = (text: string) => text.replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '-');
-
-/** The recovery codes file's name and text, dated in the browser's time zone. */
-function recoveryCodesDownload(codes: string[], file: MfaRecoveryCodesDialogProps['recoveryCodesFile'], now: Date) {
-    const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    let zone = '';
-    try {
-        zone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
-    } catch {
-        // No Intl time zone support: the time goes without its zone.
-    }
-    const name = [file?.slug, 'recovery-codes', file?.account, date].filter(Boolean).join('-');
-    const text = [
-        file?.app ? `${file.app} two-factor recovery codes` : 'Two-factor recovery codes',
-        ...(file?.account ? [`Account: ${file.account}`] : []),
-        `Downloaded: ${date} ${pad(now.getHours())}:${pad(now.getMinutes())}${zone ? ` (${zone})` : ''}`,
-        '',
-        'Each line below is one code. Each code works once. Getting new codes cancels these.',
-        '',
-        ...codes,
-        '',
-    ].join('\n');
-
-    return { name: `${unsafeInFileName(name)}.txt`, text };
-}
-
-/**
- * Copy to the clipboard, falling back to a selected textarea where the
- * Clipboard API is missing or blocked (old browsers, webviews, iframes).
- */
-async function copyText(text: string): Promise<boolean> {
-    try {
-        await navigator.clipboard.writeText(text);
-        return true;
-    } catch {
-        const area = document.createElement('textarea');
-        area.value = text;
-        area.setAttribute('readonly', '');
-        area.style.position = 'fixed';
-        area.style.opacity = '0';
-        document.body.appendChild(area);
-        area.select();
-        try {
-            return document.execCommand('copy');
-        } catch {
-            return false;
-        } finally {
-            area.remove();
-        }
-    }
-}
 
 /** Seconds left until something is allowed again; ticks down to 0. */
 function useCountdown(seconds: number | null): number {
@@ -150,12 +98,13 @@ export default function MfaRecoveryCodesDialog({
     codes = null,
     onClose,
     onComplete,
-    recoveryCodesFile = null,
-    downloadName,
+    completing = false,
+    onDownload,
+    downloading = false,
+    downloaded = false,
+    downloadError = null,
 }: MfaRecoveryCodesDialogProps) {
     const [password, setPassword] = useState('');
-    const [saved, setSaved] = useState<'copied' | 'downloaded' | null>(null);
-    const [copyFailed, setCopyFailed] = useState(false);
     const panel = useRef<HTMLDivElement>(null);
     const titleId = useId();
     const passwordWait = useCountdown(passwordRetryAfter);
@@ -164,8 +113,6 @@ export default function MfaRecoveryCodesDialog({
     useEffect(() => {
         if (!open) return;
         setPassword('');
-        setSaved(null);
-        setCopyFailed(false);
     }, [open]);
 
     // A wrong password clears.
@@ -199,9 +146,6 @@ export default function MfaRecoveryCodesDialog({
 
     if (!open) return null;
 
-    // The codes are shown once: no way out but Complete.
-    const closable = step !== 'codes';
-
     const title = {
         confirm: 'Generate new recovery codes?',
         password: 'Confirm your password',
@@ -209,7 +153,8 @@ export default function MfaRecoveryCodesDialog({
     }[step];
 
     const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-        if (e.key === 'Escape' && closable) {
+        // Closing drops a new set that isn't saved yet: the old codes keep working.
+        if (e.key === 'Escape') {
             e.stopPropagation();
             onClose();
         }
@@ -225,27 +170,6 @@ export default function MfaRecoveryCodesDialog({
             e.preventDefault();
             first?.focus();
         }
-    };
-
-    const copyCodes = async () => {
-        const ok = await copyText((codes ?? []).join('\n'));
-        setCopyFailed(!ok);
-        if (ok) setSaved('copied');
-    };
-
-    const downloadCodes = () => {
-        const { name, text } = recoveryCodesDownload(codes ?? [], recoveryCodesFile, new Date());
-        const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = downloadName ?? name;
-        // In the document and revoked a moment later: Firefox cancels a download otherwise.
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        setCopyFailed(false);
-        setSaved('downloaded');
     };
 
     const formId = `${titleId}-form`;
@@ -279,18 +203,16 @@ export default function MfaRecoveryCodesDialog({
                         </h2>
                         <p className="text-sm text-gray-500 dark:text-gray-400">Recovery codes</p>
                     </div>
-                    {closable && (
-                        <button type="button" aria-label="Close" onClick={onClose} className="-mr-2 -mt-1 flex size-11 shrink-0 items-center justify-center rounded-lg text-gray-500 dark:text-gray-400">
-                            <MfaIconClose size={20} />
-                        </button>
-                    )}
+                    <button type="button" aria-label="Close" onClick={onClose} className="-mr-2 -mt-1 flex size-11 shrink-0 items-center justify-center rounded-lg text-gray-500 dark:text-gray-400">
+                        <MfaIconClose size={20} />
+                    </button>
                 </header>
 
                 <form id={formId} onSubmit={submit} className="space-y-4 px-5 py-5 sm:px-6">
                     {step === 'confirm' && (
                         <>
                             <p className="text-sm text-gray-600 dark:text-gray-400">
-                                {remaining > 0 ? `${unused} working as soon as the new ones are made.` : "You've used all your codes."} You'll get {fresh} to copy or download.
+                                {remaining > 0 ? `${unused} working once you've downloaded the new ones and pressed Finish.` : "You've used all your codes."} You'll get {fresh} to download.
                             </p>
                             {error && (
                                 <p role="alert" className="text-sm text-red-600 dark:text-red-400">
@@ -326,26 +248,26 @@ export default function MfaRecoveryCodesDialog({
                     {step === 'codes' && (
                         <>
                             <p className="text-sm text-gray-600 dark:text-gray-400">
-                                Your old codes no longer work. Each of these is a separate code; each works once, and they won't be shown again.
+                                Download these and press Finish to start using them; until then your old codes keep working. Each code works once. Keep the file somewhere safe, not only on this device.
                             </p>
                             <ul aria-label="Recovery codes" className="grid grid-cols-2 gap-x-6 gap-y-1.5 rounded-xl bg-gray-100 p-4 font-mono text-sm text-gray-900 dark:bg-gray-800 dark:text-gray-100">
                                 {codes!.map((c) => (
                                     <li key={c}>{c}</li>
                                 ))}
                             </ul>
-                            <div className="grid grid-cols-2 gap-2">
-                                <button type="button" data-autofocus onClick={copyCodes} className={`${SECONDARY} inline-flex items-center justify-center gap-2`}>
-                                    <MfaIconCopy size={16} />
-                                    {saved === 'copied' ? 'Copied' : 'Copy'}
-                                </button>
-                                <button type="button" onClick={downloadCodes} className={`${SECONDARY} inline-flex items-center justify-center gap-2`}>
-                                    <MfaIconDownload size={16} />
-                                    {saved === 'downloaded' ? 'Downloaded' : 'Download'}
-                                </button>
-                            </div>
-                            {copyFailed && (
+                            <button
+                                type="button"
+                                data-autofocus
+                                disabled={downloading}
+                                onClick={onDownload}
+                                className={`${downloaded ? SECONDARY : PRIMARY} inline-flex w-full items-center justify-center gap-2`}
+                            >
+                                {downloaded ? <MfaIconCheck size={16} /> : <MfaIconDownload size={16} />}
+                                {downloading ? 'Downloading…' : downloaded ? 'Downloaded. Download again' : 'Download recovery codes'}
+                            </button>
+                            {downloadError && (
                                 <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-                                    Couldn't copy here. Download the codes instead.
+                                    {downloadError}
                                 </p>
                             )}
                         </>
@@ -376,9 +298,9 @@ export default function MfaRecoveryCodesDialog({
                     )}
                     {step === 'codes' && (
                         <>
-                            {!saved && <p className="text-center text-xs text-gray-500 sm:mr-auto sm:text-left dark:text-gray-400">Copy or download your codes to finish.</p>}
-                            <button type="button" disabled={!saved} onClick={onComplete} className={PRIMARY}>
-                                Complete
+                            {!downloaded && <p className="text-center text-xs text-gray-500 sm:mr-auto sm:text-left dark:text-gray-400">Download your codes to finish.</p>}
+                            <button type="button" disabled={!downloaded || completing} onClick={onComplete} className={PRIMARY}>
+                                {completing ? 'Finishing…' : 'Finish'}
                             </button>
                         </>
                     )}

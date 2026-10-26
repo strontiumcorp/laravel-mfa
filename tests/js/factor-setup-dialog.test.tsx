@@ -340,101 +340,46 @@ describe('MfaFactorSetupDialog', () => {
     });
 
     describe('after the code', () => {
-        it('shows the recovery codes, and Complete only once they are copied', async () => {
-            const user = userEvent.setup();
+        it('shows the recovery codes with Download only, and Finish once they are downloaded', async () => {
             const onComplete = vi.fn();
             const onClose = vi.fn();
-            render(<MfaFactorSetupDialog {...sms} sentTo="+*******0100" confirmed recoveryCodes={codes} onComplete={onComplete} onClose={onClose} />);
+            const onDownload = vi.fn();
+            const { rerender } = render(<MfaFactorSetupDialog {...sms} sentTo="+*******0100" confirmed recoveryCodes={codes} onDownload={onDownload} onComplete={onComplete} onClose={onClose} />);
 
             expect(screen.getByRole('dialog', { name: 'Save your recovery codes' })).toBeInTheDocument();
             expect(screen.getByText('SMS · Step 3 of 3')).toBeInTheDocument();
             expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual(codes);
-            expect(screen.getByText(/Each of these is a separate code\. Use one when you can't use your other sign-in methods; each works once/)).toBeInTheDocument();
-            // Shown once: no way out but Complete.
+            expect(screen.getByText(/Download them and keep the file somewhere safe, not only on this device\./)).toBeInTheDocument();
+            // No Copy: a copied list is easily lost.
+            expect(screen.queryByRole('button', { name: /copy/i })).not.toBeInTheDocument();
+            // No way out but Download, then Finish.
             expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
             fireEvent.keyDown(dialog(), { key: 'Escape' });
             expect(onClose).not.toHaveBeenCalled();
+            expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
+            expect(dialog()).toHaveTextContent('Download your codes to finish.');
 
-            const complete = screen.getByRole('button', { name: 'Complete' });
-            expect(complete).toBeDisabled();
-            await user.click(screen.getByRole('button', { name: 'Copy' }));
-            expect(await navigator.clipboard.readText()).toBe('aaaaa-11111\nbbbbb-22222');
-            await user.click(complete);
+            await userEvent.click(screen.getByRole('button', { name: 'Download recovery codes' }));
+            expect(onDownload).toHaveBeenCalledOnce();
+            expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
+
+            // The page says the server served the file.
+            rerender(<MfaFactorSetupDialog {...sms} sentTo="+*******0100" confirmed recoveryCodes={codes} onDownload={onDownload} downloaded onComplete={onComplete} onClose={onClose} />);
+            expect(screen.getByRole('button', { name: 'Downloaded. Download again' })).toBeInTheDocument();
+            expect(dialog()).not.toHaveTextContent('Download your codes to finish.');
+            await userEvent.click(screen.getByRole('button', { name: 'Finish' }));
             expect(onComplete).toHaveBeenCalledOnce();
         });
 
-        it('downloads the codes as a text file, which also unlocks Complete', async () => {
-            const createObjectURL = vi.fn((_blob: Blob) => 'blob:codes');
-            const revokeObjectURL = vi.fn();
-            Object.assign(URL, { createObjectURL, revokeObjectURL });
-            const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
-                expect(this.download).toBe('acme-recovery-codes.txt');
-                expect(this.isConnected).toBe(true);
-            });
-            render(<MfaFactorSetupDialog {...totp} confirmed recoveryCodes={codes} downloadName="acme-recovery-codes.txt" />);
+        it('shows a download in progress, its error, and Finish saving', () => {
+            const { rerender } = render(<MfaFactorSetupDialog {...totp} confirmed recoveryCodes={codes} downloading />);
+            expect(screen.getByRole('button', { name: 'Downloading…' })).toBeDisabled();
 
-            await userEvent.click(screen.getByRole('button', { name: 'Download' }));
+            rerender(<MfaFactorSetupDialog {...totp} confirmed recoveryCodes={codes} downloadError="Couldn't download the codes." />);
+            expect(screen.getByRole('alert')).toHaveTextContent("Couldn't download the codes.");
 
-            expect(click).toHaveBeenCalledOnce();
-            expect(await createObjectURL.mock.calls[0][0].text()).toContain('aaaaa-11111\nbbbbb-22222');
-            await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:codes'), { timeout: 2000 });
-            expect(screen.getByRole('button', { name: 'Complete' })).toBeEnabled();
-        });
-
-        describe('the downloaded file', () => {
-            const file = { app: 'Artistly (staging)', slug: 'artistly-staging', account: 'mojahid@mail.com' };
-
-            // Downloads with the given props at 2026-10-09 08:05 local time in Asia/Dhaka; returns the file's name and text.
-            const download = async (props: Partial<MfaFactorSetupDialogProps>) => {
-                vi.useFakeTimers({ toFake: ['Date'] });
-                vi.setSystemTime(new Date(2026, 9, 9, 8, 5));
-                const resolved = Intl.DateTimeFormat().resolvedOptions();
-                vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockReturnValue({ ...resolved, timeZone: 'Asia/Dhaka' });
-                const createObjectURL = vi.fn((_blob: Blob) => 'blob:codes');
-                Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
-                let name = '';
-                vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
-                    name = this.download;
-                });
-                render(<MfaFactorSetupDialog {...totp} confirmed recoveryCodes={codes} {...props} />);
-
-                await userEvent.click(screen.getByRole('button', { name: 'Download' }));
-
-                return { name, text: await createObjectURL.mock.calls[0][0].text() };
-            };
-
-            it('is named after the app, the account and the local date', async () => {
-                expect((await download({ recoveryCodesFile: file })).name).toBe('artistly-staging-recovery-codes-mojahid@mail.com-2026-10-09.txt');
-            });
-
-            it('says whose codes they are and when they were downloaded', async () => {
-                expect((await download({ recoveryCodesFile: file })).text).toBe(
-                    'Artistly (staging) two-factor recovery codes\n' +
-                        'Account: mojahid@mail.com\n' +
-                        'Downloaded: 2026-10-09 08:05 (Asia/Dhaka)\n' +
-                        '\n' +
-                        'Each line below is one code. Each code works once. Getting new codes cancels these.\n' +
-                        '\n' +
-                        'aaaaa-11111\nbbbbb-22222\n',
-                );
-            });
-
-            it('replaces characters file names cannot hold', async () => {
-                const { name } = await download({ recoveryCodesFile: { ...file, account: 'a/b\\c:d*e?f"g<h>i|j\tk@x.com' } });
-
-                expect(name).toBe('artistly-staging-recovery-codes-a-b-c-d-e-f-g-h-i-j-k@x.com-2026-10-09.txt');
-            });
-
-            it('works without the app and account', async () => {
-                const { name, text } = await download({});
-
-                expect(name).toBe('recovery-codes-2026-10-09.txt');
-                expect(text).toBe('Two-factor recovery codes\nDownloaded: 2026-10-09 08:05 (Asia/Dhaka)\n\nEach line below is one code. Each code works once. Getting new codes cancels these.\n\naaaaa-11111\nbbbbb-22222\n');
-            });
-
-            it('takes an explicit downloadName over the derived one', async () => {
-                expect((await download({ recoveryCodesFile: file, downloadName: 'acme.txt' })).name).toBe('acme.txt');
-            });
+            rerender(<MfaFactorSetupDialog {...totp} confirmed recoveryCodes={codes} downloaded completing />);
+            expect(screen.getByRole('button', { name: 'Finishing…' })).toBeDisabled();
         });
 
         it('ends with a short "added" step when there are no new codes', async () => {
@@ -446,22 +391,15 @@ describe('MfaFactorSetupDialog', () => {
             expect(onComplete).toHaveBeenCalledOnce();
         });
 
-        it('falls back when the Clipboard API is blocked, and says so when that fails too', async () => {
+        it('copies the setup key even where the Clipboard API is blocked', async () => {
             Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new Error('blocked')) } });
             const execCommand = vi.fn(() => true);
             Object.assign(document, { execCommand });
-            const { unmount } = render(<MfaFactorSetupDialog {...totp} confirmed recoveryCodes={codes} />);
+            render(<MfaFactorSetupDialog {...totp} secret="JBSWY3DPEHPK3PXP" />);
 
             await userEvent.click(screen.getByRole('button', { name: 'Copy' }));
             expect(execCommand).toHaveBeenCalledWith('copy');
-            expect(screen.getByRole('button', { name: 'Complete' })).toBeEnabled();
-            unmount();
-
-            execCommand.mockReturnValue(false);
-            render(<MfaFactorSetupDialog {...totp} confirmed recoveryCodes={codes} />);
-            await userEvent.click(screen.getByRole('button', { name: 'Copy' }));
-            expect(screen.getByRole('alert')).toHaveTextContent("Couldn't copy here. Download the codes instead.");
-            expect(screen.getByRole('button', { name: 'Complete' })).toBeDisabled();
+            expect(screen.getByRole('button', { name: 'Copied' })).toBeInTheDocument();
         });
     });
 

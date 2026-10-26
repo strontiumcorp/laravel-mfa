@@ -64,6 +64,7 @@ export const inertia = (() => {
             router: {
                 post: (url: string, data: unknown = {}, options?: Options) => send({ method: 'post', url, data }, options),
                 delete: (url: string, options?: Options) => send({ method: 'delete', url, data: null }, options),
+                reload: (options?: Options) => send({ method: 'reload', url: '', data: null }, options),
             },
         },
     };

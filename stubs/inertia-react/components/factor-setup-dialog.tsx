@@ -7,8 +7,11 @@
 //   3. Authenticator app: scan the QR code or enter the key ("Open in
 //      authenticator app" on phones). Email/SMS: the address or number.
 //   4. Enter the code.
-//   5. Save the recovery codes (Complete unlocks once they're copied or
-//      downloaded), or a short "added" step when there are no new ones.
+//   5. Save the recovery codes: Download (the page gets the file from the
+//      server, which records it), then Finish, which turns the method on.
+//      There is no Copy: a copied list is easily lost, and losing the
+//      method then locks the account. Or a short "added" step when there
+//      are no new codes.
 // The steps follow the props: a password or account check requested mid-way
 // (it expired) brings that step back, and a code that's been sent moves on to the code.
 // A bottom sheet on phones, a centred dialog from `sm` up. Needs only React and
@@ -20,7 +23,8 @@
 //         emailCodeSent={sent} onVerifyEmailCode={verifyEmailCode}
 //         onSubmitDestination={(to) => store('sms', to)} sentTo={pending?.destination}
 //         onConfirm={(code) => confirm(pending.id, code)} onResend={resend}
-//         confirmed={confirmed} recoveryCodes={codes} onClose={close} onComplete={done} />
+//         confirmed={confirmed} recoveryCodes={codes} onDownload={download} downloaded={downloaded}
+//         onClose={close} onComplete={finish} />
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 import { MfaFactorIcon, MfaIconCheck, MfaIconClose, MfaIconCopy, MfaIconDownload, type MfaFactorType } from './icons';
 
@@ -86,60 +90,23 @@ export type MfaFactorSetupDialogProps = {
     error?: string | null;
     /** The code was accepted: moves on to the last step. */
     confirmed?: boolean;
-    /** Recovery codes from that confirmation, shown once. */
+    /** Recovery codes waiting to be saved: the method is on only after Download, then Finish. */
     recoveryCodes?: string[] | null;
+    /** Download: the page fetches the file from the server (which notes it) and saves it. */
+    onDownload?: () => void;
+    downloading?: boolean;
+    /** The file was downloaded: unlocks Finish. */
+    downloaded?: boolean;
+    /** Why the download or Finish failed. */
+    downloadError?: string | null;
 
     /** Cancel or close before the code is confirmed. */
     onClose: () => void;
-    /** Complete / Done after the code is confirmed. */
+    /** Finish (after the download), or Done when there were no new codes. */
     onComplete: () => void;
-    /**
-     * Who and what the downloaded recovery codes are for (the settings prop
-     * recoveryCodesFile): the file is named "{slug}-recovery-codes-{account}-{date}.txt",
-     * with the browser's local date, and its text names the app and account.
-     */
-    recoveryCodesFile?: MfaRecoveryCodesFile | null;
-    /** The downloaded file's name, instead of the one built from recoveryCodesFile. */
-    downloadName?: string;
+    /** Finish is saving. */
+    completing?: boolean;
 };
-
-export type MfaRecoveryCodesFile = {
-    /** The app as authenticator apps show it, e.g. "Acme (staging)". */
-    app: string;
-    /** The same for a file name, e.g. "acme-staging". */
-    slug: string;
-    /** The account, e.g. the user's email. */
-    account: string;
-};
-
-const pad = (n: number) => String(n).padStart(2, '0');
-// Characters Windows, macOS or Linux won't take in a file name, and control characters.
-// eslint-disable-next-line no-control-regex
-const unsafeInFileName = (text: string) => text.replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '-');
-
-/** The recovery codes file's name and text, dated in the browser's time zone. */
-function recoveryCodesDownload(codes: string[], file: MfaRecoveryCodesFile | null | undefined, now: Date) {
-    const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    let zone = '';
-    try {
-        zone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
-    } catch {
-        // No Intl time zone support: the time goes without its zone.
-    }
-    const name = [file?.slug, 'recovery-codes', file?.account, date].filter(Boolean).join('-');
-    const text = [
-        file?.app ? `${file.app} two-factor recovery codes` : 'Two-factor recovery codes',
-        ...(file?.account ? [`Account: ${file.account}`] : []),
-        `Downloaded: ${date} ${pad(now.getHours())}:${pad(now.getMinutes())}${zone ? ` (${zone})` : ''}`,
-        '',
-        'Each line below is one code. Each code works once. Getting new codes cancels these.',
-        '',
-        ...codes,
-        '',
-    ].join('\n');
-
-    return { name: `${unsafeInFileName(name)}.txt`, text };
-}
 
 type Step = 'password' | 'verify' | 'scan' | 'destination' | 'code' | 'saved';
 
@@ -253,8 +220,11 @@ export default function MfaFactorSetupDialog({
     recoveryCodes = null,
     onClose,
     onComplete,
-    recoveryCodesFile = null,
-    downloadName,
+    completing = false,
+    onDownload,
+    downloading = false,
+    downloaded = false,
+    downloadError = null,
 }: MfaFactorSetupDialogProps) {
     const totp = type === 'totp';
     const [password, setPassword] = useState('');
@@ -268,8 +238,6 @@ export default function MfaFactorSetupDialog({
     const [passwordStep, setPasswordStep] = useState(askPassword);
     const [verifyStep, setVerifyStep] = useState(!!verifyEmail);
     const [keyCopied, setKeyCopied] = useState(false);
-    const [saved, setSaved] = useState<'copied' | 'downloaded' | null>(null);
-    const [copyFailed, setCopyFailed] = useState(false);
     const panel = useRef<HTMLDivElement>(null);
     const titleId = useId();
     const passwordWait = useCountdown(passwordRetryAfter);
@@ -288,8 +256,6 @@ export default function MfaFactorSetupDialog({
         setPasswordStep(askPassword);
         setVerifyStep(!!verifyEmail);
         setKeyCopied(false);
-        setSaved(null);
-        setCopyFailed(false);
     }, [open]); // Only on open: askPassword and verifyEmail are read as they are then.
     useEffect(() => {
         if (askPassword) setPasswordStep(true);
@@ -399,27 +365,6 @@ export default function MfaFactorSetupDialog({
     };
 
     const copyKey = async () => setKeyCopied(await copyText((secret ?? '').replace(/\s+/g, '')));
-
-    const copyCodes = async () => {
-        const ok = await copyText((recoveryCodes ?? []).join('\n'));
-        setCopyFailed(!ok);
-        if (ok) setSaved('copied');
-    };
-
-    const downloadCodes = () => {
-        const { name, text } = recoveryCodesDownload(recoveryCodes ?? [], recoveryCodesFile, new Date());
-        const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = downloadName ?? name;
-        // In the document and revoked a moment later: Firefox cancels a download otherwise.
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        setCopyFailed(false);
-        setSaved('downloaded');
-    };
 
     const formId = `${titleId}-form`;
     const submit = (e: { preventDefault(): void }) => {
@@ -674,26 +619,26 @@ export default function MfaFactorSetupDialog({
                     {step === 'saved' && hasCodes && (
                         <>
                             <p className="text-sm text-gray-600 dark:text-gray-400">
-                                Each of these is a separate code. Use one when you can't use your other sign-in methods; each works once, and they won't be shown again.
+                                Use one of these codes when you can't use your other sign-in methods; each works once. Download them and keep the file somewhere safe, not only on this device.
                             </p>
                             <ul aria-label="Recovery codes" className="grid grid-cols-2 gap-x-6 gap-y-1.5 rounded-xl bg-gray-100 p-4 font-mono text-sm text-gray-900 dark:bg-gray-800 dark:text-gray-100">
                                 {recoveryCodes!.map((c) => (
                                     <li key={c}>{c}</li>
                                 ))}
                             </ul>
-                            <div className="grid grid-cols-2 gap-2">
-                                <button type="button" data-autofocus onClick={copyCodes} className={`${SECONDARY} inline-flex items-center justify-center gap-2`}>
-                                    <MfaIconCopy size={16} />
-                                    {saved === 'copied' ? 'Copied' : 'Copy'}
-                                </button>
-                                <button type="button" onClick={downloadCodes} className={`${SECONDARY} inline-flex items-center justify-center gap-2`}>
-                                    <MfaIconDownload size={16} />
-                                    {saved === 'downloaded' ? 'Downloaded' : 'Download'}
-                                </button>
-                            </div>
-                            {copyFailed && (
+                            <button
+                                type="button"
+                                data-autofocus
+                                disabled={downloading}
+                                onClick={onDownload}
+                                className={`${downloaded ? SECONDARY : PRIMARY} inline-flex w-full items-center justify-center gap-2`}
+                            >
+                                {downloaded ? <MfaIconCheck size={16} /> : <MfaIconDownload size={16} />}
+                                {downloading ? 'Downloading…' : downloaded ? 'Downloaded. Download again' : 'Download recovery codes'}
+                            </button>
+                            {downloadError && (
                                 <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-                                    Couldn't copy here. Download the codes instead.
+                                    {downloadError}
                                 </p>
                             )}
                         </>
@@ -773,9 +718,9 @@ export default function MfaFactorSetupDialog({
                     )}
                     {step === 'saved' && (
                         <>
-                            {hasCodes && !saved && <p className="text-center text-xs text-gray-500 sm:mr-auto sm:text-left dark:text-gray-400">Copy or download your codes to finish.</p>}
-                            <button type="button" data-autofocus={hasCodes ? undefined : true} disabled={hasCodes && !saved} onClick={onComplete} className={PRIMARY}>
-                                {hasCodes ? 'Complete' : 'Done'}
+                            {hasCodes && !downloaded && <p className="text-center text-xs text-gray-500 sm:mr-auto sm:text-left dark:text-gray-400">Download your codes to finish.</p>}
+                            <button type="button" data-autofocus={hasCodes ? undefined : true} disabled={(hasCodes && !downloaded) || completing} onClick={onComplete} className={PRIMARY}>
+                                {hasCodes ? (completing ? 'Finishing…' : 'Finish') : 'Done'}
                             </button>
                         </>
                     )}

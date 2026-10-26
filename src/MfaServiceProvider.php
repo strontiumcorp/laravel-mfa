@@ -31,6 +31,7 @@ use StrontiumCorp\LaravelMfa\Listeners\WriteMfaAuditLog;
 use StrontiumCorp\LaravelMfa\Metrics\LogMetricsRecorder;
 use StrontiumCorp\LaravelMfa\Metrics\NullMetricsRecorder;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
+use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Models\MfaOtpCode;
 use StrontiumCorp\LaravelMfa\Models\MfaTrustedBrowser;
 use StrontiumCorp\LaravelMfa\Sms\SmsManager;
@@ -219,7 +220,7 @@ class MfaServiceProvider extends ServiceProvider
     {
         $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
             if (config('mfa.prune.schedule')) {
-                $schedule->command('model:prune', ['--model' => [MfaOtpCode::class, MfaAuditLog::class, MfaTrustedBrowser::class]])
+                $schedule->command('model:prune', ['--model' => [MfaOtpCode::class, MfaAuditLog::class, MfaTrustedBrowser::class, MfaFactor::class]])
                     ->daily()
                     ->onOneServer()
                     ->withoutOverlapping()

@@ -344,6 +344,7 @@ describe('EnrollmentService', function () {
         $secret = $this->postJson('/mfa/factors', ['type' => 'totp'])->json('setup.secret');
         $id = $user->mfaFactors()->sole()->id;
         $this->postJson("/mfa/factors/{$id}/confirm", ['code' => (new Google2FA)->oathTotp($secret, intdiv(now()->getTimestamp(), 30))]);
+        $this->finishRecoveryCodes();
         $this->deleteJson("/mfa/factors/{$id}");
 
         foreach ([Events\FactorEnrollmentStarted::class, Events\FactorEnabled::class, Events\FactorDisabled::class] as $event) {
@@ -354,6 +355,7 @@ describe('EnrollmentService', function () {
         $this->postJson('/mfa/factors', ['type' => 'totp']);
         $this->createMfaFactor($user);
         $this->postJson('/mfa/recovery-codes');
+        $this->finishRecoveryCodes();
         Event::assertDispatched(Events\RecoveryCodesGenerated::class, fn ($e) => $e->context === ['count' => 10]);
     });
 
@@ -800,6 +802,8 @@ describe('responses and controllers', function () {
         $id = MfaFactor::sole()->id;
 
         $this->postJson("/mfa/factors/{$id}/confirm", ['code' => (new Google2FA)->oathTotp($secret, intdiv(now()->getTimestamp(), 30))])->assertOk();
+        Event::assertNotDispatched(Events\VerificationSucceeded::class); // not yet: the method is on once its codes are saved
+        $this->finishRecoveryCodes();
 
         Event::assertDispatched(Events\VerificationSucceeded::class, fn ($e) => $e->factorType === FactorType::Totp && $e->context === ['stage' => 'enrollment']);
     });

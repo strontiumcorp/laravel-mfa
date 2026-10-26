@@ -114,6 +114,18 @@ abstract class TestCase extends Orchestra
         ]);
     }
 
+    /**
+     * After the code of an account's first method: download its recovery
+     * codes and press Finish, which turns the method on.
+     */
+    public function finishRecoveryCodes(): static
+    {
+        $this->get(route('mfa.recovery-codes.download'))->assertOk();
+        $this->postJson(route('mfa.recovery-codes.finish'))->assertOk();
+
+        return $this;
+    }
+
     /** A user with one confirmed factor of the given type. */
     protected function userWithFactor(FactorType $type = FactorType::Totp, array $attributes = []): array
     {

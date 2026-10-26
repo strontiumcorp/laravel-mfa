@@ -59,7 +59,7 @@ describe('settings', function () {
         expect(MfaRecoveryCode::count())->toBe(0);
     });
 
-    it('shows recovery codes to Inertia exactly once after the first factor is confirmed', function () {
+    it('shows the first factor\'s recovery codes to Inertia until they are finished', function () {
         config(['mfa.ui.driver' => 'inertia']);
         $user = $this->makeUser();
         $this->loginWithSession($user)->post(route('mfa.factors.store'), ['type' => 'totp'])->assertRedirect(route('mfa.settings'));
@@ -68,10 +68,15 @@ describe('settings', function () {
         $this->post(route('mfa.factors.confirm', ['factor' => $factor->id]), ['code' => $this->currentTotpCode($factor)])
             ->assertRedirect(route('mfa.settings'));
 
-        $codes = $this->get(route('mfa.settings'), ['X-Inertia' => 'true'])->json('props.recoveryCodes');
+        $codes = $this->get(route('mfa.settings'), ['X-Inertia' => 'true'])->json('props.pendingRecoveryCodes.codes');
         expect($codes)->toHaveCount(10)
-            ->and(app(RecoveryCodes::class)->consume($user, $codes[0]))->toBeTrue()
-            ->and($this->get(route('mfa.settings'), ['X-Inertia' => 'true'])->json('props.recoveryCodes'))->toBeNull();
+            ->and($this->get(route('mfa.settings'), ['X-Inertia' => 'true'])->json('props.pendingRecoveryCodes.codes'))->toBe($codes);
+
+        $this->get(route('mfa.recovery-codes.download'))->assertOk();
+        $this->post(route('mfa.recovery-codes.finish'))->assertRedirect(route('mfa.settings'));
+
+        expect(app(RecoveryCodes::class)->consume($user, $codes[0]))->toBeTrue()
+            ->and($this->get(route('mfa.settings'), ['X-Inertia' => 'true'])->json('props.pendingRecoveryCodes'))->toBeNull();
     });
 });
 

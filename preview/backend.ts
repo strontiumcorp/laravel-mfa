@@ -78,7 +78,8 @@ export type State = {
     status: string | null;
     retryAfter: number | null;
     passwordRetryAfter: number | null;
-    recoveryCodes: string[] | null;
+    /** New codes waiting to be downloaded and finished (kept in the session, so not a flash): a first method's, or a new set. */
+    pendingRecoveryCodes: { codes: string[]; downloaded: boolean; factor: Factor | null } | null;
 };
 
 export type Result = { errors?: Record<string, string>; toast?: string };
@@ -96,6 +97,9 @@ export const urls = {
         resend: '/mfa/factors/__ID__/resend',
         destroy: '/mfa/factors/__ID__',
         recoveryCodes: '/mfa/recovery-codes',
+        downloadRecoveryCodes: '/mfa/recovery-codes/download',
+        finishRecoveryCodes: '/mfa/recovery-codes/finish',
+        discardRecoveryCodes: '/mfa/recovery-codes/pending',
         confirmPassword: '/mfa/confirm-password',
         sendEnrollmentCode: '/mfa/enrollment-verification/send',
         verifyEnrollmentCode: '/mfa/enrollment-verification',
@@ -207,12 +211,30 @@ export function initialState(overrides: Partial<State> = {}): State {
         status: null,
         retryAfter: null,
         passwordRetryAfter: null,
-        recoveryCodes: null,
+        pendingRecoveryCodes: null,
         ...overrides,
     };
 }
 
 const newCodes = () => Array.from({ length: 10 }, (_, i) => `${'abcdefghij'[i].repeat(5)}-${String(i + 1).padStart(5, '1')}`);
+
+function enable(s: State, f: Factor) {
+    s.factors = [...s.factors, { ...f, confirmed: true, confirmed_at: new Date().toISOString(), secret: undefined, qr_svg: undefined, otpauth_url: undefined }];
+    if (s.mustEnroll && required(s, f.type)) s.mustEnroll = false;
+}
+
+/** GET /mfa/recovery-codes/download: the waiting codes as a file, noted as downloaded; null when none. */
+export function downloadRecoveryCodes(s: State): { name: string; text: string } | null {
+    const p = s.pendingRecoveryCodes;
+    if (!p) return null;
+    p.downloaded = true;
+    const date = new Date().toISOString().slice(0, 10);
+
+    return {
+        name: `acme-local-recovery-codes-jane@example.com-${date}.txt`,
+        text: ['Acme (local) two-factor recovery codes', 'Account: jane@example.com', '', ...p.codes, ''].join('\n'),
+    };
+}
 
 const required = (s: State, type: FactorType) => s.requiredTypes.length === 0 || s.requiredTypes.includes(type);
 
@@ -220,7 +242,6 @@ const required = (s: State, type: FactorType) => s.requiredTypes.length === 0 ||
 export function handle(s: State, method: 'post' | 'delete', url: string, data: Record<string, unknown>): Result {
     // Flashes last one request.
     s.status = s.retryAfter = s.passwordRetryAfter = null;
-    s.recoveryCodes = null;
 
     const id = Number(url.match(/\/factors\/(\d+)/)?.[1]);
     const needsPassword = () => s.requirePassword && !s.passwordConfirmed;
@@ -289,15 +310,32 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
         if (!pending) return { errors: { code: 'This verification method is not available.' } };
         if (data.code !== CODE) return { errors: { code: 'The provided code is invalid.' } };
 
-        const first = s.factors.length === 0;
         s.pending = s.pending.filter((p) => p.id !== id);
-        s.factors = [...s.factors, { ...pending, confirmed: true, confirmed_at: new Date().toISOString(), secret: undefined, qr_svg: undefined, otpauth_url: undefined }];
-        if (first || s.recoveryCodesRemaining === 0) {
-            s.recoveryCodes = newCodes();
-            s.recoveryCodesRemaining = 10;
+        // No codes yet (the first method, or all used): on only once its codes are downloaded and finished.
+        if (s.factors.length === 0 || s.recoveryCodesRemaining === 0) {
+            s.pendingRecoveryCodes = { codes: newCodes(), downloaded: false, factor: pending };
+            s.status = 'recovery-codes-pending';
+            return {};
         }
-        if (s.mustEnroll && required(s, pending.type)) s.mustEnroll = false;
+        enable(s, pending);
         s.status = 'factor-enabled';
+        return {};
+    }
+
+    if (method === 'post' && url === urls.settings.finishRecoveryCodes) {
+        const p = s.pendingRecoveryCodes;
+        if (!p) return { errors: { recovery_codes: 'These recovery codes expired. Start again.' } };
+        if (!p.downloaded) return { errors: { recovery_codes: 'Download your recovery codes first.' } };
+        s.pendingRecoveryCodes = null;
+        s.recoveryCodesRemaining = 10;
+        if (p.factor) enable(s, p.factor);
+        s.status = p.factor ? 'factor-enabled' : 'recovery-codes-generated';
+        return {};
+    }
+
+    if (method === 'delete' && url === urls.settings.discardRecoveryCodes) {
+        s.pendingRecoveryCodes = null;
+        s.status = 'recovery-codes-discarded';
         return {};
     }
 
@@ -317,9 +355,9 @@ export function handle(s: State, method: 'post' | 'delete', url: string, data: R
 
     if (method === 'post' && url === urls.settings.recoveryCodes) {
         if (needsPassword()) return passwordRequired;
-        s.recoveryCodes = newCodes();
-        s.recoveryCodesRemaining = 10;
-        s.status = 'recovery-codes-generated';
+        // The old codes keep working until the new ones are downloaded and finished.
+        s.pendingRecoveryCodes = { codes: newCodes(), downloaded: false, factor: null };
+        s.status = 'recovery-codes-pending';
         return {};
     }
 
@@ -413,7 +451,7 @@ export function settingsProps(s: State) {
         nudge: s.factors.length === 0 && !s.mustEnroll ? { title: NUDGE.title, body: NUDGE.body } : null,
         trustedBrowsers: s.trustBrowserDays === null ? null : s.trustedBrowsers,
         status: s.status,
-        recoveryCodes: s.recoveryCodes,
+        pendingRecoveryCodes: s.pendingRecoveryCodes && { ...s.pendingRecoveryCodes, factor: s.pendingRecoveryCodes.factor && { id: s.pendingRecoveryCodes.factor.id, type: s.pendingRecoveryCodes.factor.type } },
         retryAfter: s.retryAfter,
         urls: urls.settings,
     };

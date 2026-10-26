@@ -173,6 +173,7 @@ it('ends for every browser when a method is added or removed, or a recovery code
         $secret = $test->postJson('/mfa/factors', ['type' => 'totp'])->json('setup.secret');
         $id = $user->mfaFactors()->whereNull('confirmed_at')->sole()->id;
         $test->postJson("/mfa/factors/{$id}/confirm", ['code' => (new Google2FA)->oathTotp($secret, intdiv(now()->getTimestamp(), 30) + 1)])->assertOk();
+        $test->finishRecoveryCodes(); // no codes yet: the method is on once they are saved
     }, 'factor_enabled'],
     'a method removed' => [function ($test, $user) {
         $test->createMfaFactor($user, FactorType::Email);

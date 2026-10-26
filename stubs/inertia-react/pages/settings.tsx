@@ -2,7 +2,7 @@
 // your app's settings layout. It only wires Inertia to the components in
 // components/vendor/laravel-mfa/, which hold the UI.
 import MfaFactorCards, { type MfaCardFactor, type MfaFactorType } from '@/components/vendor/laravel-mfa/factor-cards';
-import MfaFactorSetupDialog, { type MfaRecoveryCodesFile } from '@/components/vendor/laravel-mfa/factor-setup-dialog';
+import MfaFactorSetupDialog from '@/components/vendor/laravel-mfa/factor-setup-dialog';
 import MfaPasswordConfirmForm from '@/components/vendor/laravel-mfa/password-confirm-form';
 import MfaRecoveryCodesDialog from '@/components/vendor/laravel-mfa/recovery-codes-dialog';
 import MfaRecoveryCodesPanel from '@/components/vendor/laravel-mfa/recovery-codes-panel';
@@ -20,8 +20,14 @@ type Props = {
     /** How many a fresh set of recovery codes has. */
     recoveryCodesTotal: number;
     /** What the downloaded recovery codes file is named after: the app (as authenticator apps show it) and the account. */
-    recoveryCodesFile: MfaRecoveryCodesFile;
-    recoveryCodes: string[] | null;
+    recoveryCodesFile: { app: string; slug: string; account: string };
+    /**
+     * New recovery codes waiting to be downloaded and finished in this
+     * session: a first method's (`factor`, which is on only after Finish) or
+     * a new set for an account that has some (`factor` null; the old ones
+     * work until Finish). null = none.
+     */
+    pendingRecoveryCodes: { codes: string[]; downloaded: boolean; factor: { id: number; type: MfaFactorType } | null } | null;
     retryAfter: number | null;
     /** Seconds until the password prompt may be tried again. */
     passwordRetryAfter: number | null;
@@ -47,6 +53,12 @@ type Props = {
         resend: string;
         destroy: string;
         recoveryCodes: string;
+        /** GET: the waiting codes as a file (the server notes the download). */
+        downloadRecoveryCodes: string;
+        /** POST: saves the waiting codes once downloaded. */
+        finishRecoveryCodes: string;
+        /** DELETE: drops the waiting codes. */
+        discardRecoveryCodes: string;
         confirmPassword: string;
         sendEnrollmentCode: string;
         verifyEnrollmentCode: string;
@@ -66,8 +78,7 @@ export default function MfaSettings(props: Props) {
         availableTypes,
         recoveryCodesRemaining,
         recoveryCodesTotal,
-        recoveryCodesFile,
-        recoveryCodes,
+        pendingRecoveryCodes,
         mustEnroll,
         requiredTypes,
         status,
@@ -90,14 +101,19 @@ export default function MfaSettings(props: Props) {
     const [resendingId, setResendingId] = useState<number | null>(null);
     const [removingId, setRemovingId] = useState<number | null>(null);
     const [regenerating, setRegenerating] = useState(false);
-    // New recovery codes run in their own dialog: confirm, the password when
-    // the server asks, then the codes. Opened again on load when making them
-    // came back as a full page load (the flashed codes are still there).
-    const reloadedCodes = status === 'recovery-codes-generated' && !!recoveryCodes;
-    const [codesOpen, setCodesOpen] = useState(reloadedCodes);
+    // New recovery codes wait in the session until they are downloaded and
+    // finished (pendingRecoveryCodes), so a reload shows them again: a first
+    // method's in the setup dialog, a new set in its own dialog.
+    const methodCodes = pendingRecoveryCodes?.factor ? pendingRecoveryCodes : null;
+    const newSet = pendingRecoveryCodes && !pendingRecoveryCodes.factor ? pendingRecoveryCodes : null;
+    const [codesOpen, setCodesOpen] = useState(!!newSet);
     const [codesPassword, setCodesPassword] = useState(false);
-    // The codes in the props are this dialog's (not an earlier setup's).
-    const [codesMade, setCodesMade] = useState(reloadedCodes);
+    // Download: fetched from the server (which notes it, so Finish is allowed) and saved as a file.
+    const [downloading, setDownloading] = useState(false);
+    const [downloadedNow, setDownloadedNow] = useState(false);
+    const [downloadError, setDownloadError] = useState<string | null>(null);
+    const downloaded = downloadedNow || !!pendingRecoveryCodes?.downloaded;
+    const finishForm = useForm<{ recovery_codes?: string }>({});
     const [forgettingBrowserId, setForgettingBrowserId] = useState<number | null>(null);
     const [forgettingAllBrowsers, setForgettingAllBrowsers] = useState(false);
 
@@ -163,21 +179,14 @@ export default function MfaSettings(props: Props) {
     // Adding a method runs in one dialog for every type: password (when
     // needed), then the account check (when needed), then the QR code or the
     // address/number, then the code, then the recovery codes. A setup left pending (e.g. after a reload) reopens it,
-    // unless the user closed it ("Continue setup" in its card).
-    // Confirming can come back as a full page load instead (e.g. the app's
-    // asset version changes once the session is verified), which loses the
-    // dialog: the flashed codes then reopen it on its last step, for the
-    // method confirmed last.
-    const [reloadedType] = useState(() =>
-        status === 'factor-enabled' && recoveryCodes
-            ? ([...factors].sort((a, b) => (a.confirmed_at ?? '').localeCompare(b.confirmed_at ?? '')).pop()?.type ?? null)
-            : null,
-    );
-    const [setupType, setSetupType] = useState<MfaFactorType | null>(reloadedType);
+    // unless the user closed it ("Continue setup" in its card). A first
+    // method whose codes aren't saved yet reopens on its codes, which have
+    // no way out but Download and Finish.
+    const [setupType, setSetupType] = useState<MfaFactorType | null>(null);
     const [closedIds, setClosedIds] = useState<number[]>([]);
     // The pending setup being confirmed: confirming removes it from the props.
     const [confirming, setConfirming] = useState<Pending | null>(null);
-    const [confirmed, setConfirmed] = useState(reloadedType !== null);
+    const [confirmed, setConfirmed] = useState(false);
     // Password: confirmed in this dialog, or asked again by the server mid-way (it expired).
     const [passwordDone, setPasswordDone] = useState(false);
     const [passwordAgain, setPasswordAgain] = useState(false);
@@ -187,7 +196,7 @@ export default function MfaSettings(props: Props) {
     // Only a setup that was pending when the page loaded reopens by itself, and only once.
     const [resumeId] = useState(() => pending[0]?.id ?? null);
     const resumable = pending.find((p) => p.id === resumeId && !closedIds.includes(p.id)) ?? null;
-    const dialogType = setupType ?? confirming?.type ?? resumable?.type ?? null;
+    const dialogType = methodCodes?.factor?.type ?? setupType ?? confirming?.type ?? resumable?.type ?? null;
     const current = confirming ?? (dialogType ? (pending.find((p) => p.type === dialogType) ?? null) : null);
     const needsPassword = (passwordConfirmationRequired && !passwordDone) || passwordAgain;
     const needsVerification = !!enrollmentVerification || verifyAgain;
@@ -279,17 +288,75 @@ export default function MfaSettings(props: Props) {
             onError: askPasswordFor({ factor: factor.id }, () => remove(factor)),
         });
 
+    const downloadCodes = async () => {
+        setDownloading(true);
+        setDownloadError(null);
+        try {
+            const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
+            const response = await fetch(`${urls.downloadRecoveryCodes}${tz ? `?tz=${encodeURIComponent(tz)}` : ''}`, {
+                credentials: 'same-origin',
+                headers: { Accept: 'text/plain' },
+            });
+            if (response.status === 404) {
+                // Expired (30 minutes): the page starts over.
+                setDownloadError('These codes expired. Start again.');
+                router.reload();
+                return;
+            }
+            if (!response.ok) throw new Error(String(response.status));
+            const name = /filename="?([^";]+)"?/.exec(response.headers.get('Content-Disposition') ?? '')?.[1] ?? 'recovery-codes.txt';
+            const url = URL.createObjectURL(await response.blob());
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            // In the document and revoked a moment later: Firefox cancels a download otherwise.
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            setDownloadedNow(true);
+        } catch {
+            setDownloadError("Couldn't download the codes. Check your connection and try again.");
+        } finally {
+            setDownloading(false);
+        }
+    };
+
+    const forgetDownload = () => {
+        setDownloadedNow(false);
+        setDownloadError(null);
+        finishForm.clearErrors();
+    };
+
+    // Saves the downloaded codes: turns the first method on, or replaces the old set.
+    const finishCodes = (then: () => void) => {
+        finishForm.transform(() => ({}));
+        finishForm.post(urls.finishRecoveryCodes, {
+            preserveScroll: true,
+            onSuccess: () => {
+                forgetDownload();
+                then();
+            },
+        });
+    };
+
     const openCodes = () => {
         passwordForm.clearErrors();
         setCodesPassword(false);
-        setCodesMade(false);
+        forgetDownload();
         setCodesOpen(true);
     };
 
     const closeCodes = () => {
         setCodesOpen(false);
         setCodesPassword(false);
-        setCodesMade(false);
+        forgetDownload();
+    };
+
+    // Closing before Finish drops the new set: the old codes keep working.
+    const discardCodes = () => {
+        if (newSet) router.delete(urls.discardRecoveryCodes, { preserveScroll: true });
+        closeCodes();
     };
 
     const regenerate = (): void =>
@@ -297,7 +364,6 @@ export default function MfaSettings(props: Props) {
             preserveScroll: true,
             onStart: () => setRegenerating(true),
             onFinish: () => setRegenerating(false),
-            onSuccess: () => setCodesMade(true),
             onError: (errors) => {
                 if (errors.password_confirmation_required) setCodesPassword(true);
             },
@@ -416,11 +482,15 @@ export default function MfaSettings(props: Props) {
                     onConfirm={(code) => current && confirmFactor(current, code)}
                     processing={confirmForm.processing}
                     error={(current && confirmingId === current.id ? confirmForm.errors.code : null) ?? (current && resendingId === current.id ? resend.errors.code : null)}
-                    confirmed={confirmed}
-                    recoveryCodes={confirmed ? recoveryCodes : null}
-                    recoveryCodesFile={recoveryCodesFile}
+                    confirmed={confirmed || !!methodCodes}
+                    recoveryCodes={methodCodes?.codes ?? null}
+                    onDownload={downloadCodes}
+                    downloading={downloading}
+                    downloaded={downloaded}
+                    downloadError={downloadError ?? finishForm.errors.recovery_codes}
                     onClose={endSetup}
-                    onComplete={endSetup}
+                    onComplete={methodCodes ? () => finishCodes(endSetup) : endSetup}
+                    completing={finishForm.processing}
                 />
             )}
 
@@ -447,10 +517,14 @@ export default function MfaSettings(props: Props) {
                 passwordProcessing={passwordForm.processing}
                 passwordError={passwordForm.errors.password}
                 passwordRetryAfter={passwordRetryAfter}
-                codes={codesMade ? recoveryCodes : null}
-                recoveryCodesFile={recoveryCodesFile}
-                onClose={closeCodes}
-                onComplete={closeCodes}
+                codes={newSet?.codes ?? null}
+                onDownload={downloadCodes}
+                downloading={downloading}
+                downloaded={downloaded}
+                downloadError={downloadError ?? finishForm.errors.recovery_codes}
+                onClose={discardCodes}
+                onComplete={() => finishCodes(closeCodes)}
+                completing={finishForm.processing}
             />
 
             {trustedBrowsers && (

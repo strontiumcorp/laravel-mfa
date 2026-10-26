@@ -3,6 +3,7 @@
 namespace StrontiumCorp\LaravelMfa\Models;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -27,6 +28,8 @@ use StrontiumCorp\LaravelMfa\Support\Mask;
  */
 class MfaFactor extends Model
 {
+    use MassPrunable;
+
     protected $guarded = ['id'];
 
     protected $hidden = ['secret', 'destination', 'last_totp_timestep'];
@@ -97,5 +100,17 @@ class MfaFactor extends Model
             'confirmed_at' => $this->confirmed_at?->toIso8601String(),
             'last_used_at' => $this->last_used_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * Setups never finished (abandoned, or a first method whose recovery
+     * codes were never saved): a day after they started, well past the
+     * PendingEnrollments window. Confirmed factors are never pruned.
+     *
+     * @return Builder<static>
+     */
+    public function prunable(): Builder
+    {
+        return static::query()->whereNull('confirmed_at')->where('created_at', '<=', now()->subDay());
     }
 }

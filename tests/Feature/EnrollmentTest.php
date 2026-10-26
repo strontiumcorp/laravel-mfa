@@ -26,6 +26,7 @@ it('enrolls an authenticator app end to end', function () {
     $codes = $this->postJson(route('mfa.factors.confirm', $factorId), [
         'code' => (new Google2FA)->oathTotp($setup['secret'], intdiv(now()->getTimestamp(), 30)),
     ])->assertOk()->json('recovery_codes');
+    $this->finishRecoveryCodes();
 
     expect($codes)->toHaveCount(10)
         ->and(Mfa::hasConfirmedFactors($this->user))->toBeTrue()
@@ -54,6 +55,7 @@ it('enrolls a phone number and sends a code', function () {
 
     $factor = MfaFactor::sole();
     $this->postJson(route('mfa.factors.confirm', $factor->id), ['code' => $sms->lastCodeFor('+15555550199')])->assertOk();
+    $this->finishRecoveryCodes();
 
     expect($factor->fresh()->isConfirmed())->toBeTrue();
 });

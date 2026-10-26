@@ -208,24 +208,28 @@ No body. → `{ "status": "enrollment-code-sent", "retry_after": 120, "email": "
     "recoveryCodesRemaining": 10,
     "recoveryCodesTotal": 10,
     "recoveryCodesFile": { "app": "Acme (staging)", "slug": "acme-staging", "account": "jane@example.com" },
+    "pendingRecoveryCodes": null,
     "mustEnroll": false,
     "requiredTypes": [],
     "passwordConfirmationRequired": false,
     "passwordRetryAfter": null,
     "nudge": { "title": "Protect your account", "body": "Turn on two-factor sign-in now. It takes a minute and will soon be required." },
     "urls": { "store": "…/mfa/factors", "confirm": "…/mfa/factors/__ID__/confirm", "resend": "…/mfa/factors/__ID__/resend",
-              "destroy": "…/mfa/factors/__ID__", "recoveryCodes": "…/mfa/recovery-codes", "confirmPassword": "…/mfa/confirm-password",
+              "destroy": "…/mfa/factors/__ID__", "recoveryCodes": "…/mfa/recovery-codes",
+              "downloadRecoveryCodes": "…/mfa/recovery-codes/download", "finishRecoveryCodes": "…/mfa/recovery-codes/finish",
+              "discardRecoveryCodes": "…/mfa/recovery-codes/pending", "confirmPassword": "…/mfa/confirm-password",
               "sendEnrollmentCode": "…/mfa/enrollment-verification/send", "verifyEnrollmentCode": "…/mfa/enrollment-verification",
               "forgetTrustedBrowser": "…/mfa/trusted-browsers/__ID__", "forgetTrustedBrowsers": "…/mfa/trusted-browsers" },
     "enrollmentVerification": null,
     "trustedBrowsers": null,
     "status": null,
-    "recoveryCodes": null,
     "retryAfter": null
 }
 ```
 
-`passwordConfirmationRequired` says whether adding or removing a method would answer `423` right now (see [Password confirmation](#password-confirmation)), so a client can ask for the password before starting; the routes still enforce it. `enrollmentVerification` does the same for the proof of ownership before a first factor (see [Enrollment verification](#enrollment-verification)). `recoveryCodesTotal` is how many a fresh set has (`recovery_codes.count`), for an "8 of 10 left" display. `recoveryCodesFile` is what a downloaded codes file is named after: `app` is the name authenticator apps show (`factors.totp.issuer`, with the environment in brackets outside production unless `factors.totp.issuer_environment` is off), `slug` the same for a file name, and `account` the user's authenticator label (`getMfaLabel()`: the email, else the auth identifier). The bundled dialog names the file `{slug}-recovery-codes-{account}-{YYYY-MM-DD}.txt` with the browser's date. `availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have every one, and `availableTypes` lists only those (`POST /mfa/factors` refuses other types with `422` on `type`). It's `[]` for other users.
+`pendingRecoveryCodes` is a new set of recovery codes waiting in this session to be downloaded and finished (see [Recovery codes](#recovery-codes-download-then-finish)), or `null`: `{ "codes": [ … ], "downloaded": false, "factor": { "id": 12, "type": "totp" } }` for an account's first method (verified, not on yet), or with `"factor": null` for a new set replacing the current one. Show it again after a reload until it is finished. A first method waiting on its codes is not in `pending`.
+
+`passwordConfirmationRequired` says whether adding or removing a method would answer `423` right now (see [Password confirmation](#password-confirmation)), so a client can ask for the password before starting; the routes still enforce it. `enrollmentVerification` does the same for the proof of ownership before a first factor (see [Enrollment verification](#enrollment-verification)). `recoveryCodesTotal` is how many a fresh set has (`recovery_codes.count`), for an "8 of 10 left" display. `recoveryCodesFile` is what a downloaded codes file is named after: `app` is the name authenticator apps show (`factors.totp.issuer`, with the environment in brackets outside production unless `factors.totp.issuer_environment` is off), `slug` the same for a file name, and `account` the user's authenticator label (`getMfaLabel()`: the email, else the auth identifier). The downloaded file is named `{slug}-recovery-codes-{account}-{YYYY-MM-DD}.txt`. `availableTypes` lists the recommended types first (`factors.{type}.recommended`, default `totp`). For an enforced user, `requiredTypes` lists what they must set up (`enforcement.required_types`, e.g. `[{ "type": "totp", "label": "Authenticator app" }]`); `mustEnroll` stays true until they have every one, and `availableTypes` lists only those (`POST /mfa/factors` refuses other types with `422` on `type`). It's `[]` for other users.
 
 `nudge` holds the [nudge](configuration.md#nudge)'s title and body, to show as a notice, for a user with no method who isn't enforced (and while `nudge.enabled` is on); it's `null` otherwise.
 
@@ -258,10 +262,9 @@ Response: `{ "status": "enrollment-started", "factor": { … }, "setup": { … }
 ```json
 { "code": "123456" }
 ```
-→ `{ "status": "factor-enabled", "recovery_codes": ["ab3de-fg7hk", …] }`
+→ `{ "status": "factor-enabled" }`, when the account still has unused recovery codes. The method is on, and the session is marked verified.
 
-- `recovery_codes` appears only when this is the user's first factor (or they had no codes left). Show the codes once; they can't be retrieved again.
-- Confirming also marks the current session as verified.
+→ `{ "status": "recovery-codes-pending", "recovery_codes": ["ab3de-fg7hk", …], "download_url": "…/mfa/recovery-codes/download", "finish_url": "…/mfa/recovery-codes/finish" }`, for the account's first method (or when no codes were left). The code was right, but **the method is not on yet**: it is turned on by `POST /mfa/recovery-codes/finish` once the codes are downloaded (see [Recovery codes](#recovery-codes-download-then-finish)). Until then the user isn't challenged for it, so walking away can't lock them out, and an enforced user stays held on the settings page.
 
 ### `POST /mfa/factors/{id}/resend`
 
@@ -288,11 +291,29 @@ Stop trusting one browser, or all of the user's browsers. → `{ "status": "trus
 
 `current` marks the browser making the request; `label` is `null` when the user agent was missing.
 
-### `POST /mfa/recovery-codes`
+### Recovery codes: download, then finish
 
-→ `{ "status": "recovery-codes-generated", "recovery_codes": [ … ] }`. This invalidates every previous code.
+New recovery codes are saved only after the user has downloaded them. They wait, encrypted, in the session that made them for 30 minutes (`pendingRecoveryCodes` in the settings response shows them again after a reload); a set never finished changes nothing, and a first method never finished is pruned a day later. There is no way to finish without the download, so offer only a download (no copy).
+
+#### `POST /mfa/recovery-codes`
+
+→ `{ "status": "recovery-codes-pending", "recovery_codes": [ … ], "download_url": "…", "finish_url": "…" }`. The current codes keep working until the new ones are finished.
 
 If the user has no confirmed factor yet, the response is `422 { "message": "Enable a verification method first." }`, without an `errors` key.
+
+#### `GET /mfa/recovery-codes/download`
+
+The waiting codes as a `text/plain` attachment (`Cache-Control: no-store`), named `{slug}-recovery-codes-{account}-{YYYY-MM-DD}.txt`. It records the download, which unlocks finishing. `?tz=Asia/Dhaka` dates the file in the browser's time zone (an unknown zone uses the app's). `404` when nothing is waiting (finished, discarded or expired). Fetch it (with the session cookie) and save the response as a file, or link to it.
+
+#### `POST /mfa/recovery-codes/finish`
+
+Saves the downloaded codes: turns the first method on with them (`{ "status": "factor-enabled" }`, and marks the session verified), or replaces the current set (`{ "status": "recovery-codes-generated" }`). Refused with `422` on `recovery_codes`:
+- "Download your recovery codes first." (`recovery_codes_not_downloaded`) before the download;
+- "These recovery codes expired. Start again." (`no_recovery_codes_pending`) when nothing is waiting, or the method was removed or its type disabled meanwhile.
+
+#### `DELETE /mfa/recovery-codes/pending`
+
+Drops the waiting set → `{ "status": "recovery-codes-discarded" }`. A new set for an account that has codes leaves the current codes as they were; a first method stays off.
 
 ## Verification lifetime
 

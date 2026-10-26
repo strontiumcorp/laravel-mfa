@@ -3,7 +3,7 @@
 // then re-render the page with the new props, calling the same callbacks in
 // the same order as Inertia (onStart, onSuccess or onError, onFinish).
 import { type AnchorHTMLAttributes, type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { handle, type State } from './backend';
+import { downloadRecoveryCodes, handle, urls, type State } from './backend';
 
 type Errors = Record<string, string>;
 type Options = { onStart?: () => void; onSuccess?: (page?: unknown) => void; onError?: (errors: Errors) => void; onFinish?: () => void; preserveScroll?: boolean; preserveState?: boolean };
@@ -26,6 +26,20 @@ export function boot(initial: State, sharedProps: (s: State) => Record<string, u
     shared = sharedProps;
     notify();
 }
+
+// The settings page fetches the recovery codes file from the server: the fake backend answers.
+const realFetch = window.fetch.bind(window);
+window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (!url.startsWith(urls.settings.downloadRecoveryCodes)) return realFetch(input, init);
+    await delay();
+    const file = downloadRecoveryCodes(state);
+    notify();
+
+    return file
+        ? new Response(file.text, { headers: { 'Content-Type': 'text/plain', 'Content-Disposition': `attachment; filename="${file.name}"` } })
+        : new Response('', { status: 404 });
+};
 
 export function useBackendState(): State {
     useSyncExternalStore(
@@ -80,6 +94,7 @@ export function useForm<T extends Record<string, unknown>>(initial: T) {
 export const router = {
     post: (url: string, data: Record<string, unknown> = {}, options?: Options) => visit('post', url, data, options),
     delete: (url: string, options?: Options) => visit('delete', url, {}, options),
+    reload: () => notify(),
 };
 
 export function usePage() {

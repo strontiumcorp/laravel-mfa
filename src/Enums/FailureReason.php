@@ -26,6 +26,8 @@ enum FailureReason: string
     case InvalidPassword = 'invalid_password';
     case EnrollmentLinkRequired = 'enrollment_link_required';
     case InvalidLink = 'invalid_link';
+    case RecoveryCodesNotDownloaded = 'recovery_codes_not_downloaded';
+    case NoRecoveryCodesPending = 'no_recovery_codes_pending';
 
     /**
      * The end-user message. $retryAfter (seconds), when known, says when to
@@ -50,6 +52,8 @@ enum FailureReason: string
             self::InvalidPassword => 'The provided password is incorrect.',
             self::EnrollmentLinkRequired => 'Ask an administrator for a setup link to add your first sign-in method.',
             self::InvalidLink => 'This setup link is not valid. Ask for a new one.',
+            self::RecoveryCodesNotDownloaded => 'Download your recovery codes first.',
+            self::NoRecoveryCodesPending => 'These recovery codes expired. Start again.',
         };
     }
 

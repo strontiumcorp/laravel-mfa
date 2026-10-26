@@ -11,6 +11,9 @@ const urls = {
     resend: '/mfa/factors/__ID__/resend',
     destroy: '/mfa/factors/__ID__',
     recoveryCodes: '/mfa/recovery-codes',
+    downloadRecoveryCodes: '/mfa/recovery-codes/download',
+    finishRecoveryCodes: '/mfa/recovery-codes/finish',
+    discardRecoveryCodes: '/mfa/recovery-codes/pending',
     confirmPassword: '/mfa/confirm-password',
     sendEnrollmentCode: '/mfa/enrollment-verification/send',
     verifyEnrollmentCode: '/mfa/enrollment-verification',
@@ -29,7 +32,7 @@ const props = {
     recoveryCodesRemaining: 9,
     recoveryCodesTotal: 10,
     recoveryCodesFile: { app: 'Acme', slug: 'acme', account: 'jane@example.com' },
-    recoveryCodes: null,
+    pendingRecoveryCodes: null,
     retryAfter: null,
     passwordRetryAfter: null,
     passwordConfirmationRequired: false,
@@ -43,6 +46,31 @@ const props = {
 };
 
 beforeEach(() => inertia.reset());
+afterEach(() => vi.restoreAllMocks());
+
+/**
+ * The server's file download: fetch answers `status` (with a file name), and
+ * the saved file's name and the URL asked for are recorded.
+ */
+function serveDownload(status = 200) {
+    const saved = { url: '', name: '' };
+    vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: string) => {
+            saved.url = url;
+            return new Response(status === 200 ? 'aaaaa-11111\n' : '', {
+                status,
+                headers: { 'Content-Disposition': 'attachment; filename="acme-recovery-codes-jane@example.com-2026-10-09.txt"' },
+            });
+        }),
+    );
+    Object.assign(URL, { createObjectURL: () => 'blob:codes', revokeObjectURL: () => {} });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+        saved.name = this.download;
+    });
+
+    return saved;
+}
 
 describe('settings page', () => {
     it('starts an authenticator app and an SMS method', async () => {
@@ -83,35 +111,33 @@ describe('settings page', () => {
         expect(inertia.requests).toEqual([{ method: 'delete', url: '/mfa/factors/7', data: null }]);
     });
 
-    it('makes new recovery codes in a dialog: asks first, then shows them until Complete', async () => {
+    it('makes new recovery codes in a dialog: asks, then Download from the server, then Finish', async () => {
         const codes = ['ccccc-33333', 'ddddd-44444'];
+        const download = serveDownload();
         const user = userEvent.setup();
-        // The mock keeps props as given: recoveryCodes stands for the flash after generating
-        // (and, before that, for codes an earlier setup left in the props, which the dialog must not show).
-        render(<MfaSettings {...props} recoveryCodes={codes} />);
-        expect(screen.queryByRole('list', { name: 'Recovery codes' })).not.toBeInTheDocument();
+        const { rerender } = render(<MfaSettings {...props} />);
 
         await user.click(screen.getByRole('button', { name: 'New codes' }));
         const ask = screen.getByRole('dialog', { name: 'Generate new recovery codes?' });
-        expect(ask).toHaveTextContent('Your 9 unused codes stop working');
+        expect(ask).toHaveTextContent('Your 9 unused codes stop working once');
         expect(inertia.requests).toEqual([]);
 
         await user.click(within(ask).getByRole('button', { name: 'Generate new codes' }));
         expect(inertia.requests).toEqual([{ method: 'post', url: urls.recoveryCodes, data: {} }]);
+        // The server keeps them waiting in the session (the mock keeps props as given).
+        rerender(<MfaSettings {...props} pendingRecoveryCodes={{ codes, downloaded: false, factor: null }} />);
         const dialog = screen.getByRole('dialog', { name: 'Save your new recovery codes' });
         expect(within(dialog).getAllByRole('listitem').map((li) => li.textContent)).toEqual(codes);
+        expect(within(dialog).queryByRole('button', { name: /copy/i })).not.toBeInTheDocument();
+        expect(within(dialog).getByRole('button', { name: 'Finish' })).toBeDisabled();
 
-        await user.click(within(dialog).getByRole('button', { name: 'Copy' }));
-        await user.click(within(dialog).getByRole('button', { name: 'Complete' }));
-        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-        expect(screen.queryByRole('list', { name: 'Recovery codes' })).not.toBeInTheDocument();
+        await user.click(within(dialog).getByRole('button', { name: 'Download recovery codes' }));
+        expect(download.url).toMatch(/^\/mfa\/recovery-codes\/download\?tz=/);
+        expect(download.name).toBe('acme-recovery-codes-jane@example.com-2026-10-09.txt');
+        await user.click(within(dialog).getByRole('button', { name: 'Finish' }));
 
-        // Opening it again asks again; the codes just saved don't come back.
-        await user.click(screen.getByRole('button', { name: 'New codes' }));
-        expect(screen.getByRole('dialog', { name: 'Generate new recovery codes?' })).toBeInTheDocument();
-        await user.click(screen.getByRole('button', { name: 'Cancel' }));
+        expect(inertia.requests.at(-1)).toEqual({ method: 'post', url: urls.finishRecoveryCodes, data: {} });
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-        expect(inertia.requests).toHaveLength(1);
     });
 
     it('tells an enforced user what they must add', () => {
@@ -121,11 +147,17 @@ describe('settings page', () => {
         expect(screen.getByText('Required', { selector: 'header span' })).toBeInTheDocument();
     });
 
-    it('reopens the new codes dialog when making them reloaded the page', () => {
-        render(<MfaSettings {...props} status="recovery-codes-generated" recoveryCodes={['aaaaa-11111']} />);
+    it('shows a new set waiting in the session again after a reload, and drops it when closed', async () => {
+        render(<MfaSettings {...props} pendingRecoveryCodes={{ codes: ['aaaaa-11111'], downloaded: true, factor: null }} />);
 
         const dialog = screen.getByRole('dialog', { name: 'Save your new recovery codes' });
         expect(within(dialog).getByRole('listitem')).toHaveTextContent('aaaaa-11111');
+        // Downloaded before the reload: Finish is open.
+        expect(within(dialog).getByRole('button', { name: 'Finish' })).toBeEnabled();
+
+        await userEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+        expect(inertia.requests).toEqual([{ method: 'delete', url: urls.discardRecoveryCodes, data: null }]);
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
 
     it('asks for the password first in the dialog when a change needs it', async () => {
@@ -180,7 +212,7 @@ describe('settings page', () => {
     });
 
     it('retries removing a factor and making new codes after the password, without asking "are you sure" again', async () => {
-        render(<MfaSettings {...props} recoveryCodes={['ccccc-33333']} />);
+        const { rerender } = render(<MfaSettings {...props} />);
 
         inertia.respondWith(passwordRequired);
         await userEvent.click(screen.getByRole('button', { name: 'Remove Email' }));
@@ -204,6 +236,7 @@ describe('settings page', () => {
             `post ${urls.confirmPassword}`,
             `post ${urls.recoveryCodes}`,
         ]);
+        rerender(<MfaSettings {...props} pendingRecoveryCodes={{ codes: ['ccccc-33333'], downloaded: false, factor: null }} />);
         expect(screen.getByRole('dialog', { name: 'Save your new recovery codes' })).toHaveTextContent('ccccc-33333');
     });
 
@@ -277,62 +310,57 @@ describe('settings page', () => {
         expect(screen.getByRole('dialog', { name: 'Set up an authenticator app' })).toBeInTheDocument();
     });
 
-    it('shows the new recovery codes in the dialog only, until Complete', async () => {
+    it('keeps a first method\'s setup open on its codes until they are downloaded and finished', async () => {
         const pendingTotp = { ...email, id: 8, type: 'totp' as const, type_label: 'Authenticator app', destination: null, secret: 'JBSWY3DP', qr_svg: '<svg/>' };
         const codes = ['aaaaa-11111', 'bbbbb-22222'];
-        // The mock keeps props as given; recoveryCodes stands for the flash after confirming.
+        serveDownload();
         const user = userEvent.setup();
-        render(<MfaSettings {...props} factors={[]} pending={[pendingTotp]} recoveryCodes={codes} />);
+        const { rerender } = render(<MfaSettings {...props} factors={[]} pending={[pendingTotp]} />);
 
         await user.click(screen.getByRole('button', { name: 'Next' }));
         await user.type(screen.getByRole('textbox', { name: 'Code from your authenticator app' }), '123456{Enter}');
+        // Verified: the server keeps the method off and its codes waiting.
+        rerender(<MfaSettings {...props} factors={[]} pending={[]} pendingRecoveryCodes={{ codes, downloaded: false, factor: { id: 8, type: 'totp' } }} />);
 
         const dialog = screen.getByRole('dialog', { name: 'Save your recovery codes' });
         expect(within(dialog).getAllByRole('listitem').map((li) => li.textContent)).toEqual(codes);
         expect(screen.getAllByRole('list', { name: 'Recovery codes' })).toHaveLength(1);
-        expect(within(dialog).getByRole('button', { name: 'Complete' })).toBeDisabled();
+        expect(within(dialog).queryByRole('button', { name: /copy/i })).not.toBeInTheDocument();
+        expect(within(dialog).queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
+        expect(within(dialog).getByRole('button', { name: 'Finish' })).toBeDisabled();
+        expect(dialog).toHaveTextContent('Download your codes to finish.');
 
-        await user.click(within(dialog).getByRole('button', { name: 'Copy' }));
-        await user.click(within(dialog).getByRole('button', { name: 'Complete' }));
+        await user.click(within(dialog).getByRole('button', { name: 'Download recovery codes' }));
+        expect(within(dialog).getByRole('button', { name: 'Downloaded. Download again' })).toBeInTheDocument();
+        await user.click(within(dialog).getByRole('button', { name: 'Finish' }));
 
+        expect(inertia.requests.map((r) => `${r.method} ${r.url}`)).toEqual(['post /mfa/factors/8/confirm', `post ${urls.finishRecoveryCodes}`]);
+        rerender(<MfaSettings {...props} factors={[{ ...pendingTotp, confirmed_at: '2026-10-10T10:00:00+00:00' }]} pending={[]} />);
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-        expect(screen.queryByRole('list', { name: 'Recovery codes' })).not.toBeInTheDocument();
     });
 
-    it('reopens the recovery codes step when confirming reloaded the page (e.g. a new asset version)', async () => {
-        const totp = { ...email, id: 8, type: 'totp' as const, type_label: 'Authenticator app', destination: null, confirmed_at: '2026-10-10T10:00:00+00:00' };
-        const codes = ['aaaaa-11111', 'bbbbb-22222'];
-        const user = userEvent.setup();
-        render(<MfaSettings {...props} factors={[{ ...email, confirmed_at: '2026-09-01T10:00:00+00:00' }, totp]} status="factor-enabled" recoveryCodes={codes} />);
+    it('reopens a first method on its codes after a reload, wherever the user left it', () => {
+        render(<MfaSettings {...props} factors={[]} pendingRecoveryCodes={{ codes: ['aaaaa-11111'], downloaded: false, factor: { id: 8, type: 'totp' } }} />);
 
         const dialog = screen.getByRole('dialog', { name: 'Save your recovery codes' });
         expect(dialog).toHaveTextContent('Authenticator app');
-        expect(within(dialog).getAllByRole('listitem').map((li) => li.textContent)).toEqual(codes);
-        expect(screen.getAllByRole('list', { name: 'Recovery codes' })).toHaveLength(1);
-
-        await user.click(within(dialog).getByRole('button', { name: 'Copy' }));
-        await user.click(within(dialog).getByRole('button', { name: 'Complete' }));
-
-        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-        expect(screen.queryByRole('list', { name: 'Recovery codes' })).not.toBeInTheDocument();
+        expect(within(dialog).getByRole('listitem')).toHaveTextContent('aaaaa-11111');
     });
 
-    it('names the downloaded codes after the app and account from the props', async () => {
-        const pendingTotp = { ...email, id: 8, type: 'totp' as const, type_label: 'Authenticator app', destination: null, secret: 'JBSWY3DP', qr_svg: '<svg/>' };
-        vi.useFakeTimers({ toFake: ['Date'] });
-        vi.setSystemTime(new Date(2026, 9, 9, 8, 5));
-        Object.assign(URL, { createObjectURL: () => 'blob:codes', revokeObjectURL: () => {} });
-        let name = '';
-        vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
-            name = this.download;
-        });
-        render(<MfaSettings {...props} factors={[]} pending={[pendingTotp]} recoveryCodes={['aaaaa-11111']} />);
+    it('says when the codes could not be downloaded, and starts over when they expired', async () => {
+        const download = serveDownload(500);
+        const user = userEvent.setup();
+        render(<MfaSettings {...props} factors={[]} pendingRecoveryCodes={{ codes: ['aaaaa-11111'], downloaded: false, factor: { id: 8, type: 'totp' } }} />);
 
-        await userEvent.click(screen.getByRole('button', { name: 'Next' }));
-        await userEvent.type(screen.getByRole('textbox', { name: 'Code from your authenticator app' }), '123456{Enter}');
-        await userEvent.click(screen.getByRole('button', { name: 'Download' }));
+        await user.click(screen.getByRole('button', { name: 'Download recovery codes' }));
+        expect(screen.getByRole('alert')).toHaveTextContent("Couldn't download the codes. Check your connection and try again.");
+        expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
+        expect(download.name).toBe('');
 
-        expect(name).toBe('acme-recovery-codes-jane@example.com-2026-10-09.txt');
+        serveDownload(404);
+        await user.click(screen.getByRole('button', { name: 'Download recovery codes' }));
+        expect(screen.getByRole('alert')).toHaveTextContent('These codes expired. Start again.');
+        expect(inertia.requests).toEqual([{ method: 'reload', url: '', data: null }]);
     });
 
     it('starts each setup clean, without the last one\'s error', async () => {

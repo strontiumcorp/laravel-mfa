@@ -38,7 +38,10 @@ function requiredTypesAddTotp($test): MfaFactor
 {
     $id = $test->postJson(route('mfa.factors.store'), ['type' => 'totp'])->assertOk()->json('factor.id');
     $factor = MfaFactor::findOrFail($id);
-    $test->postJson(route('mfa.factors.confirm', $id), ['code' => $test->currentTotpCode($factor)])->assertOk();
+    $confirmed = $test->postJson(route('mfa.factors.confirm', $id), ['code' => $test->currentTotpCode($factor)])->assertOk();
+    if ($confirmed->json('status') === 'recovery-codes-pending') {
+        $test->finishRecoveryCodes();
+    }
 
     return $factor;
 }

@@ -23,7 +23,7 @@ it('GET /mfa/challenge', function () {
         'factors' => ['*' => ['id', 'type', 'type_label', 'label', 'destination', 'confirmed', 'confirmed_at', 'last_used_at', 'code_sent', 'retry_after', 'expires_in', 'code_length']],
         'defaultFactorId', 'hasRecoveryCodes', 'trustBrowser', 'renew', 'steps',
         'urls' => ['send', 'verify', 'recover', 'logout'],
-        'status', 'recoveryCodes', 'retryAfter',
+        'status', 'retryAfter',
     ]);
 
     config(['mfa.trusted_browsers.enabled' => true, 'mfa.trusted_browsers.days' => 14]);
@@ -39,8 +39,8 @@ it('POST /mfa/challenge with remember, then the trusted browsers in /mfa/setting
         ->assertOk()->assertExactJson(['status' => 'verified', 'redirect' => '/dashboard']);
 
     $this->getJson('/mfa/settings')->assertExactJsonStructure([
-        'factors', 'pending', 'availableTypes', 'recoveryCodesRemaining', 'recoveryCodesTotal', 'recoveryCodesFile', 'mustEnroll', 'requiredTypes',
-        'urls', 'passwordConfirmationRequired', 'passwordRetryAfter', 'nudge', 'status', 'recoveryCodes', 'retryAfter', 'enrollmentVerification',
+        'factors', 'pending', 'availableTypes', 'recoveryCodesRemaining', 'recoveryCodesTotal', 'recoveryCodesFile', 'pendingRecoveryCodes', 'mustEnroll', 'requiredTypes',
+        'urls', 'passwordConfirmationRequired', 'passwordRetryAfter', 'nudge', 'status', 'retryAfter', 'enrollmentVerification',
         'trustedBrowsers' => ['*' => ['id', 'label', 'created_at', 'last_used_at', 'expires_at', 'current']],
     ]);
     $id = $this->getJson('/mfa/settings')->json('trustedBrowsers.0.id');
@@ -162,8 +162,8 @@ it('GET /mfa/settings and the enrollment endpoints', function () {
     $this->loginWithSession($user);
 
     $this->getJson('/mfa/settings')->assertOk()->assertExactJsonStructure([
-        'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label', 'recommended']], 'recoveryCodesRemaining', 'recoveryCodesTotal', 'recoveryCodesFile' => ['app', 'slug', 'account'], 'mustEnroll', 'requiredTypes',
-        'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'confirmPassword', 'sendEnrollmentCode', 'verifyEnrollmentCode', 'forgetTrustedBrowser', 'forgetTrustedBrowsers'], 'passwordConfirmationRequired', 'passwordRetryAfter', 'nudge' => ['title', 'body'], 'status', 'recoveryCodes', 'retryAfter',
+        'factors', 'pending', 'availableTypes' => ['*' => ['type', 'label', 'recommended']], 'recoveryCodesRemaining', 'recoveryCodesTotal', 'recoveryCodesFile' => ['app', 'slug', 'account'], 'pendingRecoveryCodes', 'mustEnroll', 'requiredTypes',
+        'urls' => ['store', 'confirm', 'resend', 'destroy', 'recoveryCodes', 'downloadRecoveryCodes', 'finishRecoveryCodes', 'discardRecoveryCodes', 'confirmPassword', 'sendEnrollmentCode', 'verifyEnrollmentCode', 'forgetTrustedBrowser', 'forgetTrustedBrowsers'], 'passwordConfirmationRequired', 'passwordRetryAfter', 'nudge' => ['title', 'body'], 'status', 'retryAfter',
         'enrollmentVerification', 'trustedBrowsers',
     ]);
 
@@ -175,11 +175,28 @@ it('GET /mfa/settings and the enrollment endpoints', function () {
     $id = $created->json('factor.id');
     $code = (new Google2FA)->oathTotp($created->json('setup.secret'), intdiv(now()->getTimestamp(), 30));
 
+    // The first method: on only once its recovery codes are downloaded and finished.
     $this->postJson("/mfa/factors/{$id}/confirm", ['code' => $code])
-        ->assertExactJsonStructure(['status', 'recovery_codes'])->assertJsonPath('status', 'factor-enabled');
+        ->assertExactJsonStructure(['status', 'recovery_codes', 'download_url', 'finish_url'])->assertJsonPath('status', 'recovery-codes-pending');
+    expect(array_keys($this->getJson('/mfa/settings')->json('pendingRecoveryCodes')))->toBe(['codes', 'downloaded', 'factor'])
+        ->and($this->getJson('/mfa/settings')->json('pendingRecoveryCodes.factor'))->toBe(['id' => $id, 'type' => 'totp']);
+    $this->postJson('/mfa/recovery-codes/finish')->assertUnprocessable()->assertExactJson([
+        'message' => 'Download your recovery codes first.',
+        'errors' => ['recovery_codes' => ['Download your recovery codes first.']],
+    ]);
+    $this->get('/mfa/recovery-codes/download')->assertOk()->assertHeader('Content-Type', 'text/plain; charset=UTF-8');
+    $this->postJson('/mfa/recovery-codes/finish')->assertExactJson(['status' => 'factor-enabled']);
+    $this->getJson('/mfa/recovery-codes/download')->assertNotFound();
+    $this->postJson('/mfa/recovery-codes/finish')->assertUnprocessable()->assertJsonPath('errors.recovery_codes.0', 'These recovery codes expired. Start again.');
 
-    $this->postJson('/mfa/recovery-codes')->assertExactJsonStructure(['status', 'recovery_codes'])
-        ->assertJsonPath('status', 'recovery-codes-generated');
+    // A new set: the old one works until this one is downloaded and finished (or discarded).
+    $this->postJson('/mfa/recovery-codes')->assertExactJsonStructure(['status', 'recovery_codes', 'download_url', 'finish_url'])
+        ->assertJsonPath('status', 'recovery-codes-pending');
+    $this->getJson('/mfa/settings')->assertJsonPath('pendingRecoveryCodes.factor', null);
+    $this->deleteJson('/mfa/recovery-codes/pending')->assertExactJson(['status' => 'recovery-codes-discarded']);
+    $this->postJson('/mfa/recovery-codes');
+    $this->get('/mfa/recovery-codes/download')->assertOk();
+    $this->postJson('/mfa/recovery-codes/finish')->assertExactJson(['status' => 'recovery-codes-generated']);
 
     $this->deleteJson("/mfa/factors/{$id}")->assertExactJson(['status' => 'factor-disabled']);
 });

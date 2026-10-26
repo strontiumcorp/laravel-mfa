@@ -256,6 +256,7 @@ it('fingerprints an email destination and flags that it is the account email, wi
     // Case and spacing don't matter: it is still the account's own address.
     $id = $this->postJson(route('mfa.factors.store'), ['type' => 'email', 'destination' => '  Owner@EXAMPLE.com '])->assertOk()->json('factor.id');
     $this->postJson(route('mfa.factors.confirm', $id), ['code' => lastEmailedCode()])->assertOk();
+    $this->finishRecoveryCodes();
 
     $audit = destinationAudit($user->id);
     expect(array_keys($audit))->toEqualCanonicalizing(['factor_enrollment_started', 'challenge_sent', 'factor_enabled']);

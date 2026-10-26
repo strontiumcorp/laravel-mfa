@@ -20,10 +20,12 @@ use StrontiumCorp\LaravelMfa\Models\MfaFactor;
 use StrontiumCorp\LaravelMfa\Support\EnrollmentService;
 use StrontiumCorp\LaravelMfa\Support\EnrollmentVerification;
 use StrontiumCorp\LaravelMfa\Support\PendingEnrollments;
+use StrontiumCorp\LaravelMfa\Support\PendingRecoveryCodes;
 use StrontiumCorp\LaravelMfa\Support\RateLimits;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
 use StrontiumCorp\LaravelMfa\Support\TrustedBrowsers;
 use StrontiumCorp\LaravelMfa\Support\VerificationResult;
+use Symfony\Component\HttpFoundation\HeaderUtils;
 use Symfony\Component\HttpFoundation\Response;
 
 class SettingsController extends Controller
@@ -38,9 +40,13 @@ class SettingsController extends Controller
     {
         $user = $this->sessionUser($request, $this->mfa);
         $factors = $user->mfaFactors()->orderBy('id')->get();
+        $codes = PendingRecoveryCodes::get($request->session(), $user);
+        $codesFactor = ($codes['factor_id'] ?? null) === null ? null : $factors->first(fn (MfaFactor $f) => ! $f->isConfirmed() && (string) $f->getKey() === $codes['factor_id']);
 
         $pending = $factors
             ->reject(fn (MfaFactor $f) => $f->isConfirmed())
+            // Verified already: it waits on its recovery codes (pendingRecoveryCodes), not on its setup.
+            ->reject(fn (MfaFactor $f) => $f === $codesFactor)
             ->filter(fn (MfaFactor $f) => $this->mfa->isTypeEnabled($f->type)
                 // Equivalent mutant(s): created_at is always set on stored factors.
                 && $f->created_at?->gt(now()->subMinutes(PendingEnrollments::TTL_MINUTES)) // @pest-mutate-ignore: RemoveNullSafeOperator
@@ -61,6 +67,14 @@ class SettingsController extends Controller
             // outside production), and the account (the authenticator app's label).
             // The page adds the date.
             'recoveryCodesFile' => $this->recoveryCodesFile($user),
+            // A new set waiting to be downloaded and finished in this session
+            // (PendingRecoveryCodes): a first method's (factor) or a new set
+            // for an account that has some (factor null). null = none.
+            'pendingRecoveryCodes' => $codes === null || ($codes['factor_id'] !== null && $codesFactor === null) ? null : [
+                'codes' => $codes['codes'],
+                'downloaded' => $codes['downloaded'],
+                'factor' => $codesFactor === null ? null : ['id' => (int) $codesFactor->getKey(), 'type' => $codesFactor->type->value],
+            ],
             'mustEnroll' => $this->mfa->mustEnroll($user),
             // What an enforced user must set up (enforcement.required_types); [] = any type.
             'requiredTypes' => $this->mfa->isEnforced($user)
@@ -72,6 +86,9 @@ class SettingsController extends Controller
                 'resend' => route('mfa.factors.resend', ['factor' => '__ID__']),
                 'destroy' => route('mfa.factors.destroy', ['factor' => '__ID__']),
                 'recoveryCodes' => route('mfa.recovery-codes.store'),
+                'downloadRecoveryCodes' => route('mfa.recovery-codes.download'),
+                'finishRecoveryCodes' => route('mfa.recovery-codes.finish'),
+                'discardRecoveryCodes' => route('mfa.recovery-codes.discard'),
                 'confirmPassword' => route('mfa.password.confirm'),
                 'sendEnrollmentCode' => route('mfa.enrollment-verification.send'),
                 'verifyEnrollmentCode' => route('mfa.enrollment-verification.verify'),
@@ -183,16 +200,36 @@ class SettingsController extends Controller
             $this->ui->failure($confirmation['result']);
         }
 
-        // Proving possession of the new factor satisfies MFA for this session.
+        // The account's first method: on only once its recovery codes are saved (finishRecoveryCodes()).
+        if (! $confirmation['confirmed']) {
+            PendingRecoveryCodes::put($request->session(), $user, (array) $confirmation['recovery_codes'], $factor);
+
+            return $this->codesPending((array) $confirmation['recovery_codes']);
+        }
+
+        $this->verifiedWith($request, $user, $confirmation['result']->context['factor'] ?? null);
+
+        return $this->ui->success(route('mfa.settings'), 'factor-enabled');
+    }
+
+    /** Proving possession of the new factor satisfies MFA for this session. */
+    private function verifiedWith(Request $request, MultiFactorAuthenticatable $user, ?FactorType $type): void
+    {
         if (! $this->mfa->isVerifiedFor($request, $user)) {
-            $this->mfa->markVerified($request, $user, $confirmation['result']->context['factor'] ?? null, ['stage' => 'enrollment']);
+            $this->mfa->markVerified($request, $user, $type, ['stage' => 'enrollment']);
         } else {
             $this->mfa->refreshEnrollmentRequirement($request, $user);
         }
+    }
 
-        return $this->ui->success(route('mfa.settings'), 'factor-enabled', array_filter([
-            'recovery_codes' => $confirmation['recovery_codes'],
-        ]));
+    /** @param list<string> $codes */
+    private function codesPending(array $codes): Response
+    {
+        return $this->ui->success(route('mfa.settings'), 'recovery-codes-pending', [
+            'recovery_codes' => $codes,
+            'download_url' => route('mfa.recovery-codes.download'),
+            'finish_url' => route('mfa.recovery-codes.finish'),
+        ]);
     }
 
     public function resend(Request $request, string $factor): Response
@@ -230,6 +267,7 @@ class SettingsController extends Controller
         return $this->ui->success(route('mfa.settings'), 'trusted-browsers-forgotten');
     }
 
+    /** A new set of recovery codes, saved only once downloaded and finished; the old ones work until then. */
     public function regenerateRecoveryCodes(Request $request): Response
     {
         $user = $this->sessionUser($request, $this->mfa);
@@ -238,9 +276,97 @@ class SettingsController extends Controller
             abort(422, 'Enable a verification method first.');
         }
 
-        return $this->ui->success(route('mfa.settings'), 'recovery-codes-generated', [
-            'recovery_codes' => $this->enrollment->regenerateRecoveryCodes($user),
+        $codes = $this->enrollment->newRecoveryCodes();
+        PendingRecoveryCodes::put($request->session(), $user, $codes, null);
+
+        return $this->codesPending($codes);
+    }
+
+    /** The waiting recovery codes as a text file; Finish is allowed from then on. */
+    public function downloadRecoveryCodes(Request $request): Response
+    {
+        $user = $this->sessionUser($request, $this->mfa);
+        $pending = PendingRecoveryCodes::get($request->session(), $user);
+
+        if ($pending === null) {
+            abort(404);
+        }
+
+        PendingRecoveryCodes::markDownloaded($request->session(), $user);
+        $file = $this->recoveryCodesFile($user);
+        // Dated in the browser's time zone when it says which (?tz=Asia/Dhaka), else the app's.
+        $zone = in_array($request->query('tz'), timezone_identifiers_list(), true) ? (string) $request->query('tz') : (string) config('app.timezone');
+        $now = now()->setTimezone($zone);
+
+        $text = implode("\n", [
+            "{$file['app']} two-factor recovery codes",
+            "Account: {$file['account']}",
+            'Downloaded: '.$now->format('Y-m-d H:i')." ({$zone})",
+            '',
+            'Each line below is one code. Each code works once. Getting new codes cancels these.',
+            '',
+            ...$pending['codes'],
+            '',
         ]);
+        // Characters Windows, macOS or Linux won't take in a file name, and control characters.
+        $name = (string) preg_replace('/[\\\\\/:*?"<>|\x00-\x1f\x7f]/', '-', implode('-', array_filter([$file['slug'], 'recovery-codes', $file['account'], $now->format('Y-m-d')]))).'.txt';
+
+        return response($text, 200, [
+            'Content-Type' => 'text/plain; charset=UTF-8',
+            'Content-Disposition' => HeaderUtils::makeDisposition(HeaderUtils::DISPOSITION_ATTACHMENT, $name, Str::ascii($name) !== '' ? (string) preg_replace('/[^\x20-\x7e]|%/', '-', Str::ascii($name)) : 'recovery-codes.txt'),
+            'Cache-Control' => 'no-store, private',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    /** Save the downloaded codes: turn the first method on with them, or replace the old set. */
+    public function finishRecoveryCodes(Request $request): Response
+    {
+        $user = $this->sessionUser($request, $this->mfa);
+        $pending = PendingRecoveryCodes::get($request->session(), $user);
+
+        if ($pending === null) {
+            $this->ui->failure(FailureReason::NoRecoveryCodesPending, 'recovery_codes');
+        }
+
+        if (! $pending['downloaded']) {
+            $this->ui->failure(FailureReason::RecoveryCodesNotDownloaded, 'recovery_codes');
+        }
+
+        if ($pending['factor_id'] === null) {
+            if (! $this->mfa->hasConfirmedFactors($user)) {
+                PendingRecoveryCodes::forget($request->session(), $user);
+                $this->ui->failure(FailureReason::NoRecoveryCodesPending, 'recovery_codes');
+            }
+
+            $this->enrollment->saveRecoveryCodes($user, $pending['codes']);
+            PendingRecoveryCodes::forget($request->session(), $user);
+
+            return $this->ui->success(route('mfa.settings'), 'recovery-codes-generated');
+        }
+
+        $factor = PendingEnrollments::owns($request->session(), $pending['factor_id'])
+            ? $this->enrollment->verifiedFactor($user, $pending['factor_id'])
+            : null;
+
+        if ($factor === null || ! $this->mfa->isTypeEnabled($factor->type) || ! in_array($factor->type, $this->mfa->enrollableTypes($user), true)) {
+            PendingRecoveryCodes::forget($request->session(), $user);
+            $this->ui->failure(FailureReason::NoRecoveryCodesPending, 'recovery_codes');
+        }
+
+        $this->enrollment->enable($user, $factor, $pending['codes']);
+        PendingRecoveryCodes::forget($request->session(), $user);
+        $this->verifiedWith($request, $user, $factor->type);
+
+        return $this->ui->success(route('mfa.settings'), 'factor-enabled');
+    }
+
+    /** Drop the waiting set: a new set for an account that has codes keeps the old ones; a first method stays off. */
+    public function discardRecoveryCodes(Request $request): Response
+    {
+        PendingRecoveryCodes::forget($request->session(), $this->sessionUser($request, $this->mfa));
+
+        return $this->ui->success(route('mfa.settings'), 'recovery-codes-discarded');
     }
 
     /**

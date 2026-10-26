@@ -25,7 +25,6 @@ final class UiResponse
     {
         $props += [
             'status' => $this->request->session()->get('mfa.status'),
-            'recoveryCodes' => $this->request->session()->get('mfa.recovery_codes'),
             // Seconds until another code can be requested (drives the countdown).
             'retryAfter' => $this->request->session()->get('mfa.retry_after'),
         ];
@@ -39,7 +38,7 @@ final class UiResponse
     }
 
     /**
-     * @param  array<string, mixed>  $data  returned as JSON, or flashed (status, recovery codes)
+     * @param  array<string, mixed>  $data  returned as JSON, or flashed (status, retry_after)
      */
     public function success(string $redirectTo, string $status, array $data = []): Response
     {
@@ -48,10 +47,6 @@ final class UiResponse
         }
 
         $redirect = redirect()->to($redirectTo)->with('mfa.status', $status);
-
-        if (isset($data['recovery_codes'])) {
-            $redirect->with('mfa.recovery_codes', $data['recovery_codes']);
-        }
 
         if (isset($data['retry_after'])) {
             $redirect->with('mfa.retry_after', $data['retry_after']);

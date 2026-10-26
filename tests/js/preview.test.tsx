@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import { CODE, challengeProps, handle, initialState, PASSWORD, settingsProps } from '../../preview/backend';
+import { CODE, challengeProps, downloadRecoveryCodes, handle, initialState, PASSWORD, settingsProps } from '../../preview/backend';
 import { scenarios } from '../../preview/scenarios';
 import MfaChallenge from '../../stubs/inertia-react/pages/challenge';
 import MfaSettings from '../../stubs/inertia-react/pages/settings';
@@ -26,8 +26,15 @@ describe('UI preview', () => {
 
         expect(handle(s, 'post', `/mfa/factors/${pending.id}/confirm`, { code: '000000' }).errors).toEqual({ code: 'The provided code is invalid.' });
         expect(handle(s, 'post', `/mfa/factors/${pending.id}/confirm`, { code: CODE })).toEqual({});
+        // Verified, but on only once its recovery codes are downloaded and finished.
+        expect(s.factors).toEqual([]);
+        expect(settingsProps(s).pendingRecoveryCodes).toMatchObject({ downloaded: false, factor: { id: pending.id, type: 'totp' } });
+        expect(settingsProps(s).pendingRecoveryCodes?.codes).toHaveLength(10);
+        expect(handle(s, 'post', '/mfa/recovery-codes/finish', {}).errors).toEqual({ recovery_codes: 'Download your recovery codes first.' });
+        expect(downloadRecoveryCodes(s)?.text).toContain(settingsProps(s).pendingRecoveryCodes!.codes[0]);
+        expect(handle(s, 'post', '/mfa/recovery-codes/finish', {})).toEqual({});
         expect(s.factors.map((f) => f.type)).toEqual(['totp']);
-        expect(settingsProps(s).recoveryCodes).toHaveLength(10);
+        expect(settingsProps(s).pendingRecoveryCodes).toBeNull();
     });
 
     it('takes "Not today" on the nudge, and offers the settings notice to users without a method', () => {

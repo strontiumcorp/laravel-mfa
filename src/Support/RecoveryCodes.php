@@ -24,6 +24,20 @@ final class RecoveryCodes
      */
     public function generate(MultiFactorAuthenticatable $user): array
     {
+        $codes = $this->make();
+        $this->store($user, $codes);
+
+        return $codes;
+    }
+
+    /**
+     * A fresh set of plain codes, not stored yet (PendingRecoveryCodes holds
+     * them until the user has saved them).
+     *
+     * @return list<string>
+     */
+    public function make(): array
+    {
         $codes = [];
 
         while (count($codes) < $this->count) {
@@ -31,8 +45,16 @@ final class RecoveryCodes
             $codes[$this->generator->recoveryCode()] = true; // @pest-mutate-ignore: TrueToFalse
         }
 
-        $codes = array_keys($codes);
+        return array_map('strval', array_keys($codes));
+    }
 
+    /**
+     * Replace all of the user's recovery codes with these.
+     *
+     * @param  list<string>  $codes
+     */
+    public function store(MultiFactorAuthenticatable $user, array $codes): void
+    {
         DB::transaction(function () use ($user, $codes): void {
             $user->mfaRecoveryCodes()->delete();
 
@@ -40,8 +62,6 @@ final class RecoveryCodes
                 'code_hash' => $this->hasher->hash(self::normalize($code), self::SCOPE),
             ], $codes));
         });
-
-        return $codes;
     }
 
     /** Atomically mark a code as used. Safe against concurrent double use. */

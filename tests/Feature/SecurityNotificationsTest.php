@@ -50,7 +50,11 @@ function enableTotp($test, $user): int
 {
     $secret = $test->postJson('/mfa/factors', ['type' => 'totp'])->assertOk()->json('setup.secret');
     $id = $user->mfaFactors()->whereNull('confirmed_at')->sole()->id;
-    $test->postJson("/mfa/factors/{$id}/confirm", ['code' => (new Google2FA)->oathTotp($secret, intdiv(now()->getTimestamp(), 30))])->assertOk();
+    $confirmed = $test->postJson("/mfa/factors/{$id}/confirm", ['code' => (new Google2FA)->oathTotp($secret, intdiv(now()->getTimestamp(), 30))])->assertOk();
+    // A first method is on once its recovery codes are downloaded and finished.
+    if ($confirmed->json('status') === 'recovery-codes-pending') {
+        $test->finishRecoveryCodes();
+    }
 
     return $id;
 }
@@ -85,6 +89,7 @@ it('tells the owner when a method is removed, and when an administrator removed 
 it('tells the owner about new recovery codes and about each one used', function () {
     [$user] = $this->userWithFactor(FactorType::Totp, ['email' => 'owner@example.com']);
     $this->actingAsMfaVerified($user)->postJson('/mfa/recovery-codes')->assertOk();
+    $this->finishRecoveryCodes();
 
     $code = app(RecoveryCodes::class)->generate($user)[0];
     $this->post('/logout');
@@ -127,9 +132,11 @@ it('has a switch per event and one for all of them', function () {
 it('sets the delivery queue on the email when one is set, and leaves it unset otherwise (then it is sent inline)', function () {
     [$user] = $this->userWithFactor(FactorType::Totp, ['email' => 'owner@example.com']);
     $this->actingAsMfaVerified($user)->postJson('/mfa/recovery-codes')->assertOk();
+    $this->finishRecoveryCodes();
 
     config(['mfa.delivery.queue_connection' => 'redis', 'mfa.delivery.queue' => 'mfa']);
     $this->postJson('/mfa/recovery-codes')->assertOk();
+    $this->finishRecoveryCodes();
 
     $alerts = alertsTo('owner@example.com');
     expect($alerts[0])->toBeInstanceOf(ShouldQueue::class)
@@ -142,6 +149,7 @@ it('uses the configured notification class', function () {
     [$user] = $this->userWithFactor(FactorType::Totp, ['email' => 'owner@example.com']);
 
     $this->actingAsMfaVerified($user)->postJson('/mfa/recovery-codes')->assertOk();
+    $this->finishRecoveryCodes();
 
     Notification::assertSentOnDemand(CustomSecurityAlert::class, fn ($n, $channels, $to) => $n->alert === 'recovery_codes_generated' && $to->routes === ['mail' => 'owner@example.com']);
 });
@@ -150,6 +158,7 @@ it('skips users without an email address', function () {
     [$user] = $this->userWithFactor(FactorType::Totp, ['email' => '']);
 
     $this->actingAsMfaVerified($user)->postJson('/mfa/recovery-codes')->assertOk();
+    $this->finishRecoveryCodes();
 
     Notification::assertNothingSent();
 });
@@ -171,6 +180,7 @@ it('never blocks the request when sending fails', function () {
     [$user] = $this->userWithFactor(FactorType::Totp, ['email' => 'owner@example.com']);
 
     $this->actingAsMfaVerified($user)->postJson('/mfa/recovery-codes')->assertOk();
+    $this->finishRecoveryCodes();
 
     Exceptions::assertReported(fn (RuntimeException $e) => $e->getMessage() === 'mail is down');
 });
@@ -208,11 +218,13 @@ describe('review fixes', function () {
         [$user] = $this->userWithFactor(FactorType::Totp, ['email' => 'owner@example.com']);
 
         $this->actingAsMfaVerified($user)->postJson('/mfa/recovery-codes')->assertOk();
+        $this->finishRecoveryCodes();
         Queue::assertNothingPushed();
         expect(app('mailer')->getSymfonyTransport()->messages())->toHaveCount(1);
 
         config(['mfa.delivery.queue' => 'mfa', 'queue.default' => 'database']);
         $this->postJson('/mfa/recovery-codes')->assertOk();
+        $this->finishRecoveryCodes();
         Queue::assertPushedOn('mfa', SendQueuedNotifications::class);
     });
 
@@ -223,6 +235,7 @@ describe('review fixes', function () {
         [$user] = $this->userWithFactor(FactorType::Totp, ['email' => 'owner@example.com']);
 
         $this->actingAsMfaVerified($user)->postJson('/mfa/recovery-codes')->assertOk();
+        $this->finishRecoveryCodes();
 
         Queue::assertPushedOn('alerts', SendQueuedNotifications::class);
     });

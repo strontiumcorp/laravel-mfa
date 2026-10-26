@@ -80,6 +80,7 @@ describe('a stolen password alone', function () {
         $secret = $this->postJson('/mfa/factors', ['type' => 'totp'])->assertOk()->json('setup.secret');
         $id = $owner->mfaFactors()->sole()->id;
         $this->postJson("/mfa/factors/{$id}/confirm", ['code' => (new Google2FA)->oathTotp($secret, intdiv(now()->getTimestamp(), 30))])->assertOk();
+        $this->finishRecoveryCodes();
         $this->get('/dashboard')->assertOk();
 
         Event::assertDispatched(EnrollmentVerificationRequired::class, fn ($e) => $e->user->is($owner) && $e->context === ['path' => '/mfa/factors']);
