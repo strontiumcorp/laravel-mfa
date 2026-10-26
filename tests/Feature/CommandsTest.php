@@ -6,6 +6,7 @@ use Illuminate\Foundation\Auth\User;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Support\Facades\Artisan;
 use StrontiumCorp\LaravelMfa\Console\InstallCommand;
+use StrontiumCorp\LaravelMfa\Console\ReleasedStubs;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
@@ -109,27 +110,39 @@ it('points at the files left by an earlier version', function () {
     }
 });
 
-it('does not overwrite customised pages or components unless forced, and can skip the UI', function () {
+it('replaces published files the app never changed, keeps changed ones unless forced, and can skip the UI', function () {
     $files = new Filesystem;
     $js = sys_get_temp_dir().'/mfa-install-'.uniqid();
     $files->ensureDirectoryExists("{$js}/pages/mfa");
     $files->ensureDirectoryExists("{$js}/components/vendor/laravel-mfa");
+    // As an earlier release published them: untouched since.
+    $files->put("{$js}/pages/mfa/settings.tsx", "old settings page\n");
+    $files->put("{$js}/components/vendor/laravel-mfa/factor-cards.tsx", "old cards\r\n"); // a Windows checkout
+    // Changed by the app.
     $files->put("{$js}/pages/mfa/challenge.tsx", 'customised');
     $files->put("{$js}/components/vendor/laravel-mfa/challenge-form.tsx", 'customised');
+    $this->app->instance(ReleasedStubs::class, new ReleasedStubs(released([
+        'pages/settings.tsx' => "old settings page\n",
+        'components/factor-cards.tsx' => "old cards\n",
+        'pages/challenge.tsx' => 'as released',
+    ])));
+    $stubs = __DIR__.'/../../stubs/inertia-react';
     Artisan::command('vendor:publish {--tag=} {--force}', fn () => null);
 
     try {
         $this->artisan('mfa:install', ['--js-path' => $js, '--css-path' => "{$js}/css"])
             ->assertSuccessful()
-            ->expectsOutputToContain("Skipped (exists): {$js}/pages/mfa/challenge.tsx")
-            ->expectsOutputToContain("Skipped (exists): {$js}/components/vendor/laravel-mfa/challenge-form.tsx");
+            ->expectsOutputToContain("Kept (changed in the app; --force replaces it): {$js}/pages/mfa/challenge.tsx")
+            ->expectsOutputToContain("Kept (changed in the app; --force replaces it): {$js}/components/vendor/laravel-mfa/challenge-form.tsx");
         expect(file_get_contents("{$js}/pages/mfa/challenge.tsx"))->toBe('customised')
             ->and(file_get_contents("{$js}/components/vendor/laravel-mfa/challenge-form.tsx"))->toBe('customised')
+            ->and(file_get_contents("{$js}/pages/mfa/settings.tsx"))->toBe(file_get_contents("{$stubs}/pages/settings.tsx"))
+            ->and(file_get_contents("{$js}/components/vendor/laravel-mfa/factor-cards.tsx"))->toBe(file_get_contents("{$stubs}/components/factor-cards.tsx"))
             ->and("{$js}/components/vendor/laravel-mfa/totp-setup.tsx")->toBeFile();
 
         $this->artisan('mfa:install', ['--js-path' => $js, '--css-path' => "{$js}/css", '--force' => true])->assertSuccessful();
-        expect(file_get_contents("{$js}/pages/mfa/challenge.tsx"))->not->toBe('customised')
-            ->and(file_get_contents("{$js}/components/vendor/laravel-mfa/challenge-form.tsx"))->not->toBe('customised');
+        expect(file_get_contents("{$js}/pages/mfa/challenge.tsx"))->toBe(file_get_contents("{$stubs}/pages/challenge.tsx"))
+            ->and(file_get_contents("{$js}/components/vendor/laravel-mfa/challenge-form.tsx"))->toBe(file_get_contents("{$stubs}/components/challenge-form.tsx"));
 
         $files->deleteDirectory("{$js}/pages/mfa");
         $files->deleteDirectory("{$js}/components");
@@ -142,6 +155,70 @@ it('does not overwrite customised pages or components unless forced, and can ski
         $files->deleteDirectory($js);
     }
 });
+
+describe('--ui-only', function () {
+    it('updates the pages, components and theme without touching the config', function () {
+        $files = new Filesystem;
+        $js = sys_get_temp_dir().'/mfa-install-'.uniqid();
+        $files->ensureDirectoryExists("{$js}/Pages/mfa");
+        $files->put("{$js}/Pages/mfa/settings.tsx", 'as released');
+        $files->put("{$js}/Pages/mfa/challenge.tsx", 'customised');
+        $files->put("{$js}/Pages/mfa/mfa-context.ts", file_get_contents(__DIR__.'/../../stubs/inertia-react/pages/mfa-context.ts'));
+        $this->app->instance(ReleasedStubs::class, new ReleasedStubs(released(['pages/settings.tsx' => 'as released'])));
+        $published = [];
+        Artisan::command('vendor:publish {--tag=} {--force}', function () use (&$published) {
+            $published[] = $this->option('tag');
+        });
+
+        try {
+            $this->artisan('mfa:install', ['--ui-only' => true, '--js-path' => $js, '--css-path' => "{$js}/css", '--tailwind' => '3'])
+                ->assertSuccessful()
+                ->expectsOutputToContain("{$js}/Pages/mfa/settings.tsx")
+                ->expectsOutputToContain("Kept (changed in the app; --force replaces it): {$js}/Pages/mfa/challenge.tsx")
+                ->expectsOutputToContain('1 file changed in the app was kept')
+                // Only the files: no config, no first-install steps.
+                ->doesntExpectOutputToContain('Next steps');
+
+            expect($published)->toBe([])
+                ->and(file_get_contents("{$js}/Pages/mfa/settings.tsx"))->not->toBe('as released')
+                ->and(file_get_contents("{$js}/Pages/mfa/challenge.tsx"))->toBe('customised')
+                ->and("{$js}/components/vendor/laravel-mfa/factor-setup-dialog.tsx")->toBeFile()
+                ->and("{$js}/css/vendor/laravel-mfa/theme.css")->toBeFile();
+
+            $this->artisan('mfa:install', ['--ui-only' => true, '--force' => true, '--js-path' => $js, '--css-path' => "{$js}/css"])
+                ->assertSuccessful()
+                ->doesntExpectOutputToContain('was kept');
+            expect(file_get_contents("{$js}/Pages/mfa/challenge.tsx"))->not->toBe('customised')
+                ->and($published)->toBe([]);
+        } finally {
+            $files->deleteDirectory($js);
+        }
+    });
+
+    it('refuses --ui-only with --no-ui', function () {
+        $this->artisan('mfa:install', ['--ui-only' => true, '--no-ui' => true])
+            ->assertFailed()
+            ->expectsOutputToContain('--ui-only and --no-ui');
+    });
+});
+
+it('ships the hashes of every released page, component and theme', function () {
+    $released = json_decode((string) file_get_contents(ReleasedStubs::path()), true, flags: JSON_THROW_ON_ERROR);
+
+    expect($released)->toHaveKeys(['pages/settings.tsx', 'pages/challenge.tsx', 'components/factor-setup-dialog.tsx', 'css/theme.css'])
+        ->and(collect($released)->flatten()->every(fn ($hash) => is_string($hash) && preg_match('/^[0-9a-f]{64}$/', $hash) === 1))->toBeTrue()
+        ->and((new ReleasedStubs)->contains('pages/settings.tsx', 'never released'))->toBeFalse()
+        ->and((new ReleasedStubs)->contains('pages/unknown.tsx', 'anything'))->toBeFalse();
+});
+
+/** A released-stubs file holding these contents (relative stub path => contents); returns its path. */
+function released(array $contents): string
+{
+    $path = sys_get_temp_dir().'/mfa-released-'.uniqid().'.json';
+    file_put_contents($path, json_encode(array_map(fn (string $c) => [hash('sha256', $c)], $contents)));
+
+    return $path;
+}
 
 describe('the theme', function () {
     it('publishes the theme for the app\'s Tailwind version and says how to import it', function (?string $tailwind, string $stub, string $where) {
@@ -177,7 +254,7 @@ describe('the theme', function () {
         try {
             $this->artisan('mfa:install', ['--js-path' => "{$tmp}/js", '--css-path' => "{$tmp}/css"])
                 ->assertSuccessful()
-                ->expectsOutputToContain("Skipped (exists): {$tmp}/css/vendor/laravel-mfa/theme.css");
+                ->expectsOutputToContain("Kept (changed in the app; --force replaces it): {$tmp}/css/vendor/laravel-mfa/theme.css");
             expect(file_get_contents("{$tmp}/css/vendor/laravel-mfa/theme.css"))->toBe(':root { --mfa-primary: #7042f3; }');
 
             $this->artisan('mfa:install', ['--js-path' => "{$tmp}/js", '--css-path' => "{$tmp}/css", '--force' => true])->assertSuccessful();

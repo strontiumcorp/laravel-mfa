@@ -34,6 +34,7 @@ It must be secure, cheap per request, Octane-safe, fully tested, and observable.
 | `make typecheck-stubs APPS="../artistly ../clone-voice ../podcast-flow"` | Type-checks `stubs/inertia-react` (pages and components) against each app's real React/Inertia. Run after any stub change. |
 | `make format` | Pint fix. |
 | `make release ARGS="--dry-run"` | Preview the next release (see Releasing). |
+| `python3 scripts/released-stubs.py` | Rewrite `stubs/inertia-react/released.json` (the hash of every page, component and theme in each `v*` tag, so `mfa:install` replaces only files the app never changed). The release script runs it; commit its output with stub changes you release. |
 | `make release-pr` / `make release-tag` | For a protected `main`: open the release as a pull request, then tag it once merged. |
 
 **Never run mutation tests** (`pest --mutate`): about 36 minutes in this setup, and `--parallel` reports false kills. The `@pest-mutate-ignore: <Mutator>` markers in `src/` document proven-equivalent mutants. Keep them, and keep the reason comment on the line above when you touch those lines.

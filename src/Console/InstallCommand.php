@@ -12,15 +12,31 @@ class InstallCommand extends Command
 
     protected $signature = 'mfa:install
         {--no-ui : Do not publish the React/Inertia pages and components}
-        {--force : Overwrite existing files}
+        {--ui-only : Publish only the pages, components and theme (to update them; the config is left alone)}
+        {--force : Overwrite existing files, also ones the app changed}
         {--js-path= : Frontend source directory (default: resources/js)}
         {--css-path= : Stylesheet directory, for the theme (default: resources/css)}
         {--tailwind= : The app\'s Tailwind major, 3 or 4, for the theme (default: from package.json, else 4)}';
 
     protected $description = 'Publish the MFA config, UI pages and components, and print the remaining integration steps';
 
-    public function handle(Filesystem $files): int
+    /** Published files the app had changed, so left as they are (no --force). */
+    private int $kept = 0;
+
+    private ReleasedStubs $released;
+
+    public function handle(Filesystem $files, ReleasedStubs $released): int
     {
+        // The command instance is reused when called more than once in a process.
+        $this->kept = 0;
+        $this->released = $released;
+
+        if ($this->option('ui-only') && $this->option('no-ui')) {
+            $this->components->error("--ui-only and --no-ui can't be used together.");
+
+            return self::FAILURE;
+        }
+
         $tailwind = $this->option('tailwind');
         if ($tailwind !== null && ! in_array($tailwind, ['3', '4'], true)) {
             $this->components->error('--tailwind must be 3 or 4.');
@@ -29,7 +45,9 @@ class InstallCommand extends Command
         }
         $tailwind = (int) ($tailwind ?? self::tailwindMajor(is_file(base_path('package.json')) ? (string) file_get_contents(base_path('package.json')) : null) ?? 4);
 
-        $this->call('vendor:publish', ['--tag' => 'mfa-config', '--force' => (bool) $this->option('force')]);
+        if (! $this->option('ui-only')) {
+            $this->call('vendor:publish', ['--tag' => 'mfa-config', '--force' => (bool) $this->option('force')]);
+        }
 
         $base = rtrim((string) ($this->option('js-path') ?: resource_path('js')), '/');
         $pagesDir = collect(['Pages', 'pages'])->first(fn ($dir) => $files->isDirectory("{$base}/{$dir}")) ?? 'pages';
@@ -37,6 +55,17 @@ class InstallCommand extends Command
         if (! $this->option('no-ui')) {
             $this->publishUi($files, $base, $pagesDir);
             $this->publishTheme($files, rtrim((string) ($this->option('css-path') ?: resource_path('css')), '/'), $tailwind);
+        }
+
+        if ($this->kept > 0) {
+            $this->newLine();
+            $this->components->warn($this->kept === 1
+                ? '1 file changed in the app was kept. Merge the new version by hand, or replace it with --force.'
+                : "{$this->kept} files changed in the app were kept. Merge the new versions by hand, or replace them with --force.");
+        }
+
+        if ($this->option('ui-only')) {
+            return self::SUCCESS;
         }
 
         $this->newLine();
@@ -86,8 +115,8 @@ class InstallCommand extends Command
     private function publishUi(Filesystem $files, string $base, string $pagesDir): void
     {
         $stubs = __DIR__.'/../../stubs/inertia-react';
-        $this->publishDirectory($files, "{$stubs}/pages", "{$base}/{$pagesDir}/mfa");
-        $this->publishDirectory($files, "{$stubs}/components", "{$base}/".self::COMPONENTS_DIR);
+        $this->publishDirectory($files, "{$stubs}/pages", "{$base}/{$pagesDir}/mfa", 'pages');
+        $this->publishDirectory($files, "{$stubs}/components", "{$base}/".self::COMPONENTS_DIR, 'components');
 
         // v0.1 published two files to {Components|components}/mfa/.
         foreach (['Components', 'components'] as $dir) {
@@ -108,9 +137,9 @@ class InstallCommand extends Command
      */
     private function publishTheme(Filesystem $files, string $css, int $tailwind): void
     {
-        $stub = __DIR__.'/../../stubs/inertia-react/css/'.($tailwind < 4 ? 'theme.tailwind-3.css' : 'theme.css');
+        $name = $tailwind < 4 ? 'theme.tailwind-3.css' : 'theme.css';
 
-        $this->publishFile($files, $stub, "{$css}/vendor/laravel-mfa/theme.css");
+        $this->publishFile($files, __DIR__."/../../stubs/inertia-react/css/{$name}", "{$css}/vendor/laravel-mfa/theme.css", "css/{$name}");
     }
 
     /** The Tailwind major in package.json's dependencies (null if none, or not a version). */
@@ -122,21 +151,38 @@ class InstallCommand extends Command
         return is_string($version) && preg_match('/\d+/', $version, $match) ? (int) $match[0] : null;
     }
 
-    private function publishDirectory(Filesystem $files, string $from, string $target): void
+    private function publishDirectory(Filesystem $files, string $from, string $target, string $kind): void
     {
         $files->ensureDirectoryExists($target);
 
         foreach ($files->files($from) as $stub) {
-            $this->publishFile($files, $stub->getPathname(), $target.'/'.$stub->getFilename());
+            $this->publishFile($files, $stub->getPathname(), $target.'/'.$stub->getFilename(), "{$kind}/{$stub->getFilename()}");
         }
     }
 
-    private function publishFile(Filesystem $files, string $from, string $to): void
+    /**
+     * Publish one file. An existing one is replaced when --force says so, or
+     * when it is still the file some release published ($stub, e.g.
+     * "pages/settings.tsx", in ReleasedStubs): the app never changed it.
+     * One the app changed is kept and counted.
+     */
+    private function publishFile(Filesystem $files, string $from, string $to, string $stub): void
     {
         if ($files->exists($to) && ! $this->option('force')) {
-            $this->components->warn("Skipped (exists): {$to}");
+            $current = $files->get($to);
 
-            return;
+            if (ReleasedStubs::hash($current) === ReleasedStubs::hash($files->get($from))) {
+                $this->components->twoColumnDetail($to, '<fg=gray>UP TO DATE</>');
+
+                return;
+            }
+
+            if (! $this->released->contains($stub, $current)) {
+                $this->components->warn("Kept (changed in the app; --force replaces it): {$to}");
+                $this->kept++;
+
+                return;
+            }
         }
 
         $files->ensureDirectoryExists(dirname($to));

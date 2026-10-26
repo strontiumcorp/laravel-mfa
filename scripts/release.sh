@@ -249,7 +249,11 @@ make ci
 python3 "$changelog_tool" notes "$tag" --notes "$notes" --changelog CHANGELOG.md
 [ -n "$(git status --porcelain -- CHANGELOG.md)" ] || fail "CHANGELOG.md did not change; nothing to release"
 
-git add CHANGELOG.md
+# The pages and components each release shipped, so mfa:install can tell a
+# published file the app never changed (replaced) from one it changed (kept).
+python3 scripts/released-stubs.py
+
+git add CHANGELOG.md stubs/inertia-react/released.json
 git commit --quiet -m "chore: release $tag"
 
 if [ "$mode" = "direct" ]; then
