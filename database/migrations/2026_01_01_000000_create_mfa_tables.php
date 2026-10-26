@@ -35,7 +35,8 @@ return new class extends Migration
             $table->foreignId('factor_id')->constrained(config('mfa.tables.factors', 'mfa_factors'))->cascadeOnDelete();
             $table->string('code_hash', 64);
             $table->unsignedTinyInteger('attempts')->default(0);
-            $table->timestamp('expires_at');
+            // An explicit default: without one, MySQL 5.7 and MariaDB < 10.10 make it ON UPDATE CURRENT_TIMESTAMP.
+            $table->timestamp('expires_at')->useCurrent();
             $table->timestamp('consumed_at')->nullable();
             $table->timestamp('created_at')->nullable();
 

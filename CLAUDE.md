@@ -25,6 +25,7 @@ It must be secure, cheap per request, Octane-safe, fully tested, and observable.
 | `make ci` | Pint (check), PHPStan level 6, the parallel Pest suite, `make test-js`. Run before every commit. |
 | `make test-js` | `tsc` and Vitest for `stubs/inertia-react` (needs `npm ci`; `make install` does both). |
 | `make preview` | Live preview of the published pages and components (`preview/`: Vite, a fake backend with the package's endpoints, scenarios, light/dark, phone/tablet/desktop frames) at http://localhost:5180. Reloads on every edit under `stubs/`. Code `123456`, password `password`. Tailwind comes from its CDN, so it needs internet. Look at UI changes here at all three widths. |
+| `make test-db` | `tests/Database` against a real MySQL/MariaDB with `explicit_defaults_for_timestamp` off (settings in a gitignored `.env.test-db`, see `tests/DatabaseServerTestCase.php`). One process; skipped elsewhere. CI runs it on MariaDB 10.6. |
 | `make test PROCESSES=2` | The suite grouped the way CI groups it (CI has 2 workers; the local default is one per CPU). |
 | `make test-filter FILTER="…"` | Run tests matching a name. |
 | `make coverage` | Parallel coverage, fails under 85% (currently ~98%). |
@@ -59,6 +60,7 @@ It must be secure, cheap per request, Octane-safe, fully tested, and observable.
 - **Must pass on PHP 8.2** (CI's oldest): e.g. `class_alias()` of an internal class fails there.
 - **Must pass on the lowest dependencies:** Laravel 11.x with Carbon 2 truncates `diffInSeconds()`. Compute whole-second waits from timestamps.
 - **Guzzle 7 (Laravel 11/12) and Guzzle 8 (Laravel 13) differ:** Guzzle 8 has typed exceptions (`ConnectException` means "never connected"), Guzzle 7 puts curl data in `getHandlerContext()`. Code and tests must handle both.
+- **SQLite hides what a database server does to columns.** A bare NOT NULL `timestamp` became `ON UPDATE CURRENT_TIMESTAMP` on MariaDB < 10.10 / MySQL 5.7 (SDAP-791: trusted browsers expired on first use). Give every NOT NULL timestamp an explicit default, and test schema behaviour in `tests/Database` (`make test-db`).
 - SQLite foreign keys are on in `TestCase` (Testbench turns them off), because MFA rows rely on cascades.
 - Boot-time config (read while providers boot, e.g. `middleware.append_to_web_group`) needs `$this->rebootWith([...])`.
 - Never assert `null`/falsy on a response without asserting its status: a 500 can satisfy it.

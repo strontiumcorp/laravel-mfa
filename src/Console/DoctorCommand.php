@@ -8,6 +8,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Inertia\Inertia;
@@ -48,6 +49,8 @@ class DoctorCommand extends Command
         foreach (config('mfa.tables') as $name => $table) {
             $this->check("Table [{$table}] exists", $this->safely(fn () => Schema::hasTable($table)), 'Run php artisan migrate');
         }
+
+        $this->checkExpiryColumns();
 
         foreach ($mfa->guards() as $guard) {
             $provider = config("auth.guards.{$guard}.provider");
@@ -401,6 +404,30 @@ class DoctorCommand extends Command
         }
     }
 
+    /**
+     * MySQL 5.7 and MariaDB before 10.10 gave the old create migrations'
+     * `expires_at` ON UPDATE CURRENT_TIMESTAMP: using a trusted browser, or
+     * a wrong guess at a code, moved its expiry to now.
+     */
+    private function checkExpiryColumns(): void
+    {
+        if (! in_array($this->safelyGet(fn () => DB::connection()->getDriverName()), ['mysql', 'mariadb'], true)) {
+            return;
+        }
+
+        foreach (['trusted_browsers', 'otp_codes'] as $name) {
+            $table = (string) config("mfa.tables.{$name}");
+            $extra = $this->safelyGet(fn () => DB::selectOne(
+                'select extra from information_schema.columns where table_schema = database() and table_name = ? and column_name = ?',
+                [DB::connection()->getTablePrefix().$table, 'expires_at'],
+            )?->extra);
+
+            if (is_string($extra)) {
+                $this->check("[{$table}.expires_at] doesn't update itself", ! str_contains(strtolower($extra), 'on update'), 'Run php artisan migrate (the expiry moved to "now" on every update)');
+            }
+        }
+    }
+
     private function check(string $label, bool $passed, ?string $hint = null): void
     {
         $passed ? $this->components->twoColumnDetail($label, '<fg=green;options=bold>OK</>')
@@ -413,6 +440,15 @@ class DoctorCommand extends Command
     {
         $this->components->twoColumnDetail($message, '<fg=yellow;options=bold>WARN</>');
         $this->warnings++;
+    }
+
+    private function safelyGet(callable $callback): mixed
+    {
+        try {
+            return $callback();
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     private function safely(callable $callback): bool

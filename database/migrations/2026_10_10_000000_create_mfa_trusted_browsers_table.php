@@ -23,7 +23,8 @@ return new class extends Migration
             $table->string('password_hash', 64);        // keyed hash of the password hash: a password change revokes
             $table->string('label', 100)->nullable();   // e.g. "Chrome on Mac"
             $table->string('user_agent', 1024)->nullable(); // the User-Agent it was trusted with
-            $table->timestamp('expires_at');
+            // An explicit default: without one, MySQL 5.7 and MariaDB < 10.10 make it ON UPDATE CURRENT_TIMESTAMP.
+            $table->timestamp('expires_at')->useCurrent();
             $table->timestamp('last_used_at')->nullable();
             $table->timestamp('created_at')->nullable();
 

@@ -11,7 +11,7 @@ XDEBUG_COV := -d xdebug.mode=coverage
 MIN_COVERAGE ?= 85
 
 .DEFAULT_GOAL := help
-.PHONY: help install test test-js preview test-filter coverage lint format analyse ci test-laravel test-matrix typecheck-stubs release clean
+.PHONY: help install test test-db test-js preview test-filter coverage lint format analyse ci test-laravel test-matrix typecheck-stubs release clean
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -22,6 +22,9 @@ install: ## Install Composer and npm dependencies
 
 test: ## Run the test suite in parallel
 	$(PEST) $(PARALLEL)
+
+test-db: ## Run the database-server tests against MySQL/MariaDB (set MFA_TEST_DB_* in .env.test-db; see tests/DatabaseServerTestCase.php)
+	$(PEST) --testsuite=Database
 
 test-js: ## Type-check the React stubs and run their Vitest tests (needs Node; run make install first)
 	npm run typecheck

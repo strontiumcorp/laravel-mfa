@@ -29,6 +29,36 @@ jobs:
           {"php": "8.5", "laravel": "13", "stability": "prefer-stable"}
         ]}
 
+  # What only a database server shows (tests/Database): MariaDB 10.6, whose
+  # explicit_defaults_for_timestamp is off by default, as on many production
+  # servers. artistly's PHP and Laravel.
+  database:
+    name: MariaDB 10.6 · PHP 8.3 · Laravel 11
+    runs-on: ubuntu-24.04
+    services:
+      mariadb:
+        image: mariadb:10.6
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: laravel_mfa_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      MFA_TEST_DB_HOST: 127.0.0.1
+      MFA_TEST_DB_PASSWORD: root
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo_mysql, pdo_sqlite, openssl
+          coverage: none
+      - run: composer config audit.block-insecure false
+      - run: composer update --prefer-dist --no-interaction --no-progress -W --with "laravel/framework:^11.0" --with "orchestra/testbench:^9.0"
+      - run: vendor/bin/pest --ci --testsuite=Database
+
   # The published React components and pages: tsc and Vitest.
   ui:
     uses: ./.github/workflows/ui-suite.yml
