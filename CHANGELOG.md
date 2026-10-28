@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.10.1 - 2026-10-28
+
+_Changes since `v0.10.0`._
+
+### Features
+
+- **enrollment:** make the setup window configurable, 60 minutes by default (10fc3d7)
+
+### Other
+
+- commit the preview launch config, ignore Claude Code's worktrees (5d22dc5)
+- **recovery-codes:** pin down what an expired first-method setup leaves behind (a765bdf)
+
 ## v0.10.0 - 2026-10-26
 
 _Changes since `v0.9.1`._
