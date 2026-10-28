@@ -129,7 +129,7 @@ final class ChallengeService
             ->when(
                 $confirmed,
                 fn ($q) => $q->whereNotNull('confirmed_at'),
-                fn ($q) => $q->whereNull('confirmed_at')->where('created_at', '>', now()->subMinutes(PendingEnrollments::TTL_MINUTES)),
+                fn ($q) => $q->whereNull('confirmed_at')->where('created_at', '>', now()->subMinutes(PendingEnrollments::ttlMinutes())),
             )
             ->first();
 

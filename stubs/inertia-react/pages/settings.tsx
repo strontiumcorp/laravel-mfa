@@ -298,7 +298,7 @@ export default function MfaSettings(props: Props) {
                 headers: { Accept: 'text/plain' },
             });
             if (response.status === 404) {
-                // Expired (30 minutes): the page starts over.
+                // Expired (mfa.enrollment.ttl): the page starts over.
                 setDownloadError('These codes expired. Start again.');
                 router.reload();
                 return;

@@ -7,6 +7,7 @@ use StrontiumCorp\LaravelMfa\Events\FactorEnabled;
 use StrontiumCorp\LaravelMfa\Events\RecoveryCodesGenerated;
 use StrontiumCorp\LaravelMfa\Facades\Mfa;
 use StrontiumCorp\LaravelMfa\Models\MfaFactor;
+use StrontiumCorp\LaravelMfa\Support\PendingEnrollments;
 use StrontiumCorp\LaravelMfa\Support\RecoveryCodes;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\EnforceForEveryone;
 
@@ -110,7 +111,7 @@ it('shows the same codes again after a reload', function () {
 it('lets the codes expire with the setup, and prunes the abandoned method', function () {
     [$factor] = verifyFirstFactor($this);
 
-    $this->travel(31)->minutes();
+    $this->travel(PendingEnrollments::ttlMinutes() + 1)->minutes();
 
     $this->get(route('mfa.recovery-codes.download'))->assertNotFound();
     $this->postJson(route('mfa.recovery-codes.finish'))->assertUnprocessable()->assertJsonValidationErrors('recovery_codes');
@@ -125,7 +126,7 @@ it('lets the codes expire with the setup, and prunes the abandoned method', func
 it('leaves a user who never finished without two-factor once the setup expires', function () {
     [$factor] = verifyFirstFactor($this);
 
-    $this->travel(31)->minutes();
+    $this->travel(PendingEnrollments::ttlMinutes() + 1)->minutes();
 
     $this->getJson(route('mfa.settings'))
         ->assertOk()
@@ -141,7 +142,7 @@ it('leaves a user who never finished without two-factor once the setup expires',
 
 it('starts over after an expired setup, replacing the abandoned method as the new setup starts', function () {
     [$abandoned] = verifyFirstFactor($this);
-    $this->travel(31)->minutes();
+    $this->travel(PendingEnrollments::ttlMinutes() + 1)->minutes();
 
     $this->postJson(route('mfa.factors.store'), ['type' => 'totp'])->assertOk();
 
@@ -160,7 +161,7 @@ it('starts over after an expired setup, replacing the abandoned method as the ne
 
 it('keeps an abandoned method of another type unused until it is pruned', function () {
     [$abandoned] = verifyFirstFactor($this);
-    $this->travel(31)->minutes();
+    $this->travel(PendingEnrollments::ttlMinutes() + 1)->minutes();
     $sms = Mfa::fakeSms();
 
     $this->postJson(route('mfa.factors.store'), ['type' => 'sms', 'destination' => '+15555550199'])->assertOk();

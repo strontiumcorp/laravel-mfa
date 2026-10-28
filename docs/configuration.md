@@ -164,6 +164,18 @@ In host-app tests, `$this->loginWithSession($user)->withEnrollmentVerified($user
 
 **Upgrading from v0.5:** republish the settings page and `factor-setup-dialog` ([integration step 6](integration.md#6-frontend)); an older page can't show the new step. This is on by default for enforced users. An enforced user who hasn't enrolled yet now gets one email code before adding their first method. Users with a factor see no change. If your app's tests enroll an enforced user, add `withEnrollmentVerified($user)` (or fake notifications and enter the emailed code). To keep the old behaviour, set `MFA_ENROLLMENT_VERIFICATION=null`.
 
+## Enrollment window
+
+How long a setup may take, in minutes. A setup has one window from starting a sign-in method to confirming its code, then a fresh one from there to downloading its recovery codes and pressing **Finish** (a new set of codes for an account that already has some waits as long). Once a window is over, that setup is gone: the method stays off, and the user starts again from the beginning. Nothing is half-enabled.
+
+```php
+'enrollment' => [
+    'ttl' => (int) env('MFA_ENROLLMENT_TTL', 60), // minutes
+],
+```
+
+Set `MFA_ENROLLMENT_TTL` to change it without republishing the config. A longer window keeps a verified first method's recovery codes (encrypted) in the session longer. Unfinished methods are pruned a day after they started, or after two windows if that is longer, so pruning never removes a setup that can still be finished.
+
 ## Nudge
 
 Users who aren't required to use MFA can be asked to turn it on: a small floating card in the app's layout (`MfaEnableNudge`, [integration step 6](integration.md#6-frontend)), and the same title and body as a notice on the MFA settings page.
@@ -430,7 +442,7 @@ So a background poll in a stale tab gets a JSON error it can handle, and never r
 - A user who must enroll (and, with `required_for => 'everyone'`, any user) proves ownership with an email code or an administrator's link before their first factor, so a stolen password alone can't enroll the attacker's authenticator (see [Enrollment verification](#enrollment-verification)).
 - The owner is emailed when a method is added or removed, recovery codes are created or used, and when codes keep being requested (see [Security notifications](#security-notifications)).
 - Adding or removing a factor and regenerating recovery codes ask for the password again (see [Password confirmation](#password-confirmation)), so a stolen session alone can't change them (unless confirmation is off or the user is exempt).
-- A pending enrollment belongs to the browser session that started it and expires after 30 minutes.
+- A pending enrollment belongs to the browser session that started it and expires after the [enrollment window](#enrollment-window) (60 minutes by default).
 - Deleting a user deletes their factors and codes. Their audit rows stay, unlinked, until pruned.
 
 ## Known limitations

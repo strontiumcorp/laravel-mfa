@@ -12,6 +12,7 @@ use StrontiumCorp\LaravelMfa\Contracts\MultiFactorAuthenticatable;
 use StrontiumCorp\LaravelMfa\Enums\FactorType;
 use StrontiumCorp\LaravelMfa\Mfa;
 use StrontiumCorp\LaravelMfa\Support\Mask;
+use StrontiumCorp\LaravelMfa\Support\PendingEnrollments;
 
 /**
  * @property int $id
@@ -104,13 +105,15 @@ class MfaFactor extends Model
 
     /**
      * Setups never finished (abandoned, or a first method whose recovery
-     * codes were never saved): a day after they started, well past the
-     * PendingEnrollments window. Confirmed factors are never pruned.
+     * codes were never saved): a day after they started, or once a longer
+     * enrollment window (mfa.enrollment.ttl) is over. Confirmed factors are
+     * never pruned.
      *
      * @return Builder<static>
      */
     public function prunable(): Builder
     {
-        return static::query()->whereNull('confirmed_at')->where('created_at', '<=', now()->subDay());
+        return static::query()->whereNull('confirmed_at')
+            ->where('created_at', '<=', now()->subMinutes(max(1440, 2 * PendingEnrollments::ttlMinutes())));
     }
 }

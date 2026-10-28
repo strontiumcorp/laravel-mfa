@@ -13,8 +13,11 @@ use Illuminate\Contracts\Session\Session;
  */
 final class PendingEnrollments
 {
-    /** Unconfirmed factors older than this can no longer be confirmed. */
-    public const TTL_MINUTES = 30;
+    /** Unconfirmed factors older than this can no longer be confirmed (mfa.enrollment.ttl, at least 1). */
+    public static function ttlMinutes(): int
+    {
+        return max(1, (int) config('mfa.enrollment.ttl'));
+    }
 
     private const KEY = 'mfa.pending';
 

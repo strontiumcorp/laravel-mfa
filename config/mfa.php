@@ -118,6 +118,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Enrollment
+    |--------------------------------------------------------------------------
+    |
+    | ttl => minutes a setup may take: from starting a sign-in method to
+    |        confirming its code, then again from there to downloading its
+    |        recovery codes and pressing Finish (a new set of codes for an
+    |        account that has some waits as long). Past it the setup is gone
+    |        and starts over; the method stays off. Unfinished methods are
+    |        pruned a day after they started, or after the window if longer.
+    |        Override with MFA_ENROLLMENT_TTL.
+    |
+    */
+
+    'enrollment' => [
+        'ttl' => (int) env('MFA_ENROLLMENT_TTL', 60),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Trusted browsers
     |--------------------------------------------------------------------------
     |

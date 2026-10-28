@@ -16,7 +16,7 @@ use Throwable;
  * keeps no method they can't recover from.
  *
  * Kept in this browser's session only, encrypted (the codes are plain
- * text until finished), per user, for PendingEnrollments::TTL_MINUTES. A
+ * text until finished), per user, for PendingEnrollments::ttlMinutes(). A
  * reload shows the same codes again.
  */
 final class PendingRecoveryCodes
@@ -47,7 +47,7 @@ final class PendingRecoveryCodes
         $entry = $session->get(self::key($user));
 
         if (! is_array($entry) || ! is_numeric($entry['at'] ?? null)
-            || (int) $entry['at'] <= now()->subMinutes(PendingEnrollments::TTL_MINUTES)->getTimestamp()) {
+            || (int) $entry['at'] <= now()->subMinutes(PendingEnrollments::ttlMinutes())->getTimestamp()) {
             return null;
         }
 

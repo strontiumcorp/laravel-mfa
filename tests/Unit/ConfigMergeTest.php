@@ -35,5 +35,6 @@ it('gives apps with an older published config the newer nested keys', function (
         ->and(config('mfa.factors.sms.allowed_calling_codes'))->toBe(['44'])
         ->and(config('mfa.factors.sms.blocked_prefixes'))->toContain('1876')
         ->and(config('mfa.middleware.except'))->toBe(['logout'])          // list replaced, not merged
-        ->and(config('mfa.middleware.allow_while_enrolling'))->toContain('password.confirm');
+        ->and(config('mfa.middleware.allow_while_enrolling'))->toContain('password.confirm')
+        ->and(config('mfa.enrollment.ttl'))->toBe(60);                     // a whole new section too
 });

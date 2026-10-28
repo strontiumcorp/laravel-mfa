@@ -749,7 +749,7 @@ describe('responses and controllers', function () {
         Event::assertDispatched(Events\VerificationSucceeded::class, fn ($e) => $e->context === ['via' => 'recovery_code', 'remaining' => 9]);
     });
 
-    it('hides pending enrollments of disabled types or older than 30 minutes', function () {
+    it('hides pending enrollments of disabled types or older than the enrollment window', function () {
         Mfa::fakeSms();
         $this->loginWithSession($this->makeUser());
         addSms('+15555550101')->assertOk();
@@ -758,7 +758,7 @@ describe('responses and controllers', function () {
         config(['mfa.factors.sms.enabled' => false]);
         expect(collect($this->getJson('/mfa/settings')->json('pending'))->pluck('type')->all())->toBe(['totp']);
 
-        $this->travel(31)->minutes();
+        $this->travel(PendingEnrollments::ttlMinutes() + 1)->minutes();
         expect($this->getJson('/mfa/settings')->json('pending'))->toBe([]);
     });
 

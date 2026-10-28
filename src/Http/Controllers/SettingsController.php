@@ -49,7 +49,7 @@ class SettingsController extends Controller
             ->reject(fn (MfaFactor $f) => $f === $codesFactor)
             ->filter(fn (MfaFactor $f) => $this->mfa->isTypeEnabled($f->type)
                 // Equivalent mutant(s): created_at is always set on stored factors.
-                && $f->created_at?->gt(now()->subMinutes(PendingEnrollments::TTL_MINUTES)) // @pest-mutate-ignore: RemoveNullSafeOperator
+                && $f->created_at?->gt(now()->subMinutes(PendingEnrollments::ttlMinutes())) // @pest-mutate-ignore: RemoveNullSafeOperator
                 && PendingEnrollments::owns($request->session(), $f->getKey()))
             ->map(fn (MfaFactor $f) => $this->enrollment->pendingSetup($user, $f))
             ->values();

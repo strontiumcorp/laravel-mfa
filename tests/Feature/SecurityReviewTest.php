@@ -17,6 +17,7 @@ use StrontiumCorp\LaravelMfa\FactorManager;
 use StrontiumCorp\LaravelMfa\Models\MfaAuditLog;
 use StrontiumCorp\LaravelMfa\Notifications\OtpCodeNotification;
 use StrontiumCorp\LaravelMfa\Policies\EnforceForAdmins;
+use StrontiumCorp\LaravelMfa\Support\PendingEnrollments;
 use StrontiumCorp\LaravelMfa\Support\RateLimits;
 use StrontiumCorp\LaravelMfa\Tests\Fixtures\RequestAwarePolicy;
 
@@ -55,12 +56,12 @@ it('[#2] refuses to confirm a pending factor from another session', function () 
     expect(Mfa::hasConfirmedFactors($user))->toBeFalse();
 });
 
-it('[#2] expires pending enrollments after 30 minutes', function () {
+it('[#2] expires pending enrollments after the enrollment window', function () {
     $user = $this->makeUser();
     $secret = $this->loginWithSession($user)->postJson('/mfa/factors', ['type' => 'totp'])->json('setup.secret');
     $id = $user->mfaFactors()->sole()->id;
 
-    $this->travel(31)->minutes();
+    $this->travel(PendingEnrollments::ttlMinutes() + 1)->minutes();
 
     $code = (new Google2FA)->oathTotp($secret, intdiv(now()->getTimestamp(), 30));
     $this->postJson("/mfa/factors/{$id}/confirm", ['code' => $code])->assertUnprocessable();

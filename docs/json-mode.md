@@ -203,7 +203,7 @@ No body. → `{ "status": "enrollment-code-sent", "retry_after": 120, "email": "
 ```json
 {
     "factors": [ /* confirmed factors, same shape as above */ ],
-    "pending": [ /* unconfirmed factors from the last 30 minutes, same shape plus setup fields (below) */ ],
+    "pending": [ /* unconfirmed factors started within the enrollment window (mfa.enrollment.ttl), same shape plus setup fields (below) */ ],
     "availableTypes": [ { "type": "totp", "label": "Authenticator app", "recommended": true }, { "type": "email", "label": "Email", "recommended": false } ],
     "recoveryCodesRemaining": 10,
     "recoveryCodesTotal": 10,
@@ -237,7 +237,7 @@ Replace `__ID__` in the URLs with a factor ID.
 
 A pending TOTP factor also includes `secret`, `otpauth_url` and `qr_svg`, so you can show the QR code again after a page reload. The secret is never kept in the session.
 
-Pending factors are bound to the browser session that started the enrollment, and expire after 30 minutes:
+Pending factors are bound to the browser session that started the enrollment, and expire after the enrollment window (`mfa.enrollment.ttl`, 60 minutes by default):
 - Another session on the same account sees an empty `pending` list.
 - Another session gets `422` ("not available") from `confirm` and `resend`.
 - If the user switches device mid-enrollment, they simply start again.
@@ -293,7 +293,7 @@ Stop trusting one browser, or all of the user's browsers. → `{ "status": "trus
 
 ### Recovery codes: download, then finish
 
-New recovery codes are saved only after the user has downloaded them. They wait, encrypted, in the session that made them for 30 minutes (`pendingRecoveryCodes` in the settings response shows them again after a reload); a set never finished changes nothing, and a first method never finished is pruned a day later. There is no way to finish without the download, so offer only a download (no copy).
+New recovery codes are saved only after the user has downloaded them. They wait, encrypted, in the session that made them for the enrollment window (`mfa.enrollment.ttl`, 60 minutes by default; `pendingRecoveryCodes` in the settings response shows them again after a reload); a set never finished changes nothing, and a first method never finished is pruned a day later (or after two windows, if longer). There is no way to finish without the download, so offer only a download (no copy).
 
 #### `POST /mfa/recovery-codes`
 
