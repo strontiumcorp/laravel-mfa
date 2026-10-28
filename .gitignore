@@ -25,3 +25,7 @@ Thumbs.db
 .env.*
 *.log
 release-notes.md
+
+# Claude Code: its worktrees and per-machine settings (shared config such as launch.json is committed)
+.claude/worktrees/
+.claude/*.local.json
