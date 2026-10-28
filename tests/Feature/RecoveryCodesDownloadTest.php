@@ -122,6 +122,63 @@ it('lets the codes expire with the setup, and prunes the abandoned method', func
     expect(MfaFactor::query()->exists())->toBeFalse();
 });
 
+it('leaves a user who never finished without two-factor once the setup expires', function () {
+    [$factor] = verifyFirstFactor($this);
+
+    $this->travel(31)->minutes();
+
+    $this->getJson(route('mfa.settings'))
+        ->assertOk()
+        ->assertJsonPath('pendingRecoveryCodes', null)
+        ->assertJsonCount(0, 'pending');
+    expect($factor->fresh()->confirmed_at)->toBeNull()
+        ->and(Mfa::hasConfirmedFactors($this->user))->toBeFalse();
+
+    // Signing in again asks for no code: there is no method to ask for.
+    $this->flushSession();
+    $this->freshGuards()->loginWithSession($this->user)->get('/dashboard')->assertOk();
+});
+
+it('starts over after an expired setup, replacing the abandoned method as the new setup starts', function () {
+    [$abandoned] = verifyFirstFactor($this);
+    $this->travel(31)->minutes();
+
+    $this->postJson(route('mfa.factors.store'), ['type' => 'totp'])->assertOk();
+
+    expect($abandoned->fresh())->toBeNull();
+    $factor = MfaFactor::sole();
+    $codes = $this->postJson(route('mfa.factors.confirm', $factor->id), ['code' => $this->currentTotpCode($factor)])
+        ->assertOk()
+        ->json('recovery_codes');
+    $this->get(route('mfa.recovery-codes.download'))->assertOk();
+    $this->postJson(route('mfa.recovery-codes.finish'))->assertOk()->assertJsonPath('status', 'factor-enabled');
+
+    expect(MfaFactor::sole()->is($factor))->toBeTrue()
+        ->and($factor->fresh()->isConfirmed())->toBeTrue()
+        ->and(app(RecoveryCodes::class)->consume($this->user, $codes[0]))->toBeTrue();
+});
+
+it('keeps an abandoned method of another type unused until it is pruned', function () {
+    [$abandoned] = verifyFirstFactor($this);
+    $this->travel(31)->minutes();
+    $sms = Mfa::fakeSms();
+
+    $this->postJson(route('mfa.factors.store'), ['type' => 'sms', 'destination' => '+15555550199'])->assertOk();
+    $phone = MfaFactor::query()->where('type', FactorType::Sms)->sole();
+    $this->postJson(route('mfa.factors.confirm', $phone->id), ['code' => $sms->lastCodeFor('+15555550199')])->assertOk();
+    $this->get(route('mfa.recovery-codes.download'))->assertOk();
+    $this->postJson(route('mfa.recovery-codes.finish'))->assertOk();
+
+    // The authenticator app was never confirmed: it is not a way to sign in, and isn't listed.
+    expect($abandoned->fresh()->confirmed_at)->toBeNull();
+    $this->getJson(route('mfa.settings'))->assertJsonCount(1, 'factors')->assertJsonPath('factors.0.type', 'sms');
+
+    $this->travel(1)->day();
+    $this->artisan('model:prune', ['--model' => [MfaFactor::class]]);
+    expect($abandoned->fresh())->toBeNull()
+        ->and($phone->fresh()->isConfirmed())->toBeTrue();
+});
+
 it('prunes no confirmed method and no setup in progress', function () {
     $confirmed = $this->createMfaFactor($this->user);
     $abandoned = $this->user->mfaFactors()->create(['type' => FactorType::Email, 'label' => 'Email', 'destination' => 'a@example.com']);
