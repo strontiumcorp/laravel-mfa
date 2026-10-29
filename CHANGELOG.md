@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.10.2 - 2026-10-30
+
+_Changes since `v0.10.1`._
+
+### Fixes
+
+- **migrations:** read information_schema's extra column on MySQL 8 (1eaee21)
+
+### Documentation
+
+- note the MySQL 8 information_schema casing and the database matrix (7abd1fd)
+
+### Other
+
+- run the database tests on MariaDB 10.6, MySQL 8.4 and PostgreSQL 17 (de0998c)
+
 ## v0.10.1 - 2026-10-28
 
 _Changes since `v0.10.0`._
