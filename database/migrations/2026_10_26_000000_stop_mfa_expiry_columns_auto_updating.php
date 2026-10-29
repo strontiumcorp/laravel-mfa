@@ -23,7 +23,7 @@ return new class extends Migration
 
         foreach ([config('mfa.tables.trusted_browsers', 'mfa_trusted_browsers'), config('mfa.tables.otp_codes', 'mfa_otp_codes')] as $table) {
             $extra = DB::selectOne(
-                'select extra from information_schema.columns where table_schema = database() and table_name = ? and column_name = ?',
+                'select extra as `extra` from information_schema.columns where table_schema = database() and table_name = ? and column_name = ?',
                 [DB::connection()->getTablePrefix().$table, 'expires_at'],
             )?->extra;
 

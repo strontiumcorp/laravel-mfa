@@ -7,12 +7,14 @@ use PDO;
 use Pdo\Mysql;
 
 /**
- * The suite against a real MySQL or MariaDB server instead of SQLite, for
- * what only a server does: column defaults it adds on its own, row locks.
- * Skipped unless MFA_TEST_DB_HOST is set, in the environment or in a
+ * The suite against a real MySQL, MariaDB or PostgreSQL server instead of
+ * SQLite, for what only a server does: column defaults it adds on its own,
+ * row locks, the casing of information_schema columns, and every migration on
+ * each. Skipped unless MFA_TEST_DB_HOST is set, in the environment or in a
  * gitignored `.env.test-db` at the package root (`make test-db`; CI's
- * database job).
- * The connection turns explicit_defaults_for_timestamp off, as it is on
+ * database jobs). MFA_TEST_DB_DRIVER picks the server: mysql (default, also
+ * for MariaDB) or pgsql.
+ * A MySQL connection turns explicit_defaults_for_timestamp off, as it is on
  * MariaDB before 10.10 and MySQL 5.7, where a NOT NULL `timestamp` without a
  * default silently gets ON UPDATE CURRENT_TIMESTAMP.
  */
@@ -32,27 +34,52 @@ abstract class DatabaseServerTestCase extends TestCase
         parent::setUp();
     }
 
+    /** For what only MySQL and MariaDB have (information_schema `extra`, `modify`). */
+    protected function onlyOnMysql(): void
+    {
+        if (self::driver() !== 'mysql') {
+            $this->markTestSkipped('MySQL and MariaDB only.');
+        }
+    }
+
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
 
-        // PHP 8.5 deprecates the PDO constant for the driver-specific one.
-        $initCommand = class_exists(Mysql::class) ? Mysql::ATTR_INIT_COMMAND : PDO::MYSQL_ATTR_INIT_COMMAND;
-
-        $app['config']->set('database.connections.server', [
-            'driver' => 'mysql',
+        $connection = [
+            'driver' => self::driver(),
             'host' => self::env('MFA_TEST_DB_HOST'),
-            'port' => self::env('MFA_TEST_DB_PORT') ?: '3306',
             'database' => self::env('MFA_TEST_DB_DATABASE') ?: 'laravel_mfa_test',
-            'username' => self::env('MFA_TEST_DB_USERNAME') ?: 'root',
+            'username' => self::env('MFA_TEST_DB_USERNAME') ?: (self::driver() === 'pgsql' ? 'postgres' : 'root'),
             'password' => self::env('MFA_TEST_DB_PASSWORD') ?: '',
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_unicode_ci',
             'prefix' => '',
-            'strict' => true,
-            'options' => [$initCommand => 'SET SESSION explicit_defaults_for_timestamp = 0'],
-        ]);
+        ];
+
+        if (self::driver() === 'pgsql') {
+            $app['config']->set('database.connections.server', $connection + [
+                'port' => self::env('MFA_TEST_DB_PORT') ?: '5432',
+                'charset' => 'utf8',
+                'search_path' => 'public',
+                'sslmode' => 'prefer',
+            ]);
+        } else {
+            // PHP 8.5 deprecates the PDO constant for the driver-specific one.
+            $initCommand = class_exists(Mysql::class) ? Mysql::ATTR_INIT_COMMAND : PDO::MYSQL_ATTR_INIT_COMMAND;
+
+            $app['config']->set('database.connections.server', $connection + [
+                'port' => self::env('MFA_TEST_DB_PORT') ?: '3306',
+                'charset' => 'utf8mb4',
+                'collation' => 'utf8mb4_unicode_ci',
+                'strict' => true,
+                'options' => [$initCommand => 'SET SESSION explicit_defaults_for_timestamp = 0'],
+            ]);
+        }
         $app['config']->set('database.default', 'server');
+    }
+
+    private static function driver(): string
+    {
+        return self::env('MFA_TEST_DB_DRIVER') === 'pgsql' ? 'pgsql' : 'mysql';
     }
 
     private static function env(string $key): ?string

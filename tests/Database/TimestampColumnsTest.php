@@ -52,8 +52,9 @@ it('keeps an emailed code valid after a wrong guess', function () {
 });
 
 it('gives no expiry column an automatic update', function (string $table) {
+    $this->onlyOnMysql();
     $extra = DB::selectOne(
-        'select extra from information_schema.columns where table_schema = database() and table_name = ? and column_name = ?',
+        'select extra as `extra` from information_schema.columns where table_schema = database() and table_name = ? and column_name = ?',
         [config("mfa.tables.{$table}"), 'expires_at'],
     )->extra;
 
@@ -61,6 +62,7 @@ it('gives no expiry column an automatic update', function (string $table) {
 })->with(['trusted_browsers', 'otp_codes']);
 
 it('fails mfa:doctor while an expiry column still updates itself', function () {
+    $this->onlyOnMysql();
     $this->artisan('mfa:doctor')->expectsOutputToContain("[mfa_trusted_browsers.expires_at] doesn't update itself");
     DB::statement('alter table mfa_trusted_browsers modify expires_at timestamp not null default current_timestamp on update current_timestamp');
 
@@ -70,4 +72,17 @@ it('fails mfa:doctor while an expiry column still updates itself', function () {
         // DDL commits: put the column back for the tests that run after this one.
         DB::statement('alter table mfa_trusted_browsers modify expires_at timestamp not null default current_timestamp');
     }
+});
+
+it('takes the automatic update off an expiry column that has it', function () {
+    $this->onlyOnMysql();
+    DB::statement('alter table mfa_otp_codes modify expires_at timestamp not null default current_timestamp on update current_timestamp');
+
+    (require __DIR__.'/../../database/migrations/2026_10_26_000000_stop_mfa_expiry_columns_auto_updating.php')->up();
+
+    $extra = DB::selectOne(
+        'select extra as `extra` from information_schema.columns where table_schema = database() and table_name = ? and column_name = ?',
+        ['mfa_otp_codes', 'expires_at'],
+    )->extra;
+    expect(strtolower($extra))->not->toContain('on update');
 });

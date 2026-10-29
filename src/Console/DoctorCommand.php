@@ -418,7 +418,7 @@ class DoctorCommand extends Command
         foreach (['trusted_browsers', 'otp_codes'] as $name) {
             $table = (string) config("mfa.tables.{$name}");
             $extra = $this->safelyGet(fn () => DB::selectOne(
-                'select extra from information_schema.columns where table_schema = database() and table_name = ? and column_name = ?',
+                'select extra as `extra` from information_schema.columns where table_schema = database() and table_name = ? and column_name = ?',
                 [DB::connection()->getTablePrefix().$table, 'expires_at'],
             )?->extra);
 
