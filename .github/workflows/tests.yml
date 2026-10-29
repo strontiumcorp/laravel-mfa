@@ -29,34 +29,74 @@ jobs:
           {"php": "8.5", "laravel": "13", "stability": "prefer-stable"}
         ]}
 
-  # What only a database server shows (tests/Database): MariaDB 10.6, whose
-  # explicit_defaults_for_timestamp is off by default, as on many production
-  # servers. artistly's PHP and Laravel.
+  # What only a database server shows (tests/Database), on each server the
+  # apps run: MariaDB 10.6 (explicit_defaults_for_timestamp off by default,
+  # as on many production servers; artistly's PHP and Laravel), MySQL 8.4
+  # (upper-case information_schema column names) and PostgreSQL 17
+  # (podcast-flow). Every migration runs, and rolls back, on each.
   database:
-    name: MariaDB 10.6 · PHP 8.3 · Laravel 11
+    name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: MariaDB 10.6 · PHP 8.3 · Laravel 11
+            image: mariadb:10.6
+            driver: mysql
+            port: 3306
+            username: root
+            health: healthcheck.sh --connect --innodb_initialized
+            php: '8.3'
+            laravel: '11'
+            testbench: '9'
+          - name: MySQL 8.4 · PHP 8.4 · Laravel 12
+            image: mysql:8.4
+            driver: mysql
+            port: 3306
+            username: root
+            health: mysqladmin ping -h 127.0.0.1 -proot
+            php: '8.4'
+            laravel: '12'
+            testbench: '10'
+          - name: PostgreSQL 17 · PHP 8.4 · Laravel 13
+            image: postgres:17
+            driver: pgsql
+            port: 5432
+            username: postgres
+            health: pg_isready -U postgres
+            php: '8.4'
+            laravel: '13'
+            testbench: '11'
     services:
-      mariadb:
-        image: mariadb:10.6
+      database:
+        image: ${{ matrix.image }}
         env:
           MARIADB_ROOT_PASSWORD: root
           MARIADB_DATABASE: laravel_mfa_test
-        ports: ['3306:3306']
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: laravel_mfa_test
+          POSTGRES_PASSWORD: root
+          POSTGRES_DB: laravel_mfa_test
+        ports: ['${{ matrix.port }}:${{ matrix.port }}']
         options: >-
-          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-cmd="${{ matrix.health }}"
           --health-interval=5s --health-timeout=5s --health-retries=20
     env:
+      MFA_TEST_DB_DRIVER: ${{ matrix.driver }}
       MFA_TEST_DB_HOST: 127.0.0.1
+      MFA_TEST_DB_PORT: ${{ matrix.port }}
+      MFA_TEST_DB_USERNAME: ${{ matrix.username }}
       MFA_TEST_DB_PASSWORD: root
     steps:
       - uses: actions/checkout@v7
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
-          extensions: mbstring, pdo_mysql, pdo_sqlite, openssl
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, pdo_mysql, pdo_pgsql, pdo_sqlite, openssl
           coverage: none
       - run: composer config audit.block-insecure false
-      - run: composer update --prefer-dist --no-interaction --no-progress -W --with "laravel/framework:^11.0" --with "orchestra/testbench:^9.0"
+      - run: composer update --prefer-dist --no-interaction --no-progress -W --with "laravel/framework:^${{ matrix.laravel }}.0" --with "orchestra/testbench:^${{ matrix.testbench }}.0"
       - run: vendor/bin/pest --ci --testsuite=Database
 
   # The published React components and pages: tsc and Vitest.
